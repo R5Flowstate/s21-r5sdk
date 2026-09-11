@@ -1,3 +1,4 @@
+#if defined(CLIENT_DLL)
 #ifndef VSQUIRREL_H
 #define VSQUIRREL_H
 #include "tier1/utlmap.h"
@@ -71,6 +72,226 @@ extern void(*UiServerScriptRegister_Callback)(CSquirrelVM* const s);
 extern void(*UiAdminPanelScriptRegister_Callback)(CSquirrelVM* const s);
 
 extern void(*ScriptConstantRegister_Callback)(CSquirrelVM* const s);
+extern void(*ServerScriptExecuteError_Callback)(const char* pszName);
+
+inline bool(*CSquirrelVM__Init)(CSquirrelVM* s, SQCONTEXT context, SQFloat curtime);
+inline bool(*CSquirrelVM__DestroySignalEntryListHead)(CSquirrelVM* s, HSQUIRRELVM v, SQFloat f);
+inline SQRESULT(*CSquirrelVM__RegisterFunction)(CSquirrelVM* s, ScriptFunctionBinding_t* binding, const bool useTypeCompiler);
+inline HSCRIPT(*CSquirrelVM__FindFunction)(CSquirrelVM* s, const char* const pszFunctionName, const char* const pszFunctionSig, HSCRIPT hScope);
+
+inline SQRESULT(*CSquirrelVM__RegisterConstant)(CSquirrelVM* s, const SQChar* name, SQInteger value);
+
+inline bool(*CSquirrelVM__PrecompileClientScripts)(CSquirrelVM* vm, SQCONTEXT context, char** scriptArray, int scriptCount);
+
+inline ScriptStatus_t(*CSquirrelVM__ExecuteFunction)(CSquirrelVM* s, HSCRIPT hFunction, const ScriptVariant_t* const pArgs, unsigned int nArgs, ScriptVariant_t* const pReturn, HSCRIPT hScope);
+inline bool(*CSquirrelVM__ExecuteCodeCallback)(CSquirrelVM* s, const SQChar* callbackName);
+
+inline bool(*CSquirrelVM__ThrowError)(CSquirrelVM* s, HSQUIRRELVM v);
+
+inline SQRESULT(*v_Script_PrintFunc)(HSQUIRRELVM v, SQChar* fmt, ...);
+inline SQBool(*v_Script_WarningFunc)(HSQUIRRELVM v, SQInteger nformatstringidx);
+
+
+inline CSquirrelVM* g_pClientScript;
+inline CSquirrelVM* g_pUIScript;
+
+inline bool* g_bUIScriptInitialized;
+
+inline const char* Script_GetCodeCallbackPrefixForContext(const SQCONTEXT context)
+{
+	switch (context)
+	{
+	case SQCONTEXT::SERVER: return "CodeCallback";
+	case SQCONTEXT::CLIENT: return "ClientCodeCallback";
+	case SQCONTEXT::UI: return "UICodeCallback";
+		NO_DEFAULT
+	}
+}
+
+template<typename... Args>
+FORCEINLINE void Script_RegisterEnumTable(CSquirrelVM* const s, const SQChar* const enumName, const int startValue, const Args... names)
+{
+	HSQUIRRELVM const v = s->GetVM();
+
+	sq_startconsttable(v);
+	sq_pushstring(v, enumName, -1);
+	sq_newtable(v);
+
+	int enumValue = startValue;
+
+	([&] {
+		sq_pushstring(v, names, -1);
+		sq_pushinteger(v, enumValue++);
+
+		if (sq_newslot(v, -3) < 0)
+			Error(s->GetNativeContext(), EXIT_FAILURE, "Error adding entry '%s' for enum '%s'.", names, enumName);
+
+		}(), ...);
+
+	if (sq_newslot(v, -3) < 0)
+		Error(s->GetNativeContext(), EXIT_FAILURE, "Error adding enum '%s' to const table.", enumName);
+
+	sq_endconsttable(v);
+}
+
+template<typename... Args>
+FORCEINLINE void Script_RegisterFuncNamed(CSquirrelVM* const s, 
+	const SQChar* const scriptName, const SQChar* const nativeName, const SQChar* const helpString,
+	const SQChar* const returnType, const SQChar* const parameters, const bool isVariadic,
+	const ScriptFunctionBindingStorageType_t function, const Args... fieldTypes)
+{
+	static ScriptFunctionBinding_t binding;
+	binding.Init(scriptName, nativeName, helpString, returnType, parameters, isVariadic, function);
+
+	const int fieldCount = sizeof...(Args);
+
+	if (fieldCount > 0)
+	{
+		binding.m_Parameters.SetCount(fieldCount);
+		int index = 0; (void)index;
+
+		([&]() mutable {
+			if (index == (fieldCount-1)) // Last arg is the return type.
+				binding.m_ReturnType = fieldTypes;
+			else
+				binding.m_Parameters[index++] = fieldTypes;
+			}(), ...);
+	}
+
+	SCRIPT_REGISTER_FUNC(s, binding, fieldCount == 0);
+}
+
+// Use this to return from any script func. S21 SQVM has no _sharedstate; return val only.
+#define SCRIPT_CHECK_AND_RETURN(v, val) \
+	{ \
+		return val; \
+	}
+
+///////////////////////////////////////////////////////////////////////////////
+class VSquirrel : public IDetour
+{
+	virtual void GetAdr(void) const
+	{
+		LogFunAdr("CSquirrelVM::Init", CSquirrelVM__Init);
+		LogFunAdr("CSquirrelVM::DestroySignalEntryListHead", CSquirrelVM__DestroySignalEntryListHead);
+
+		LogFunAdr("CSquirrelVM::RegisterConstant", CSquirrelVM__RegisterConstant);
+		LogFunAdr("CSquirrelVM::RegisterFunction", CSquirrelVM__RegisterFunction);
+		LogFunAdr("CSquirrelVM::FindFunction", CSquirrelVM__FindFunction);
+
+		LogFunAdr("CSquirrelVM::PrecompileClientScripts", CSquirrelVM__PrecompileClientScripts);
+		LogFunAdr("CSquirrelVM::ExecuteFunction", CSquirrelVM__ExecuteFunction);
+		LogFunAdr("CSquirrelVM::ExecuteCodeCallback", CSquirrelVM__ExecuteCodeCallback);
+		LogFunAdr("CSquirrelVM::ThrowError", CSquirrelVM__ThrowError);
+
+		LogFunAdr("Script_PrintFunc", v_Script_PrintFunc);
+		LogFunAdr("Script_WarningFunc", v_Script_WarningFunc);
+	}
+	virtual void GetFun(void) const
+	{
+		Module_FindPattern(g_GameDll, "E8 ?? ?? ?? ?? 0F 28 74 24 ?? 48 89 1D ?? ?? ?? ??").FollowNearCallSelf().GetPtr(CSquirrelVM__Init);
+		Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 48 89 6C 24 ?? 56 57 41 56 48 83 EC 50 44 8B 42").GetPtr(CSquirrelVM__DestroySignalEntryListHead);
+		Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC 30 4C 8B").GetPtr(CSquirrelVM__RegisterConstant);
+		Module_FindPattern(g_GameDll, "48 83 EC 38 45 0F B6 C8").GetPtr(CSquirrelVM__RegisterFunction);
+
+		Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 57 48 83 EC 50 48 8B 59 30 4D 8B C8 48 8B CB 4C 8D 44 24 ?? 48 8B FA E8 ?? ?? ?? ??").GetPtr(CSquirrelVM__FindFunction);
+
+
+		// cl/ui scripts.rson compiling
+		Module_FindPattern(g_GameDll, "E8 ?? ?? ?? ?? 44 0F B6 F0 48 85 DB").FollowNearCallSelf().GetPtr(CSquirrelVM__PrecompileClientScripts);
+
+		Module_FindPattern(g_GameDll, "41 54 48 83 EC 50 80 3D ?? ?? ?? ?? 00 48 89 6C 24 68 48 8B EA 48 89 74 24 70 49 8B F0 48 89 7C 24 48 48 8B F9 4C 89 6C 24 ??").GetPtr(CSquirrelVM__ExecuteFunction);
+		Module_FindPattern(g_GameDll, "E8 ?? ?? ?? ?? C6 47 1C 01").FollowNearCallSelf().GetPtr(CSquirrelVM__ExecuteCodeCallback);
+		Module_FindPattern(g_GameDll, "E8 ?? ?? ?? ?? BB ?? ?? ?? ?? 8B C3").FollowNearCallSelf().GetPtr(CSquirrelVM__ThrowError);
+
+		Module_FindPattern(g_GameDll, "48 8B C4 48 89 50 10 4C 89 40 18 4C 89 48 20 53 56 57 48 81 EC 30 08 ?? ?? 48 8B DA 48 8D 70 18 48 8B F9 E8 ?? ?? ?? FF 48 89 74 24 28 48 8D 54 24 30 33").GetPtr(v_Script_PrintFunc);
+		Module_FindPattern(g_GameDll, "40 53 48 83 EC ? 33 DB 48 8D 44 24 ? 4C 8D 4C 24").GetPtr(v_Script_WarningFunc);
+	}
+	virtual void GetVar(void) const
+	{
+		CMemory p_Script_InitUIVM = Module_FindPattern(g_GameDll, "48 83 EC ?? 80 3D ?? ?? ?? ?? ?? 74 ?? 32 C0");
+		p_Script_InitUIVM.Offset(0x10).FindPatternSelf("80 3D").ResolveRelativeAddressSelf(2, 7).GetPtr(g_bUIScriptInitialized);
+	}
+	virtual void GetCon(void) const { }
+	virtual void Detour(const bool bAttach) const;
+};
+
+#endif // VSQUIRREL_H
+#else // !CLIENT_DLL
+#ifndef VSQUIRREL_H
+#define VSQUIRREL_H
+#include "tier1/utlmap.h"
+#include "tier1/utlhash.h"
+#include "tier1/utlbuffer.h"
+
+#include "vscript/languages/squirrel_re/include/sqstdaux.h"
+#include "vscript/languages/squirrel_re/include/sqstdstring.h"
+#include "vscript/languages/squirrel_re/include/squirrel.h"
+#include "vscript/languages/squirrel_re/include/sqstate.h"
+#include "vscript/languages/squirrel_re/include/sqvm.h"
+#include "vscript/ivscript.h"
+
+#include "rtech/rson.h"
+
+#define MAX_SCRIPT_FILES_TO_LOAD 1024
+
+class CSquirrelVM
+{
+public:
+	static bool Init(CSquirrelVM* s, SQCONTEXT context, float curtime);
+	static bool DestroySignalEntryListHead(CSquirrelVM* s, HSQUIRRELVM v, SQFloat f);
+
+	void SetAsCompiler(RSON::Node_t* rson);
+
+	SQRESULT RegisterFunction(ScriptFunctionBinding_t* const binding, const bool useTypeCompiler);
+	const HSCRIPT FindFunction(const char* const pszFunctionName, const char* const pszFunctionSig, HSCRIPT hScope);
+	
+	SQRESULT RegisterConstant(const SQChar* name, SQInteger value);
+
+	FORCEINLINE HSQUIRRELVM GetVM() const { return m_hVM; }
+	FORCEINLINE SQCONTEXT GetContext() const { return m_iContext; }
+	FORCEINLINE eDLL_T GetNativeContext() const { return (eDLL_T)GetContext(); }
+
+	bool Run(const SQChar* const script);
+
+	ScriptStatus_t ExecuteFunction(HSCRIPT hFunction, const ScriptVariant_t* const pArgs, unsigned int nArgs, ScriptVariant_t* const pReturn, HSCRIPT hScope);
+	bool ExecuteCodeCallback(const SQChar* const name);
+
+private:
+	bool unk_00;
+	SQChar pad0[7];
+	HSQUIRRELVM m_hVM;
+	void* m_hDbg;
+	SQObjectPtr m_ErrorString;
+	SQChar pad3[8];
+	SQInteger m_nTick;
+	int unk_34;
+	SQCONTEXT m_iContext;
+	SQChar pad6[4];
+	CUtlMap<SQClass*, CUtlHashFastGenericHash> m_TypeMap;
+	CUtlBuffer* m_pBuffer;
+	CUtlMap<void*, void*> m_PtrMap;
+	bool unk_A8;
+	int64_t unk_B0;
+	int64_t unk_B8;
+	bool unk_C0;
+	int64_t unk_C8;
+	int64_t unk_D0;
+};
+
+extern void(*ServerScriptRegister_Callback)(CSquirrelVM* const s);
+extern void(*ClientScriptRegister_Callback)(CSquirrelVM* const s);
+extern void(*UiScriptRegister_Callback)(CSquirrelVM* const s);
+
+extern void(*ServerScriptRegisterEnum_Callback)(CSquirrelVM* const s);
+extern void(*ClientScriptRegisterEnum_Callback)(CSquirrelVM* const s);
+extern void(*UIScriptRegisterEnum_Callback)(CSquirrelVM* const s);
+
+extern void(*UiServerScriptRegister_Callback)(CSquirrelVM* const s);
+extern void(*UiAdminPanelScriptRegister_Callback)(CSquirrelVM* const s);
+
+extern void(*ScriptConstantRegister_Callback)(CSquirrelVM* const s);
+extern void(*ServerScriptExecuteError_Callback)(const char* pszName);
 
 inline bool(*CSquirrelVM__Init)(CSquirrelVM* s, SQCONTEXT context, SQFloat curtime);
 inline bool(*CSquirrelVM__DestroySignalEntryListHead)(CSquirrelVM* s, HSQUIRRELVM v, SQFloat f);
@@ -83,9 +304,7 @@ inline SQRESULT(*CSquirrelVM__RegisterConstant)(CSquirrelVM* s, const SQChar* na
 inline bool(*CSquirrelVM__PrecompileClientScripts)(CSquirrelVM* vm, SQCONTEXT context, char** scriptArray, int scriptCount);
 #endif
 
-#ifndef CLIENT_DLL
 inline bool(*CSquirrelVM__PrecompileServerScripts)(CSquirrelVM* vm, SQCONTEXT context, char** scriptArray, int scriptCount);
-#endif
 inline ScriptStatus_t(*CSquirrelVM__ExecuteFunction)(CSquirrelVM* s, HSCRIPT hFunction, const ScriptVariant_t* const pArgs, unsigned int nArgs, ScriptVariant_t* const pReturn, HSCRIPT hScope);
 inline bool(*CSquirrelVM__ExecuteCodeCallback)(CSquirrelVM* s, const SQChar* callbackName);
 
@@ -94,9 +313,7 @@ inline bool(*CSquirrelVM__ThrowError)(CSquirrelVM* s, HSQUIRRELVM v);
 inline SQRESULT(*v_Script_PrintFunc)(HSQUIRRELVM v, SQChar* fmt, ...);
 inline SQBool(*v_Script_WarningFunc)(HSQUIRRELVM v, SQInteger nformatstringidx);
 
-#ifndef CLIENT_DLL
 inline CSquirrelVM* g_pServerScript;
-#endif // !CLIENT_DLL
 
 #ifndef DEDICATED
 inline CSquirrelVM* g_pClientScript;
@@ -193,9 +410,7 @@ class VSquirrel : public IDetour
 		LogFunAdr("CSquirrelVM::RegisterFunction", CSquirrelVM__RegisterFunction);
 		LogFunAdr("CSquirrelVM::FindFunction", CSquirrelVM__FindFunction);
 
-#ifndef CLIENT_DLL
 		LogFunAdr("CSquirrelVM::PrecompileServerScripts", CSquirrelVM__PrecompileServerScripts);
-#endif // !CLIENT_DLL
 #ifndef DEDICATED
 		LogFunAdr("CSquirrelVM::PrecompileClientScripts", CSquirrelVM__PrecompileClientScripts);
 #endif // !DEDICATED
@@ -214,10 +429,8 @@ class VSquirrel : public IDetour
 		Module_FindPattern(g_GameDll, "48 83 EC 38 45 0F B6 C8").GetPtr(CSquirrelVM__RegisterFunction);
 		Module_FindPattern(g_GameDll, "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC ? 48 8B 59 ? 49 8B F1").GetPtr(CSquirrelVM__FindFunction);
 
-#ifndef CLIENT_DLL
 		// sv scripts.rson compiling
 		Module_FindPattern(g_GameDll, "E8 ?? ?? ?? ?? 0F B6 F0 48 85 DB").FollowNearCallSelf().GetPtr(CSquirrelVM__PrecompileServerScripts);
-#endif
 
 #ifndef DEDICATED
 		// cl/ui scripts.rson compiling
@@ -242,3 +455,4 @@ class VSquirrel : public IDetour
 };
 
 #endif // VSQUIRREL_H
+#endif // CLIENT_DLL

@@ -254,7 +254,7 @@ public:
 	// Given a relative path, gets the PACK file that contained this file and its offset and size. Can be used to prefetch a file to a HDD for caching reason.
 	virtual bool            GetPackFileInfoFromRelativePath(const char* pFileName, const char* pPathID, char* pPackPath, ssize_t nPackPathBufferSize, ptrdiff_t& nPosition, ssize_t& nLength) = 0;
 #endif
-	// Returns the search path, each path is separated by ;s. Returns the length of the string returned
+	// Returns the search path, each path is separated by;s. Returns the length of the string returned
 	virtual ssize_t			GetSearchPath(const char* pathID, bool bGetPackFiles, char* pPath, ssize_t nMaxLen) = 0;
 	virtual bool			AddPackFile(const char* fullpath, const char* pathID) = 0; 	// interface for custom pack files > 4Gb
 
@@ -318,11 +318,11 @@ public:
 	virtual const char* GetLocalPath(const char* pFileName, char* pLocalPath, ssize_t localPathBufferSize) = 0;
 
 	// Returns true on success ( based on current list of search paths, otherwise false if 
-	//  it can't be resolved )
+	// it can't be resolved )
 	virtual bool			FullPathToRelativePath(const char* pFullpath, char* pRelative, ssize_t maxlen) = 0;
 
 	// Gets the current working directory
-	virtual bool			GetCurrentDirectory(char* pDirectory, unsigned int maxlen) = 0; // Last parameter is a DWORD passed to 'GetCurrentDirectoryA()' internally.
+	virtual bool			GetCurrentDirectory(char* pDirectory, unsigned int maxlen) = 0; // Last parameter is a DWORD passed to 'GetCurrentDirectoryA' internally.
 
 	//--------------------------------------------------------
 	// Filename dictionary operations
@@ -335,7 +335,7 @@ public:
 	// Asynchronous file operations
 	//--------------------------------------------------------
 
-//--------------- [ !!! AMOS: !!! ALL ASYNC METHODS ARE UNIMPLEMENTED !!! PURECALL !!! ] ---------------//
+//--------- [ !!! AMOS: !!! ALL ASYNC METHODS ARE UNIMPLEMENTED !!! PURECALL !!! ] ---------//
 	//------------------------------------
 	// Global operations
 	//------------------------------------
@@ -360,11 +360,11 @@ public:
 	virtual void			AddLoggingFunc(void (*pfnLogFunc)(const char* fileName, const char* accessType)) = 0;
 	virtual void			RemoveLoggingFunc(FileSystemLoggingFunc_t logFunc) = 0;
 
-	virtual __int64 __fastcall sub_14038C240(__int64 a1) = 0;
-	virtual __int64 __fastcall sub_14038C380(__int64 a1) = 0;
-	virtual __int64 __fastcall sub_14038C400(__int64 a1, __int64 a2) = 0;
+	virtual __int64 __fastcall FileSystemUnknown0(__int64 a1) = 0;
+	virtual __int64 __fastcall FileSystemUnknown1(__int64 a1) = 0;
+	virtual __int64 __fastcall FileSystemUnknown2(__int64 a1, __int64 a2) = 0;
 
-	// Returns the file system statistics retrieved by the implementation.  Returns NULL if not supported.
+	// Returns the file system statistics retrieved by the implementation. Returns NULL if not supported.
 	virtual const FileSystemStatistics* GetFilesystemStatistics() = 0;
 
 	//--------------------------------------------------------
@@ -421,9 +421,9 @@ public:
 	virtual void FreeOptimalReadBuffer(void*) = 0;
 
 
-	virtual bool __fastcall sub_140383E00(__int64 a2) = 0;
-	virtual bool sub_1403836A0() = 0;
-	virtual __int64 __fastcall sub_140384310(int a1) = 0;
+	virtual bool __fastcall FileSystemUnknown3(__int64 a2) = 0;
+	virtual bool FileSystemUnknown4() = 0;
+	virtual __int64 __fastcall FileSystemUnknown5(int a1) = 0;
 	virtual __int64 __fastcall CheckVPKMode(int nMode) = 0; // Checks if the VPK mode equals the mode input.
 
 
@@ -432,7 +432,7 @@ public:
 	//--------------------------------------------------------
 	virtual bool ReadFromCache(const char* pPath, FileSystemCache* pCache) = 0;
 
-	virtual bool __fastcall sub_14037FFA0(__int64 a1, unsigned int a2, __int64 a3) = 0;
+	virtual bool __fastcall FileSystemUnknown6(__int64 a1, unsigned int a2, __int64 a3) = 0;
 
 	virtual void SetVPKCacheModeClient() = 0; // g_nVPKCacheMode = 1;
 	virtual void SetVPKCacheModeServer() = 0; // g_nVPKCacheMode = 2;
@@ -441,35 +441,35 @@ public:
 	virtual __int64 __fastcall PrecacheTaskItem(void* a1) = 0;
 
 	virtual void ResetItemCacheSize(int edx) = 0;
-	virtual void __fastcall sub_140380100(__int64 a1) = 0;
-	virtual void __fastcall sub_140380230(char a2) = 0;
-	virtual void* __fastcall sub_1403801F0(const void* a1, unsigned int a2) = 0;
-	virtual void __fastcall sub_140380220(__int64 a1) = 0;
+	virtual void __fastcall FileSystemUnknown7(__int64 a1) = 0;
+	virtual void __fastcall FileSystemUnknown8(char a2) = 0;
+	virtual void* __fastcall FileSystemUnknown9(const void* a1, unsigned int a2) = 0;
+	virtual void __fastcall FileSystemUnknown10(__int64 a1) = 0;
 	virtual bool ResetItemCache() = 0;
-	virtual char __fastcall sub_1403836D0(int a1, char* a2, unsigned int a3) = 0;
-	virtual __int64 __fastcall sub_140383840(unsigned int a1, __int64 a2, char* a3, unsigned int BufferCount) = 0;
-	virtual const char** __fastcall sub_140383760(unsigned int a1) = 0;
-	virtual __int64 __fastcall sub_140383A20(const char* a1) = 0;
+	virtual char __fastcall FileSystemUnknown11(int a1, char* a2, unsigned int a3) = 0;
+	virtual __int64 __fastcall FileSystemUnknown12(unsigned int a1, __int64 a2, char* a3, unsigned int BufferCount) = 0;
+	virtual const char** __fastcall FileSystemUnknown13(unsigned int a1) = 0;
+	virtual __int64 __fastcall FileSystemUnknown14(const char* a1) = 0;
 
 	virtual CPackedStore* MountVPKFile(const char* pVpkPath) = 0;
 	virtual const char* UnmountVPKFile(const char* pBasename) = 0;
 
-	virtual void __fastcall sub_140383370() = 0;
-	virtual void __fastcall sub_140383560() = 0;
+	virtual void __fastcall FileSystemUnknown15() = 0;
+	virtual void __fastcall FileSystemUnknown16() = 0;
 
 	virtual unsigned __int64 __fastcall PnpCtxRegQueryInfoKey(__int64 a1, char* a2, unsigned int* a3, unsigned __int64 a4, unsigned __int64 a5, void(__fastcall* a6)(unsigned __int64)) = 0;
-	virtual char* sub_1403842B0() = 0;
-	virtual __int64 __fastcall sub_1403842C0(__int64 a1, unsigned int a2, __int64 a3) = 0;
+	virtual char* FileSystemUnknown17() = 0;
+	virtual __int64 __fastcall FileSystemUnknown18(__int64 a1, unsigned int a2, __int64 a3) = 0;
 
 	virtual char __fastcall LoadMainVPK(const char* pszVPKFile) = 0;
 
-	virtual __int64 sub_140380080() = 0;
-	virtual char __fastcall sub_14038B530(const char* a1, unsigned __int8* a2, char* a3, __int64 Count) = 0;
-	virtual __int64 __fastcall sub_14038C830(unsigned __int16* a1) = 0;
-	virtual __int64 __fastcall sub_140388360(char* a1, __int64 a2) = 0;
-	virtual __int64 __fastcall sub_140384C60(char* a1, unsigned __int64 a2) = 0;
-	virtual void __fastcall sub_140382A80() = 0;
-	virtual __int64 __fastcall sub_14038CC90(int a1, unsigned int a2, __int64 a3, __int64 a4) = 0;
+	virtual __int64 FileSystemUnknown19() = 0;
+	virtual char __fastcall FileSystemUnknown20(const char* a1, unsigned __int8* a2, char* a3, __int64 Count) = 0;
+	virtual __int64 __fastcall FileSystemUnknown21(unsigned __int16* a1) = 0;
+	virtual __int64 __fastcall FileSystemUnknown22(char* a1, __int64 a2) = 0;
+	virtual __int64 __fastcall FileSystemUnknown23(char* a1, unsigned __int64 a2) = 0;
+	virtual void __fastcall FileSystemUnknown24() = 0;
+	virtual __int64 __fastcall FileSystemUnknown25(int a1, unsigned int a2, __int64 a3, __int64 a4) = 0;
 	virtual __int64 __fastcall UserMathErrorFunction() = 0;
 };
 

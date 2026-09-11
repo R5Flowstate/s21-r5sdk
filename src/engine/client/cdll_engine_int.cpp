@@ -12,7 +12,6 @@
 #include "engine/client/cl_rcon.h"
 #include "networksystem/bansystem.h"
 #include "windows/id3dx.h"
-#include "geforce/reflex.h"
 #include "vengineclient_impl.h"
 #include "globalvars_base.h"
 #include "cdll_engine_int.h"
@@ -87,7 +86,6 @@ void FrameStageNotify_Post(const ClientFrameStage_t frameStage)
 	case ClientFrameStage_t::FRAME_RENDER_START:
 		break;
 	case ClientFrameStage_t::FRAME_RENDER_END:
-		GeForce_SetLatencyMarker(D3D11Device(), SIMULATION_END, MaterialSystem()->GetCurrentFrameCount());
 		break;
 	case ClientFrameStage_t::FRAME_NET_FULL_FRAME_UPDATE_ON_REMOVE:
 		break;
@@ -95,7 +93,7 @@ void FrameStageNotify_Post(const ClientFrameStage_t frameStage)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose
 //-----------------------------------------------------------------------------
 void CHLClient::FrameStageNotify(CHLClient* pHLClient, ClientFrameStage_t frameStage)
 {
@@ -106,8 +104,8 @@ void CHLClient::FrameStageNotify(CHLClient* pHLClient, ClientFrameStage_t frameS
 
 //-----------------------------------------------------------------------------
 // Purpose: Get g_pClientClassHead Pointer for all ClientClasses.
-// Input  :
-// Output : ClientClass*
+// Input 
+// Output: ClientClass*
 //-----------------------------------------------------------------------------
 ClientClass* CHLClient::GetAllClasses()
 {
@@ -115,12 +113,3 @@ ClientClass* CHLClient::GetAllClasses()
 }
 #endif // !DEDICATED
 
-///////////////////////////////////////////////////////////////////////////////
-void VDll_Engine_Int::Detour(const bool bAttach) const
-{
-#ifndef DEDICATED
-	DetourSetup(&CHLClient__Init, &CHLClient::Init, bAttach);
-	DetourSetup(&CHLClient__PostInit, &CHLClient::PostInit, bAttach);
-	DetourSetup(&CHLClient__FrameStageNotify, &CHLClient::FrameStageNotify, bAttach);
-#endif // !DEDICATED
-}

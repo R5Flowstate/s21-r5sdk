@@ -1,8 +1,8 @@
-﻿//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
 // Purpose: Defines the more complete set of operations on the string_t defined
-// 			These should be used instead of direct manipulation to allow more
-//			flexibility in future ports or optimization.
+// These should be used instead of direct manipulation to allow more
+// flexibility in future ports or optimization.
 //
 // $NoKeywords: $
 //=============================================================================//
@@ -28,7 +28,7 @@ typedef int	string_t;
 
 //-----------------------------------------------------------------------------
 // Purpose: Given a string_t, make a C string. By convention the result string 
-// 			pointer should be considered transient and should not be stored.
+// pointer should be considered transient and should not be stored.
 //-----------------------------------------------------------------------------
 
 #define STRING( offset )	( ( offset ) ? reinterpret_cast<const char *>( offset ) : "" )
@@ -79,7 +79,7 @@ struct castable_string_t : public string_t // string_t is used in unions, hence,
 
 //-----------------------------------------------------------------------------
 // Purpose: Given a string_t, make a C string. By convention the result string 
-// 			pointer should be considered transient and should not be stored.
+// pointer should be considered transient and should not be stored.
 //-----------------------------------------------------------------------------
 
 #define STRING( string_t_obj )	(string_t_obj).ToCStr()

@@ -1,9 +1,9 @@
 //=============================================================================//
 //
-// Purpose: 
+// Purpose
 //
-// $Workfile:     $
-// $Date:         $
+// $Workfile: $
+// $Date: $
 // $NoKeywords: $
 //=============================================================================//
 #ifndef GL_MODEL_PRIVATE_H
@@ -63,7 +63,7 @@ struct brushdata_t // !! UNCONFIRMED !!
 	int				firstmodelsurface;
 	int				nummodelsurfaces;
 
-	// track the union of all lightstyles on this brush.  That way we can avoid
+	// track the union of all lightstyles on this brush. That way we can avoid
 	// searching all faces if the lightstyle hasn't changed since the last update
 	int				nLightstyleLastComputedFrame;
 	unsigned short	nLightstyleIndex;	// g_ModelLoader actually holds the allocated data here

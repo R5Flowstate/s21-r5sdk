@@ -3,10 +3,11 @@
 
 //-----------------------------------------------------------------------------
 // Purpose: reads a keyvalues file
-// Input  : *pFileSystem - 
-//			* pFileName - 
-// Output : pointer to KeyValues object
+// Input: *pFileSystem - 
+// * pFileName - 
+// Output: pointer to KeyValues object
 //-----------------------------------------------------------------------------
+#ifndef CLIENT_DLL
 static KeyValues* ReadKeyValuesFile(CFileSystem_Stdio* pFileSystem, const char* pFileName)
 {
 	return KeyValues__ReadKeyValuesFile(pFileSystem, pFileName);
@@ -17,6 +18,7 @@ void VKeyValues::Detour(const bool bAttach) const
 {
 	DetourSetup(&KeyValues__ReadKeyValuesFile, &ReadKeyValuesFile, bAttach);
 }
+#endif // !CLIENT_DLL
 
 ///////////////////////////////////////////////////////////////////////////////
 CThreadMutex g_InstalledMapsMutex;

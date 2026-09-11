@@ -444,27 +444,41 @@ bool Editor_SoloMesh::handleBuild()
 		int navDataSize = 0;
 
 		// Update poly flags from areas.
-		// todo(amos): needs to be updated and/or done differently for r2 and r5.
 		for (int i = 0; i < m_pmesh->npolys; ++i)
 		{
 			if (m_pmesh->areas[i] == RC_WALKABLE_AREA)
 				m_pmesh->areas[i] = DT_POLYAREA_GROUND;
-				
-			if (m_pmesh->areas[i] == DT_POLYAREA_GROUND
+
+			if (m_pmesh->areas[i] == DT_POLYAREA_GROUND ||
+				m_pmesh->areas[i] == DT_POLYAREA_TRIGGER
 				//||
 				//m_pmesh->areas[i] == EDITOR_POLYAREA_GRASS ||
 				//m_pmesh->areas[i] == EDITOR_POLYAREA_ROAD
 				)
 			{
-				m_pmesh->flags[i] = DT_POLYFLAGS_WALK;
+				m_pmesh->flags[i] |= DT_POLYFLAGS_WALK;
 			}
 			//else if (m_pmesh->areas[i] == EDITOR_POLYAREA_WATER)
 			//{
 			//	m_pmesh->flags[i] = EDITOR_POLYFLAGS_SWIM;
 			//}
-			else if (m_pmesh->areas[i] == DT_POLYAREA_TRIGGER)
+
+			if (m_pmesh->surfa[i] <= RC_POLY_SURFAREA_TOO_SMALL_THRESHOLD)
+				m_pmesh->flags[i] |= DT_POLYFLAGS_TOO_SMALL;
+
+			const int nvp = m_pmesh->nvp;
+			const unsigned short* p = &m_pmesh->polys[i*nvp*2];
+
+			for (int j = 0; j < nvp; ++j)
 			{
-				m_pmesh->flags[i] = DT_POLYFLAGS_WALK /*| EDITOR_POLYFLAGS_DOOR*/;
+				if (p[j] == RD_MESH_NULL_IDX)
+					break;
+				if ((p[nvp+j] & 0x8000) == 0)
+					continue;
+				if ((p[nvp+j] & 0xf) == 0xf)
+					continue;
+
+				m_pmesh->flags[i] |= DT_POLYFLAGS_HAS_NEIGHBOUR;
 			}
 		}
 
@@ -554,6 +568,7 @@ bool Editor_SoloMesh::handleBuild()
 	if (m_tool)
 		m_tool->init(this);
 	initToolStates(this);
+	invalidateNavMeshCache();
 
 	return true;
 }

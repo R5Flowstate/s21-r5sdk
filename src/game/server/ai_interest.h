@@ -1,7 +1,7 @@
 //====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
 // Purpose: Hooks and classes for the support of humanoid NPCs with 
-//          groovy facial animation capabilities, aka, "Actors"
+// groovy facial animation capabilities, aka, "Actors"
 //
 //=============================================================================//
 
@@ -40,7 +40,7 @@ public:
 	float                m_rampDuration;
 	float                m_flInterest;
 
-	//DECLARE_SIMPLE_DATADESC();
+	//DECLARE_SIMPLE_DATADESC;
 };
 
 static_assert(sizeof(CAI_InterestTarget_t) == 0x24);

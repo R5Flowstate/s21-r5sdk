@@ -1,9 +1,9 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
-// $Workfile:     $
-// $Date:         $
+// $Workfile: $
+// $Date: $
 //
 //-----------------------------------------------------------------------------
 // $NoKeywords: $
@@ -67,6 +67,13 @@ protected:
 
 	virtual CCVarIteratorInternal* FactoryInternalIterator(void) = 0;
 
+public:
+	// Head of the engine's registration list. Walk it with ConCommandBase::GetNext
+	// to reach every registered ConVar/ConCommand, including ones this SDK never
+	// names. Accessor only -- adds no members, so the mirrored layout is unchanged.
+	ConCommandBase* GetCommandList(void) const { return m_pConCommandList; }
+
+protected:
 	friend class CCVarIteratorInternal;
 	friend class CCvarUtilities;
 
@@ -169,6 +176,7 @@ inline void (*CCvar__Disconnect)(CCvar* thisptr);
 
 inline void (*v_ConVar_PrintDescription)(const ConCommandBase* const pVar);
 
+#ifndef CLIENT_DLL
 ///////////////////////////////////////////////////////////////////////////////
 class VCVar : public IDetour
 {
@@ -196,5 +204,6 @@ class VCVar : public IDetour
 	virtual void Detour(const bool bAttach) const;
 };
 ///////////////////////////////////////////////////////////////////////////////
+#endif // !CLIENT_DLL
 
 #endif // CVAR_H

@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//====== Copyright ï¿½ 1996-2005, Valve Corporation, All rights reserved. =======//
 //
 // Purpose: Physics simulation for non-havok/ipion objects
 //
@@ -6,11 +6,14 @@
 //=============================================================================//
 #include "core/stdafx.h"
 #include "tier1/cvar.h"
+#include "edict.h"
 #include "player.h"
 #include "physics_main.h"
 #include "engine/server/server.h"
 #include "engine/client/client.h"
 #include "game/server/util_server.h"
+#include "game/server/hitbox_debug.h"
+#include "game/server/headglitch_detect.h"
 
 static ConVar sv_simulateBots("sv_simulateBots", "1", FCVAR_RELEASE, "Simulate user commands for bots on the server.");
 
@@ -29,8 +32,14 @@ void Physics_RunBotSimulation(bool bSimulating)
 		if (pClient->IsActive() && pClient->IsFakeClient())
 		{
 			CPlayer* const pPlayer = UTIL_PlayerByIndex(pClient->GetHandle());
-			if (pPlayer)
-				pPlayer->RunNullCommand();
+			if (!pPlayer)
+				continue;
+
+			const edict_t nEdict = pPlayer->GetEdict();
+			if (nEdict < 1 || nEdict == FL_EDICT_INVALID)
+				continue;
+
+			pPlayer->RunNullCommand();
 		}
 	}
 }
@@ -41,6 +50,8 @@ void Physics_RunBotSimulation(bool bSimulating)
 void Physics_RunThinkFunctions(bool bSimulating)
 {
 	Physics_RunBotSimulation(bSimulating);
+	HitboxDebug_DrawFrame();
+	HeadGlitch_Frame();
 	v_Physics_RunThinkFunctions(bSimulating);
 }
 

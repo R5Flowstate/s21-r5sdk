@@ -176,13 +176,13 @@ unsigned int rdNavMeshDebugDraw::areaToFaceCol(const unsigned int area) const
 {
 	switch (area)
 	{
-		// Ground : light blue
+		// Ground: light blue
 	case DT_POLYAREA_GROUND: return duRGBA(0, 192, 215, 255);
-		// Jump : blue
+		// Jump: blue
 	case DT_POLYAREA_JUMP: return duRGBA(0, 0, 255, 255);
-		// Trigger : light green
+		// Trigger: light green
 	case DT_POLYAREA_TRIGGER: return duRGBA(20, 245, 0, 255);
-		// Unexpected : white
+		// Unexpected: white
 	default: return duRGBA(255, 255, 255, 255);
 	}
 }
@@ -194,13 +194,13 @@ unsigned int rdNavMeshDebugDraw::areaToEdgeCol(const unsigned int area) const
 {
 	switch (area)
 	{
-		// Ground : light blue
+		// Ground: light blue
 	case DT_POLYAREA_GROUND: return duRGBA(0, 24, 32, 255);
-		// Jump : blue
+		// Jump: blue
 	case DT_POLYAREA_JUMP: return duRGBA(0, 0, 48, 255);
-		// Trigger : light green
+		// Trigger: light green
 	case DT_POLYAREA_TRIGGER: return duRGBA(0, 32, 24, 255);
-		// Unexpected : white
+		// Unexpected: white
 	default: return duRGBA(28, 28, 28, 255);
 	}
 }

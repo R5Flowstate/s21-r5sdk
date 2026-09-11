@@ -1,7 +1,7 @@
 @echo off
 mode con: cols=100 lines=55
 set /A errors=0
-powershell write-host -back Red "`n"-------------------"`n"R5R DIAGNOSTIC TOOL""`n"-------------------`n"
+powershell write-host -back Red "`n"-------------------"`n"R5F DIAGNOSTIC TOOL""`n"-------------------`n"
 
 Rem made by @Archi#0731 on discord, tell me if you have problems with this script, I'm not sure if it's perfect
 echo pls don't run me as admin
@@ -23,7 +23,7 @@ powershell write-host -fore Yellow Listing scripts folder:
 DIR platform\scripts\ /A:D /-N /b
 
 powershell write-host -fore Yellow "`n"Checking if the language is set to english : 
-findstr /r "english" "%userprofile%\Saved Games\Respawn\Apex_fnf\profile\profile.cfg"
+findstr /r "english" "%userprofile%\Saved Games\Respawn\Apex_r5f\profile\profile.cfg"
 if %errorlevel%==0 (powershell write-host -fore Green [Language set to English]"`n") else (SET /A errors+=1 && powershell write-host -fore Red [Not in English or file not found!]"`n")
 
 powershell write-host -fore Yellow Listing folders : 

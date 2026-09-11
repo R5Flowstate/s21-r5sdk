@@ -1,6 +1,6 @@
-﻿//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -8,16 +8,16 @@
 //
 // VMatrix always postmultiply vectors as in Ax = b.
 // Given a set of basis vectors ((F)orward, (L)eft, (U)p), and a (T)ranslation, 
-// a matrix to transform a vector into that space looks like this:
+// a matrix to transform a vector into that space looks like this
 // Fx Lx Ux Tx
 // Fy Ly Uy Ty
 // Fz Lz Uz Tz
-// 0   0  0  1
+// 0 0 0 1
 
 // Note that concatenating matrices needs to multiply them in reverse order.
-// ie: if I want to apply matrix A, B, then C, the equation needs to look like this:
+// ie: if I want to apply matrix A, B, then C, the equation needs to look like this
 // C * B * A * v
-// ie:
+// ie
 // v = A * v;
 // v = B * v;
 // v = C * v;
@@ -857,7 +857,7 @@ inline void MatrixSetRow(VMatrix& dst, int nRow, const Vector3D& row)
 // Vector3DMultiplyPosition treats src2 as if it's a point (adds the translation)
 //-----------------------------------------------------------------------------
 // NJS: src2 is passed in as a full vector rather than a reference to prevent the need
-// for 2 branches and a potential copy in the body.  (ie, handling the case when the src2
+// for 2 branches and a potential copy in the body. (ie, handling the case when the src2
 // reference is the same as the dst reference ).
 inline void Vector3DMultiplyPosition(const VMatrix& src1, const VectorByValue src2, Vector3D& dst)
 {
@@ -872,7 +872,7 @@ inline void Vector3DMultiplyPosition(const VMatrix& src1, const VectorByValue sr
 //-----------------------------------------------------------------------------
 inline void MatrixTransformAxisAlignedPlane(const VMatrix& src, int nDim, float flSign, float flDist, cplane_t& outPlane)
 {
-	// See MatrixTransformPlane in the .cpp file for an explanation of the algorithm.
+	// See MatrixTransformPlane in the.cpp file for an explanation of the algorithm.
 	MatrixGetColumn(src, nDim, &outPlane.normal);
 	outPlane.normal *= flSign;
 	outPlane.dist = flDist * DotProduct(outPlane.normal, outPlane.normal);
@@ -919,7 +919,7 @@ inline void MatrixOrtho(VMatrix& dst, double left, double top, double right, dou
 
 inline void MatrixBuildOrthoLH(VMatrix& dst, vec_t left, vec_t top, vec_t right, vec_t bottom, vec_t zNear, vec_t zFar)
 {
-	// Same as XMMatrixOrthographicOffCenterLH().
+	// Same as XMMatrixOrthographicOffCenterLH.
 	dst.Init(
 		2.0f / (right - left), 0.0f, 0.0f, (left + right) / (left - right),
 		0.0f, 2.0f / (bottom - top), 0.0f, (bottom + top) / (top - bottom),
@@ -996,7 +996,7 @@ inline void ExtractClipPlanesFromTransposedMatrix(const VMatrix& transposedViewP
 
 //-----------------------------------------------------------------------------
 // Extracts clip planes from an arbitrary view projection matrix.
-// Differences from ExtractClipPlanesFromTransposedMatrix():
+// Differences from ExtractClipPlanesFromTransposedMatrix
 // This function assumes the matrix has NOT been transposed.
 // If bD3DClippingRange is true, the projection space clipping range is assumed
 // to be [0,1], vs. the OpenGL range [-1,1].

@@ -1,8 +1,11 @@
+#if defined(CLIENT_DLL)
 #pragma once
 
 constexpr unsigned int AES_128_KEY_SIZE = 16;
 constexpr unsigned int AES_128_B64_ENCODED_SIZE = 24;
-constexpr const char DEFAULT_NET_ENCRYPTION_KEY[AES_128_B64_ENCODED_SIZE+1] = "WDNWLmJYQ2ZlM0VoTid3Yg==";
+// Compile-time fallback when net_useRandomKey is 0. Not valid for live encrypted RCON.
+// Prefer net_useRandomKey 1 for game netchannel; RCON requires an operator rcon_key.
+constexpr const char DEFAULT_NET_ENCRYPTION_KEY[AES_128_B64_ENCODED_SIZE+1] = "W1rRqTYyS6Xah3bBiOVs5A==";
 
 #ifndef _TOOLS
 #include "engine/net_chan.h"
@@ -40,6 +43,7 @@ int  NET_SendDatagram(SOCKET s, void* pPayload, int iLenght, netadr_t* pAdr, boo
 void NET_PrintKey();
 void NET_SetKey(const string& svNetKey);
 void NET_GenerateKey();
+void NET_EnableKeyInstall();
 void NET_PrintFunc(const char* fmt, ...);
 void NET_RemoveChannel(CClient* pClient, int nIndex, const char* szReason, uint8_t bBadRep, bool bRemoveNow);
 
@@ -50,6 +54,112 @@ unsigned int NET_BufferToBufferDecompress_LZSS(CLZSS* lzss, unsigned char* pInpu
 
 bool NET_ReadMessageType(int* outType, bf_read* buffer);
 bool NET_IsRemoteLocal(const CNetAdr& netAdr);
+bool NET_IsAddressLoopback(const CNetAdr& netAdr);
+
+///////////////////////////////////////////////////////////////////////////////
+extern netadr_t* g_pNetAdr;
+extern netkey_t* g_pNetKey;
+
+extern double* g_pNetTime;
+
+extern ConVar net_useRandomKey;
+extern ConVar sv_netkey;
+
+///////////////////////////////////////////////////////////////////////////////
+class VNet : public IDetour
+{
+	virtual void GetAdr(void) const
+	{
+		LogFunAdr("NET_Init", v_NET_Init);
+		LogFunAdr("NET_Config", v_NET_Config);
+		LogFunAdr("NET_SetKey", v_NET_SetKey);
+
+		LogFunAdr("NET_GetPacket", v_NET_GetPacket);
+		LogFunAdr("NET_SendPacket", v_NET_SendPacket);
+
+		LogFunAdr("NET_ReceiveDatagram", v_NET_ReceiveDatagram);
+		LogFunAdr("NET_SendDatagram", v_NET_SendDatagram);
+
+		LogFunAdr("NET_BufferToBufferCompress", v_NET_BufferToBufferCompress);
+		LogFunAdr("NET_BufferToBufferDecompress_LZSS", v_NET_BufferToBufferDecompress_LZSS);
+
+		LogFunAdr("NET_PrintFunc", v_NET_PrintFunc);
+		LogVarAdr("g_NetAdr", g_pNetAdr);
+		LogVarAdr("g_NetKey", g_pNetKey);
+		LogVarAdr("g_NetTime", g_pNetTime);
+	}
+	virtual void GetFun(void) const
+	{
+		// S21: = the REAL NET_ReceiveDatagram.
+		// Found via _ReturnAddress trace from recvfrom hook.
+		// (The functions at 0x2A370/0x2A8E0 were ConVar constructors!)
+		Module_FindPattern(g_GameDll, "4C 8B DC 49 89 5B 18 55 41 54 41 55 41 56 41 57 48 81 EC 50 05").GetPtr(v_NET_ReceiveDatagram);
+	}
+	virtual void GetVar(void) const { }  // No vars needed for S21 bridge
+	virtual void GetCon(void) const { }
+	virtual void Detour(const bool bAttach) const;
+};
+///////////////////////////////////////////////////////////////////////////////
+#endif // !_TOOLS
+
+const char* NET_ErrorString(int iCode);
+#else // !CLIENT_DLL
+#pragma once
+
+constexpr unsigned int AES_128_KEY_SIZE = 16;
+constexpr unsigned int AES_128_B64_ENCODED_SIZE = 24;
+// Compile-time fallback when net_useRandomKey is 0. Not valid for live encrypted RCON.
+// Prefer net_useRandomKey 1 for game netchannel; RCON requires an operator rcon_key.
+constexpr const char DEFAULT_NET_ENCRYPTION_KEY[AES_128_B64_ENCODED_SIZE+1] = "W1rRqTYyS6Xah3bBiOVs5A==";
+
+#ifndef _TOOLS
+#include "engine/net_chan.h"
+#include "tier1/lzss.h"
+#define MAX_STREAMS         2
+#define FRAGMENT_BITS       8
+#define FRAGMENT_SIZE       (1<<FRAGMENT_BITS)
+
+// user message
+#define MAX_USER_MSG_DATA 511 // <-- 255 in Valve Source.
+
+#define NETMSG_TYPE_BITS	7	// must be 2^NETMSG_TYPE_BITS > SVC_LASTMSG (6 in Valve Source).
+#define NETMSG_LENGTH_BITS	12	// 512 bytes (11 in Valve Source, 256 bytes).
+#define NET_MIN_MESSAGE 5 // Even connectionless packets require int32 value (-1) + 1 byte content
+
+/* ==== CNETCHAN ======================================================================================================================================================== */
+inline void*(*v_NET_Init)(bool bDeveloper);
+inline void(*v_NET_SetKey)(netkey_t* pKey, const char* szHash);
+inline void(*v_NET_Config)(void);
+
+inline int(*v_NET_GetPacket)(int iSocket, uint8_t* pScratch, bool bEncrypted);
+inline int(*v_NET_SendPacket)(CNetChan* pChan, int iSocket, const netadr_t& toAdr, const uint8_t* pData, unsigned int nLen, void* unused0, bool bCompress, void* unused1, bool bEncrypt);
+
+inline bool(*v_NET_ReceiveDatagram)(int iSocket, netpacket_s* pInpacket, bool bRaw);
+inline int(*v_NET_SendDatagram)(SOCKET s, void* pPayload, int iLenght, netadr_t* pAdr, bool bEncrypted);
+
+inline bool(*v_NET_BufferToBufferCompress)(uint8_t* const dest, size_t* const destLen, uint8_t* const source, const size_t sourceLen);
+inline unsigned int(*v_NET_BufferToBufferDecompress_LZSS)(CLZSS* lzss, unsigned char* pInput, unsigned char* pOutput, unsigned int unBufSize);
+
+inline void(*v_NET_PrintFunc)(const char* fmt, ...);
+
+///////////////////////////////////////////////////////////////////////////////
+bool NET_ReceiveDatagram(int iSocket, netpacket_s* pInpacket, bool bRaw);
+int  NET_SendDatagram(SOCKET s, void* pPayload, int iLenght, netadr_t* pAdr, bool bEncrypted);
+void NET_PrintKey();
+void NET_SetKey(const string& svNetKey);
+void NET_GenerateKey();
+void NET_EnableKeyInstall();
+void NET_PrintFunc(const char* fmt, ...);
+void NET_RemoveChannel(CClient* pClient, int nIndex, const char* szReason, uint8_t bBadRep, bool bRemoveNow);
+
+bool NET_BufferToBufferCompress(uint8_t* const dest, size_t* const destLen, uint8_t* const source, const size_t sourceLen);
+unsigned int NET_BufferToBufferDecompress(uint8_t* pInput, size_t& coBufsize, uint8_t* pOutput, const size_t unBufSize);
+
+unsigned int NET_BufferToBufferDecompress_LZSS(CLZSS* lzss, unsigned char* pInput, unsigned char* pOutput, unsigned int unBufSize);
+
+bool NET_ReadMessageType(int* outType, bf_read* buffer);
+bool NET_IsRemoteLocal(const CNetAdr& netAdr);
+bool NET_IsAddressLoopback(const CNetAdr& netAdr);
 
 ///////////////////////////////////////////////////////////////////////////////
 extern netadr_t* g_pNetAdr;
@@ -114,3 +224,4 @@ class VNet : public IDetour
 #endif // !_TOOLS
 
 const char* NET_ErrorString(int iCode);
+#endif // CLIENT_DLL

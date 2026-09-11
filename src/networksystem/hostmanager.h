@@ -45,4 +45,9 @@ private:
 
 extern CServerHostManager g_ServerHostManager;
 
+#ifndef CLIENT_DLL
+// Playlists_Parse remounts the playlist map VPK. Call after LevelShutdown.
+void HostManager_ParseDeferredPlaylist(void);
+#endif // !CLIENT_DLL
+
 #endif // HOSTMANAGER_H

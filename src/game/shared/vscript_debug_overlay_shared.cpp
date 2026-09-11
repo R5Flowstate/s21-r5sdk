@@ -10,8 +10,19 @@
 #include "vscript_shared.h"
 #include "vscript_debug_overlay_shared.h"
 
+static bool Script_CheckDebugOverlay(HSQUIRRELVM v)
+{
+    if (g_pDebugOverlay)
+        return true;
+    v_SQVM_RaiseError(v, "debug overlay interface is not available");
+    return false;
+}
+
 SQRESULT SharedScript_DebugDrawSolidBox(HSQUIRRELVM v)
 {
+    if (!Script_CheckDebugOverlay(v))
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+
     const SQVector3D* origin;
     const SQVector3D* mins;
     const SQVector3D* maxs;
@@ -37,6 +48,9 @@ SQRESULT SharedScript_DebugDrawSolidBox(HSQUIRRELVM v)
 
 SQRESULT SharedScript_DebugDrawSweptBox(HSQUIRRELVM v)
 {
+    if (!Script_CheckDebugOverlay(v))
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+
     const SQVector3D* start;
     const SQVector3D* end;
     const SQVector3D* mins;
@@ -66,6 +80,9 @@ SQRESULT SharedScript_DebugDrawSweptBox(HSQUIRRELVM v)
 
 SQRESULT SharedScript_DebugDrawTriangle(HSQUIRRELVM v)
 {
+    if (!Script_CheckDebugOverlay(v))
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+
     const SQVector3D* p1;
     const SQVector3D* p2;
     const SQVector3D* p3;
@@ -91,6 +108,9 @@ SQRESULT SharedScript_DebugDrawTriangle(HSQUIRRELVM v)
 
 SQRESULT SharedScript_DebugDrawSolidSphere(HSQUIRRELVM v)
 {
+    if (!Script_CheckDebugOverlay(v))
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+
     const SQVector3D* origin;
     SQFloat radius;
     SQInteger theta;
@@ -118,6 +138,9 @@ SQRESULT SharedScript_DebugDrawSolidSphere(HSQUIRRELVM v)
 
 SQRESULT SharedScript_DebugDrawCapsule(HSQUIRRELVM v)
 {
+    if (!Script_CheckDebugOverlay(v))
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+
     const SQVector3D* start;
     const SQVector3D* end;
     SQFloat radius;

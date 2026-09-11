@@ -1,6 +1,6 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose:
+// Purpose
 //
 // $NoKeywords: $
 //===========================================================================//
@@ -10,7 +10,7 @@
 #include "tier1/stringpool.h"
 #include "tier1/generichash.h"
 
-// memdbgon must be the last include file in a .cpp file!!!
+// memdbgon must be the last include file in a.cpp file!!!
 #include "tier0/memdbgon.h"
 
 //-----------------------------------------------------------------------------
@@ -101,24 +101,24 @@ CON_COMMAND( test_stringpool, "Tests the class CStringPool" )
 {
 	CStringPool pool;
 
-	Assert(pool.Count() == 0);
+	Assert(pool.Count == 0);
 
 	pool.Allocate("test");
-	Assert(pool.Count() == 1);
+	Assert(pool.Count == 1);
 
 	pool.Allocate("test");
-	Assert(pool.Count() == 1);
+	Assert(pool.Count == 1);
 
 	pool.Allocate("test2");
-	Assert(pool.Count() == 2);
+	Assert(pool.Count == 2);
 
 	Assert( pool.Find("test2") != NULL );
 	Assert( pool.Find("TEST") != NULL );
 	Assert( pool.Find("Test2") != NULL );
 	Assert( pool.Find("test") != NULL );
 
-	pool.FreeAll();
-	Assert(pool.Count() == 0);
+	pool.FreeAll;
+	Assert(pool.Count == 0);
 
 	Msg("Pass.");
 }

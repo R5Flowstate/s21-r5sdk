@@ -25,7 +25,7 @@ struct CrashHardWareInfo_s
 };
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose
 //-----------------------------------------------------------------------------
 class CCrashHandler
 {
@@ -39,7 +39,7 @@ public:
 	void Reset();
 
 	//-------------------------------------------------------------------------
-	// Inlines: 
+	// Inlines
 	//-------------------------------------------------------------------------
 	void Start();
 	void End();
@@ -56,7 +56,7 @@ public:
 	inline const CrashHardWareInfo_s& GetHardwareInfo() const { return m_HardWareInfo; }
 
 	//-------------------------------------------------------------------------
-	// Formatters: 
+	// Formatters
 	//-------------------------------------------------------------------------
 	void FormatCrash();
 	void FormatCallstack();
@@ -66,7 +66,7 @@ public:
 	void FormatBuildInfo();
 
 	//-------------------------------------------------------------------------
-	// Utility: 
+	// Utility
 	//-------------------------------------------------------------------------
 	const char* ExceptionToString() const;
 	const char* ExceptionToString(const DWORD nExceptionCode) const;
@@ -83,7 +83,7 @@ public:
 private:
 
 	//-------------------------------------------------------------------------
-	// Internals: 
+	// Internals
 	//-------------------------------------------------------------------------
 	void FormatExceptionAddress();
 	void FormatExceptionAddress(const LPCSTR pExceptionAddress);

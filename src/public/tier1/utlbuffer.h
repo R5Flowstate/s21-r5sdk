@@ -1,6 +1,6 @@
 //===== Copyright (c) 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -132,19 +132,19 @@ template <> static const char* GetFmtStr< double >(int nRadix, bool bPrint) { As
 class CUtlBuffer
 {
 	// Brian has on his todo list to revisit this as there are issues in some cases with CUtlVector using operator = instead of copy construtor in InsertMultiple, etc.
-	// The unsafe case is something like this:
-	//  CUtlVector< CUtlBuffer > vecFoo;
+	// The unsafe case is something like this
+	// CUtlVector< CUtlBuffer > vecFoo;
 	// 
-	//  CUtlBuffer buf;
-	//  buf.Put( xxx );
-	//  vecFoo.Insert( buf );
+	// CUtlBuffer buf;
+	// buf.Put( xxx );
+	// vecFoo.Insert( buf );
 	//
-	//  This will cause memory corruption when vecFoo is cleared
+	// This will cause memory corruption when vecFoo is cleared
 	//
-	//private:
+	//private
 	//	// Disallow copying
 	//	CUtlBuffer( const CUtlBuffer & );// { Assert( 0 ); }
-	//	CUtlBuffer &operator=( const CUtlBuffer & );//  { Assert( 0 ); return *this; }
+	//	CUtlBuffer &operator=( const CUtlBuffer & );// { Assert( 0 ); return *this; }
 
 public:
 	enum SeekType_t
@@ -180,7 +180,7 @@ public:
 	CUtlBuffer& operator= (const CUtlBuffer&); // = delete;
 
 #if VALVE_CPP11
-	// UtlBuffer is non-copyable (same as CUtlMemory), but it is moveable.  We would like to declare these with '= default'
+	// UtlBuffer is non-copyable (same as CUtlMemory), but it is moveable. We would like to declare these with '= default'
 	// but unfortunately VS2013 isn't fully C++11 compliant, so we have to manually declare these in the boilerplate way.
 	CUtlBuffer(CUtlBuffer&& moveFrom); // = default;
 	CUtlBuffer& operator= (CUtlBuffer&& moveFrom); // = default;
@@ -236,9 +236,9 @@ public:
 
 	// Read stuff out.
 	// Binary mode: it'll just read the bits directly in, and characters will be
-	//		read for strings until a null character is reached.
+	// read for strings until a null character is reached.
 	// Text mode: it'll parse the file, turning text #s into real numbers.
-	//		GetString will read a string until a space is reached
+	// GetString will read a string until a space is reached
 	char			GetChar();
 	unsigned char	GetUnsignedChar();
 	short			GetShort();
@@ -294,7 +294,7 @@ public:
 	bool			EatCPPComment();
 
 	// (For text buffers only)
-	// Parse a token from the buffer:
+	// Parse a token from the buffer
 	// Grab all text that lies between a starting delimiter + ending delimiter
 	// (skipping whitespace that leads + trails both delimiters).
 	// If successful, the get index is advanced and the function returns true,
@@ -312,9 +312,9 @@ public:
 
 	// Write stuff in
 	// Binary mode: it'll just write the bits directly in, and strings will be
-	//		written with a null terminating character
+	// written with a null terminating character
 	// Text mode: it'll convert the numbers to text versions
-	//		PutString will not write a terminating character
+	// PutString will not write a terminating character
 	void			PutChar(char c);
 	void			PutUnsignedChar(unsigned char uc);
 	void			PutShort(short s);
@@ -421,7 +421,7 @@ protected:
 	bool CheckPut(ssize_t size);
 	bool CheckGet(ssize_t size);
 
-	// NOTE: Pass in nPut here even though it is just a copy of m_Put.  This is almost always called immediately 
+	// NOTE: Pass in nPut here even though it is just a copy of m_Put. This is almost always called immediately 
 	// after modifying m_Put and this lets it stay in a register
 	void AddNullTermination(ssize_t nPut);
 
@@ -463,7 +463,7 @@ protected:
 	template <typename T> void PutObject(T* src);
 
 	// be sure to also update the copy constructor
-	// and SwapCopy() when adding members.
+	// and SwapCopy when adding members.
 	CUtlMemory<unsigned char> m_Memory;
 	ssize_t m_Get;
 	ssize_t m_Put;
@@ -575,27 +575,25 @@ public:
 	// If end of file is reached or upon error returns "false".
 	//
 	// Note:	the returned length of the line is at least one character because the
-	//			trailing newline characters are also included as part of the line.
+	// trailing newline characters are also included as part of the line.
 	//
 	// Note:	the pointer returned points into the local memory of this buffer, in
-	//			case the buffer gets relocated or destroyed the pointer becomes invalid.
+	// case the buffer gets relocated or destroyed the pointer becomes invalid.
 	//
-	// e.g.:	-------------
+	// e.g.:	-------
 	//
-	//			char *pszLine;
-	//			int nLineLen;
-	//			while ( pUtlInplaceBuffer->InplaceGetLinePtr( &pszLine, &nLineLen ) )
-	//			{
+	// char *pszLine;
+	// int nLineLen;
+	// while ( pUtlInplaceBuffer->InplaceGetLinePtr( &pszLine, &nLineLen ) )
 	//				...
-	//			}
 	//
 	//			-------------
 	//
-	// @param	ppszInBufferPtr		on return points into this buffer at start of line
-	// @param	pnLineLength		on return holds num bytes accessible via (*ppszInBufferPtr)
+	// @param	ppszInBufferPtr on return points into this buffer at start of line
+	// @param	pnLineLength on return holds num bytes accessible via (*ppszInBufferPtr)
 	//
-	// @returns	true				if line was successfully read
-	//			false				when EOF is reached or error occurs
+	// @returns	true if line was successfully read
+	// false when EOF is reached or error occurs
 	//
 	bool InplaceGetLinePtr( /* out */ char** ppszInBufferPtr, /* out */ ssize_t* pnLineLength);
 
@@ -607,19 +605,17 @@ public:
 	// If end of file is reached or upon error returns NULL.
 	//
 	// Note:	the pointer returned points into the local memory of this buffer, in
-	//			case the buffer gets relocated or destroyed the pointer becomes invalid.
+	// case the buffer gets relocated or destroyed the pointer becomes invalid.
 	//
-	// e.g.:	-------------
+	// e.g.:	-------
 	//
-	//			while ( char *pszLine = pUtlInplaceBuffer->InplaceGetLinePtr() )
-	//			{
+	// while ( char *pszLine = pUtlInplaceBuffer->InplaceGetLinePtr )
 	//				...
-	//			}
 	//
 	//			-------------
 	//
-	// @returns	ptr-to-zero-terminated-line		if line was successfully read and buffer modified
-	//			NULL							when EOF is reached or error occurs
+	// @returns	ptr-to-zero-terminated-line if line was successfully read and buffer modified
+	// NULL when EOF is reached or error occurs
 	//
 	char* InplaceGetLinePtr(void);
 };
@@ -881,7 +877,7 @@ inline void CUtlBuffer::GetType(T& dest)
 
 inline char CUtlBuffer::GetChar()
 {
-	// LEGACY WARNING: this behaves differently than GetUnsignedChar()
+	// LEGACY WARNING: this behaves differently than GetUnsignedChar
 	char c;
 	GetTypeBin(c); // always reads as binary
 	return c;
@@ -889,7 +885,7 @@ inline char CUtlBuffer::GetChar()
 
 inline unsigned char CUtlBuffer::GetUnsignedChar()
 {
-	// LEGACY WARNING: this behaves differently than GetChar()
+	// LEGACY WARNING: this behaves differently than GetChar
 	unsigned char c;
 	if (!IsText())
 	{

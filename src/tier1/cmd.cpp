@@ -36,14 +36,12 @@ CCommand::CCommand()
 
 //-----------------------------------------------------------------------------
 // Purpose: constructor
-// Input  : nArgC - 
-//			**ppArgV - 
-//			source - 
+// Input: nArgC - 
+// **ppArgV - 
+// source - 
 //-----------------------------------------------------------------------------
 CCommand::CCommand(int nArgC, const char** ppArgV, cmd_source_t source)
 {
-	Assert(nArgC > 0);
-
 	if (!s_bBuiltBreakSet)
 	{
 		s_bBuiltBreakSet = true;
@@ -51,40 +49,58 @@ CCommand::CCommand(int nArgC, const char** ppArgV, cmd_source_t source)
 	}
 
 	Reset();
+	m_nQueuedVal = source;
+
+	if (nArgC <= 0 || !ppArgV)
+		return;
+
+	if (nArgC > COMMAND_MAX_ARGC)
+	{
+		Warning(eDLL_T::COMMON, "%s: Encountered command which overflows the argument buffer... Clamped!\n", __FUNCTION__);
+		nArgC = COMMAND_MAX_ARGC;
+	}
 
 	char* pBuf = m_pArgvBuffer;
 	char* pSBuf = m_pArgSBuffer;
-	m_nArgc = nArgC;
+	const char* const pBufEnd = m_pArgvBuffer + COMMAND_MAX_LENGTH;
+	const char* const pSBufEnd = m_pArgSBuffer + COMMAND_MAX_LENGTH;
+
 	for (int i = 0; i < nArgC; ++i)
 	{
-		m_ppArgv[i] = pBuf;
-		ssize_t nLen = strlen(ppArgV[i]);
-		memcpy(pBuf, ppArgV[i], nLen + 1);
-		if (i == 0)
+		const char* const pszArg = ppArgV[i] ? ppArgV[i] : "";
+		const size_t nLen = strlen(pszArg);
+		const bool bContainsSpace = strchr(pszArg, ' ') != NULL;
+		const size_t nQuote = bContainsSpace ? 2 : 0;
+		const size_t nSpace = (i != nArgC - 1) ? 1 : 0;
+		const size_t nArgvNeed = nLen + 1;
+		const size_t nArgSNeed = nLen + nQuote + nSpace + 1;
+
+		if (nArgvNeed > (size_t)(pBufEnd - pBuf) ||
+			nArgSNeed > (size_t)(pSBufEnd - pSBuf))
 		{
-			m_nArgv0Size = nLen;
+			Warning(eDLL_T::COMMON, "%s: Encountered command which overflows the tokenizer buffer... Skipped!\n", __FUNCTION__);
+			Reset();
+			return;
 		}
+
+		m_ppArgv[i] = pBuf;
+		memcpy(pBuf, pszArg, nLen + 1);
+		if (i == 0)
+			m_nArgv0Size = static_cast<ssize_t>(nLen);
 		pBuf += nLen + 1;
 
-		bool bContainsSpace = strchr(ppArgV[i], ' ') != NULL;
 		if (bContainsSpace)
-		{
 			*pSBuf++ = '\"';
-		}
-		memcpy(pSBuf, ppArgV[i], nLen);
+		memcpy(pSBuf, pszArg, nLen);
 		pSBuf += nLen;
 		if (bContainsSpace)
-		{
 			*pSBuf++ = '\"';
-		}
-
 		if (i != nArgC - 1)
-		{
 			*pSBuf++ = ' ';
-		}
 	}
 
-	m_nQueuedVal = source;
+	*pSBuf = '\0';
+	m_nArgc = nArgC;
 }
 
 characterset_t* CCommand::DefaultBreakSet()
@@ -94,10 +110,10 @@ characterset_t* CCommand::DefaultBreakSet()
 
 //-----------------------------------------------------------------------------
 // Purpose: tokenizer
-// Input  : *pCommand - 
-//			source - 
-//			*pBreakSet - 
-// Output : true on success, false on failure
+// Input: *pCommand - 
+// source - 
+// *pBreakSet - 
+// Output: true on success, false on failure
 //-----------------------------------------------------------------------------
 bool CCommand::Tokenize(const char* pCommand, cmd_source_t source, characterset_t* pBreakSet)
 {
@@ -133,6 +149,12 @@ bool CCommand::Tokenize(const char* pCommand, cmd_source_t source, characterset_
 	{
 		char* pArgvBuf = &m_pArgvBuffer[nArgvBufferSize];
 		ssize_t nMaxLen = COMMAND_MAX_LENGTH - nArgvBufferSize;
+		// Breakset tokens write byte+NUL; nMaxLen==0 also OOB-writes pTokenBuf[0].
+		if (nMaxLen < 2)
+		{
+			Reset();
+			return false;
+		}
 		ssize_t nStartGet = bufParse.TellGet();
 		ssize_t nSize = bufParse.ParseToken(pBreakSet, pArgvBuf, nMaxLen);
 
@@ -187,7 +209,7 @@ bool CCommand::Tokenize(const char* pCommand, cmd_source_t source, characterset_
 
 //-----------------------------------------------------------------------------
 // Purpose: return boolean depending on if the string only has digits in it
-// Input  : svString - 
+// Input: svString - 
 //-----------------------------------------------------------------------------
 bool CCommand::HasOnlyDigits(int nIndex) const
 {

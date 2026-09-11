@@ -1,6 +1,6 @@
 //====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -16,7 +16,7 @@
 
 
 //-----------------------------------------------------------------------------
-// The CUtlStack class:
+// The CUtlStack class
 // A growable stack class which doubles in size by default.
 // It will always keep all elements consecutive in memory, and may move the
 // elements around in memory (via a realloc) when elements are pushed or

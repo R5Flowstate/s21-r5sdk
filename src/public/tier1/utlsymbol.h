@@ -88,16 +88,16 @@ protected:
 
 
 //-----------------------------------------------------------------------------
-// CUtlSymbolTable:
-// description:
-//    This class defines a symbol table, which allows us to perform mappings
-//    of strings to symbols and back. The symbol class itself contains
-//    a static version of this class for creating global strings, but this
-//    class can also be instanced to create local symbol tables.
+// CUtlSymbolTable
+// description
+// This class defines a symbol table, which allows us to perform mappings
+// of strings to symbols and back. The symbol class itself contains
+// a static version of this class for creating global strings, but this
+// class can also be instanced to create local symbol tables.
 // 
-//    This class stores the strings in a series of string pools. The first
-//    two bytes of each string are decorated with a hash to speed up
-//	  comparisons.
+// This class stores the strings in a series of string pools. The first
+// two bytes of each string are decorated with a hash to speed up
+// comparisons.
 //-----------------------------------------------------------------------------
 
 class CUtlSymbolTable
@@ -253,16 +253,16 @@ private:
 
 
 //-----------------------------------------------------------------------------
-// CUtlFilenameSymbolTable:
-// description:
-//    This class defines a symbol table of individual filenames, stored more
-//	  efficiently than a standard symbol table.  Internally filenames are broken
-//	  up into file and path entries, and a file handle class allows convenient 
-//	  access to these.
+// CUtlFilenameSymbolTable
+// description
+// This class defines a symbol table of individual filenames, stored more
+// efficiently than a standard symbol table. Internally filenames are broken
+// up into file and path entries, and a file handle class allows convenient 
+// access to these.
 //-----------------------------------------------------------------------------
 
 // The handle is a CUtlSymbol for the dirname and the same for the filename, the accessor
-//  copies them into a static char buffer for return.
+// copies them into a static char buffer for return.
 typedef void* FileNameHandle_t;
 
 // Symbol table for more efficiently storing filenames by breaking paths and filenames apart.
@@ -285,7 +285,7 @@ class CUtlFilenameSymbolTable
 #endif
 		}
 
-		// We pack the path and file values into a single 32 bit value.  We were running
+		// We pack the path and file values into a single 32 bit value. We were running
 		// out of space with the two 16 bit values (more than 64k files) so instead of increasing
 		// the total size we split the underlying pool into two (paths and files) and 
 		// use a smaller path string pool and a larger file string pool.
@@ -331,12 +331,12 @@ private:
 };
 
 // This creates a simple class that includes the underlying CUtlSymbol
-//  as a private member and then instances a private symbol table to
-//  manage those symbols.  Avoids the possibility of the code polluting the
-//  'global'/default symbol table, while letting the code look like 
-//  it's just using = and .String() to look at CUtlSymbol type objects
+// as a private member and then instances a private symbol table to
+// manage those symbols. Avoids the possibility of the code polluting the
+// 'global'/default symbol table, while letting the code look like 
+// it's just using = and.String to look at CUtlSymbol type objects
 //
-// NOTE:  You can't pass these objects between .dlls in an interface (also true of CUtlSymbol of course)
+// NOTE: You can't pass these objects between.dlls in an interface (also true of CUtlSymbol of course)
 //
 #define DECLARE_PRIVATE_SYMBOLTYPE( typename )			\
 	class typename										\
@@ -351,7 +351,7 @@ private:
 		CUtlSymbol m_SymbolId;							\
 	};	
 
-// Put this in the .cpp file that uses the above typename
+// Put this in the.cpp file that uses the above typename
 #define IMPLEMENT_PRIVATE_SYMBOLTYPE( typename )					\
 	static CUtlSymbolTable g_##typename##SymbolTable;				\
 	typename::typename()											\

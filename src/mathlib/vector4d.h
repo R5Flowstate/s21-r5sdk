@@ -1,6 +1,6 @@
 //========= Copyright 1996-2005, Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -719,9 +719,9 @@ inline void Vector4DWeightMAD(vec_t w, Vector4DAligned const& vInA, Vector4DAlig
 #if ( __GNUC__ == 4 ) && ( __GNUC_MINOR__ == 1 ) && ( __GNUC_PATCHLEVEL__ == 1 )
 	// GCC 4.1.1
 	__m128 temp = vec_splats(w);
-#else //__GNUC__ == 4 && __GNUC_MINOR__ == 1 && __GNUC_PATCHLEVEL__ == 1
+#else
 	__m128 temp = __m128(w);
-#endif //__GNUC__ == 4 && __GNUC_MINOR__ == 1 && __GNUC_PATCHLEVEL__ == 1
+#endif
 
 	vOutA.AsM128() = vec_madd(vInA.AsM128(), temp, vOutA.AsM128());
 	vOutB.AsM128() = vec_madd(vInB.AsM128(), temp, vOutB.AsM128());
@@ -751,9 +751,9 @@ inline void Vector4DWeightMADSSE(vec_t w, Vector4DAligned const& vInA, Vector4DA
 #if ( __GNUC__ == 4 ) && ( __GNUC_MINOR__ == 1 ) && ( __GNUC_PATCHLEVEL__ == 1 )
 	// GCC 4.1.1
 	__m128 temp = vec_splats(w);
-#else //__GNUC__ == 4 && __GNUC_MINOR__ == 1 && __GNUC_PATCHLEVEL__ == 1
+#else
 	__m128 temp = __m128(w);
-#endif //__GNUC__ == 4 && __GNUC_MINOR__ == 1 && __GNUC_PATCHLEVEL__ == 1
+#endif
 
 	vOutA.AsM128() = vec_madd(vInA.AsM128(), temp, vOutA.AsM128());
 	vOutB.AsM128() = vec_madd(vInB.AsM128(), temp, vOutB.AsM128());

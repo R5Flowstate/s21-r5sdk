@@ -1,4 +1,4 @@
-﻿//======= Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//======= Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: Linked list container class 
 //
@@ -27,14 +27,14 @@
 	for( decltype(listName)::IndexLocalType_t iteratorName=listName.Head(); iteratorName != listName.InvalidIndex(); iteratorName = listName.Next( iteratorName ) )
 
 //-----------------------------------------------------------------------------
-// class CUtlLinkedList:
-// description:
-//		A lovely index-based linked list! T is the class type, I is the index
-//		type, which usually should be an unsigned short or smaller. However,
-//		you must avoid using 16- or 8-bit arithmetic on PowerPC architectures; 
-//		therefore you should not use UtlLinkedListElem_t::I as the type of 
-//		a local variable... ever. PowerPC integer arithmetic must be 32- or 
-//		64-bit only; otherwise performance plummets.
+// class CUtlLinkedList
+// description
+// A lovely index-based linked list! T is the class type, I is the index
+// type, which usually should be an unsigned short or smaller. However,
+// you must avoid using 16- or 8-bit arithmetic on PowerPC architectures; 
+// therefore you should not use UtlLinkedListElem_t::I as the type of 
+// a local variable... ever. PowerPC integer arithmetic must be 32- or 
+// 64-bit only; otherwise performance plummets.
 //-----------------------------------------------------------------------------
 
 template <class T, class I>
@@ -98,7 +98,7 @@ public:
 	I	AddToHead(T const& src);
 	I	AddToTail(T const& src);
 
-	// Find an element and return its index or InvalidIndex() if it couldn't be found.
+	// Find an element and return its index or InvalidIndex if it couldn't be found.
 	I		Find(const T& src) const;
 
 	// Look for the element. If it exists, remove it and return true. Otherwise, return false.
@@ -114,7 +114,7 @@ public:
 	I		Alloc(bool multilist = false);
 	void	Free(I elem);
 
-	// Identify the owner of this linked list's memory:
+	// Identify the owner of this linked list's memory
 	void	SetAllocOwner(const char* pszAllocOwner);
 
 	// list modification
@@ -352,12 +352,12 @@ inline bool CUtlLinkedList<T, S, ML, I, M>::IndexInRange(I index) // Static meth
 	// case CUtlMemory will have 'InvalidIndex == (int)-1' (which casts to 65535 in S), and will
 	// happily return elements at index 65535 and above.
 
-	// Do some static checks here:
-	//  'I' needs to be able to store 'S'
+	// Do some static checks here
+	// 'I' needs to be able to store 'S'
 	COMPILE_TIME_ASSERT(sizeof(I) >= sizeof(S));
-	//  'S' should be unsigned (to avoid signed arithmetic errors for plausibly exhaustible ranges)
+	// 'S' should be unsigned (to avoid signed arithmetic errors for plausibly exhaustible ranges)
 	COMPILE_TIME_ASSERT((sizeof(S) > 2) || (((S)-1) > 0));
-	//  M::INVALID_INDEX should be storable in S to avoid ambiguities (e.g. with 65536)
+	// M::INVALID_INDEX should be storable in S to avoid ambiguities (e.g. with 65536)
 	COMPILE_TIME_ASSERT((M::INVALID_INDEX == -1) || (M::INVALID_INDEX == (S)M::INVALID_INDEX));
 
 	return (((S)index == index) && ((S)index != InvalidIndex()));
@@ -433,7 +433,7 @@ void  CUtlLinkedList<T, S, ML, I, M>::Purge()
 	m_FirstFree = InvalidIndex();
 	m_NumAlloced = 0;
 
-	//Routing "m_LastAlloc = m_Memory.InvalidIterator();" through a local const to sidestep an internal compiler error on 360 builds
+	//Routing "m_LastAlloc = m_Memory.InvalidIterator;" through a local const to sidestep an internal compiler error on 360 builds
 	const typename M::Iterator_t scInvalidIterator = m_Memory.InvalidIterator();
 	m_LastAlloc = scInvalidIterator;
 	ResetDbgInfo();
@@ -758,7 +758,7 @@ void  CUtlLinkedList<T, S, ML, I, M>::LinkBefore(I before, I elem)
 	// The element *after* our newly linked one is the one we linked before.
 	pNewElem->m_Next = before;
 
-	S newElem_mPrevious; // we need to hang on to this for the comparison against InvalidIndex()
+	S newElem_mPrevious; // we need to hang on to this for the comparison against InvalidIndex
 					// below; otherwise we get a a load-hit-store on pNewElem->m_Previous, even
 					// with
 	if (before == InvalidIndex())

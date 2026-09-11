@@ -10,11 +10,9 @@
 #ifndef CLIENT_DLL
 #include "engine/server/sv_rcon.h"
 #endif // CLIENT_DLL
-#ifndef DEDICATED
 #include "engine/client/cdll_engine_int.h"
 #include "vgui/vgui_debugpanel.h"
 #include "gameui/IConsole.h"
-#endif // !DEDICATED
 #include "squirrel.h"
 #include "sqvm.h"
 #include "sqstate.h"
@@ -22,16 +20,18 @@
 
 //---------------------------------------------------------------------------------
 // Purpose: prints the compile error and context to the console
-// Input  : *sqvm - 
-//			*pszError - 
-//			*pszFile - 
-//			nLine - 
-//			nColumn - 
+// Input: *sqvm - 
+// *pszError - 
+// *pszFile - 
+// nLine - 
+// nColumn - 
 //---------------------------------------------------------------------------------
 void SQVM_CompileError(HSQUIRRELVM v, const SQChar* pszError, const SQChar* pszFile, SQUnsignedInteger nLine, SQInteger nColumn)
 {
 	static char szContextBuf[256]{};
-	v_SQVM_GetErrorLine(pszFile, nLine, szContextBuf, sizeof(szContextBuf) - 1);
+	szContextBuf[0] = '\0';
+	if (v_SQVM_GetErrorLine)
+		v_SQVM_GetErrorLine(pszFile, nLine, szContextBuf, sizeof(szContextBuf) - 1);
 
 	const eDLL_T context = v->GetNativeContext();
 	Error(context, NO_ERROR, "%s SCRIPT COMPILE ERROR: %s\n", v->GetContextName(), pszError);
@@ -41,7 +41,7 @@ void SQVM_CompileError(HSQUIRRELVM v, const SQChar* pszError, const SQChar* pszF
 
 //---------------------------------------------------------------------------------
 // Purpose: prints the logic error and context to the console
-// Input  : bPrompt - 
+// Input: bPrompt - 
 //---------------------------------------------------------------------------------
 void SQVM_LogicError(SQBool bPrompt)
 {

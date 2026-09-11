@@ -10,15 +10,4 @@ bool ScreenTransform(const CViewSetup& view, const VMatrix& w2sMatrix, const Vec
 bool ScreenPosition(const CViewSetup& view, const float posX, const float posY, Vector2D* const pScreen);
 bool ScreenPosition(const CViewSetup& view, const Vector2D& pos, Vector2D* const pScreen);
 
-///////////////////////////////////////////////////////////////////////////////
-class VGL_RMain : public IDetour
-{
-	virtual void GetAdr(void) const { }
-	virtual void GetFun(void) const { }
-	virtual void GetVar(void) const { }
-	virtual void GetCon(void) const { }
-	virtual void Detour(const bool bAttach) const { }
-};
-///////////////////////////////////////////////////////////////////////////////
-
 #endif

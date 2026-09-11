@@ -75,7 +75,11 @@ FORCEINLINE int32 ThreadInterlockedDecrement(int32 volatile* p) { Assert((size_t
 FORCEINLINE int64 ThreadInterlockedIncrement64(int64 volatile* p) { Assert((size_t)p % 8 == 0); return _InterlockedIncrement64((volatile int64*)p); }
 FORCEINLINE int64 ThreadInterlockedDecrement64(int64 volatile* p) { Assert((size_t)p % 8 == 0); return _InterlockedDecrement64((volatile int64*)p); }
 
+FORCEINLINE int32 ThreadInterlockedExchange(int32 volatile* p, int32 value) { Assert((size_t)p % 4 == 0); return _InterlockedExchange((volatile long*)p, value); }
+FORCEINLINE int64 ThreadInterlockedExchange64(int64 volatile* p, int64 value) { Assert((size_t)p % 8 == 0); return _InterlockedExchange64((volatile int64*)p, value); }
+
 FORCEINLINE int32 ThreadInterlockedExchangeAdd(int32 volatile* p, int32 value) { Assert((size_t)p % 4 == 0); return _InterlockedExchangeAdd((volatile long*)p, value); }
+FORCEINLINE int64 ThreadInterlockedExchangeAdd64(int64 volatile* p, int64 value) { Assert((size_t)p % 8 == 0); return _InterlockedExchangeAdd64((volatile int64*)p, value); }
 
 FORCEINLINE int32 ThreadInterlockedCompareExchange(LONG volatile* pDest, int32 value, int32 comperand)
 {
@@ -293,8 +297,8 @@ public:
 	void Unlock();
 	void Unlock() const { (const_cast<CThreadMutex*>(this))->Unlock(); }
 
-	void LockSilent(); // A Lock() operation which never spews.  Required by the logging system to prevent badness.
-	void UnlockSilent(); // An Unlock() operation which never spews.  Required by the logging system to prevent badness.
+	void LockSilent(); // A Lock operation which never spews. Required by the logging system to prevent badness.
+	void UnlockSilent(); // An Unlock operation which never spews. Required by the logging system to prevent badness.
 
 	//------------------------------------------------------
 	// Use this to make deadlocks easier to track by asserting
@@ -380,7 +384,7 @@ inline void CThreadMutex::Lock()
 #ifdef THREAD_MUTEX_TRACING_ENABLED
 	if (m_lockCount == 0)
 	{
-		// we now own it for the first time.  Set owner information
+		// we now own it for the first time. Set owner information
 		m_currentOwnerID = thisThreadID;
 		if (m_bTrace)
 			Msg(eDLL_T::COMMON, _T("Thread %u now owns lock 0x%p\n"), m_currentOwnerID, &m_CriticalSection);
@@ -865,11 +869,13 @@ class VThreadTools : public IDetour
 	virtual void GetFun(void) const { }
 	virtual void GetVar(void) const
 	{
+#ifndef CLIENT_DLL
 		Module_FindPattern(g_GameDll, "66 89 54 24 ?? 53 55 56 57 41 54 48 81 EC ?? ?? ?? ??")
 			.FindPatternSelf("39 05").ResolveRelativeAddressSelf(2, 6).GetPtr(g_CurrentServerFrameJobID);
 
 		Module_FindPattern(g_GameDll, "48 83 EC 28 FF 15 ?? ?? ?? ?? 8B 0D ?? ?? ?? ??")
 			.FindPatternSelf("8B 0D").ResolveRelativeAddressSelf(2, 6).GetPtr(g_AllocatedServerFrameJobID);
+#endif // !CLIENT_DLL
 	}
 	virtual void GetCon(void) const { }
 	virtual void Detour(const bool /*bAttach*/) const { }

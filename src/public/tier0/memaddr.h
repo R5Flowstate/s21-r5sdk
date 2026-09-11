@@ -1,5 +1,9 @@
 #pragma once
 
+// Boot ledger can report how many chain steps hit an invalid base.
+int CMemory_GetInvalidChainCount(void);
+void CMemory_ReportInvalidChain(void);
+
 class CMemory
 {
 public:
@@ -43,6 +47,12 @@ public:
 		return ptr == addr;
 	}
 
+	// Non-null and above the Windows lowest-user-page boundary (failed match / bad step).
+	inline bool IsValid(void) const
+	{
+		return ptr >= 0x10000;
+	}
+
 	inline uintptr_t GetPtr(void) const
 	{
 		return ptr;
@@ -51,16 +61,26 @@ public:
 	template<typename T>
 	inline void GetPtr(T*& outPtr) const
 	{
-		outPtr = reinterpret_cast<T*>(ptr);
+		outPtr = IsValid() ? reinterpret_cast<T*>(ptr) : nullptr;
 	}
 
 	template<class T> inline T GetValue(void) const
 	{
+		if (!IsValid())
+		{
+			CMemory_ReportInvalidChain();
+			return T{};
+		}
 		return *reinterpret_cast<T*>(ptr);
 	}
 
 	template<class T> inline T GetVirtualFunctionIndex(void) const
 	{
+		if (!IsValid())
+		{
+			CMemory_ReportInvalidChain();
+			return T{};
+		}
 		return *reinterpret_cast<T*>(ptr) / 8; // Its divided by 8 in x64.
 	}
 
@@ -76,11 +96,18 @@ public:
 
 	inline CMemory Offset(ptrdiff_t offset) const
 	{
+		if (!IsValid())
+			return CMemory();
 		return CMemory(ptr + offset);
 	}
 
 	inline CMemory OffsetSelf(ptrdiff_t offset)
 	{
+		if (!IsValid())
+		{
+			ptr = 0;
+			return *this;
+		}
 		ptr += offset;
 		return *this;
 	}
@@ -91,8 +118,12 @@ public:
 
 		while (deref--)
 		{
-			if (reference)
-				reference = *reinterpret_cast<uintptr_t*>(reference);
+			if (reference < 0x10000)
+			{
+				CMemory_ReportInvalidChain();
+				return CMemory();
+			}
+			reference = *reinterpret_cast<uintptr_t*>(reference);
 		}
 
 		return CMemory(reference);
@@ -102,8 +133,13 @@ public:
 	{
 		while (deref--)
 		{
-			if (ptr)
-				ptr = *reinterpret_cast<uintptr_t*>(ptr);
+			if (!IsValid())
+			{
+				CMemory_ReportInvalidChain();
+				ptr = 0;
+				return *this;
+			}
+			ptr = *reinterpret_cast<uintptr_t*>(ptr);
 		}
 
 		return *this;
@@ -111,12 +147,19 @@ public:
 
 	inline CMemory WalkVTable(ptrdiff_t vfuncIndex)
 	{
+		if (!IsValid())
+			return CMemory();
 		uintptr_t reference = ptr + (8 * vfuncIndex);
 		return CMemory(reference);
 	}
 
 	inline CMemory WalkVTableSelf(ptrdiff_t vfuncIndex)
 	{
+		if (!IsValid())
+		{
+			ptr = 0;
+			return *this;
+		}
 		ptr += (8 * vfuncIndex);
 		return *this;
 	}
@@ -129,6 +172,7 @@ public:
 	CMemory FindPatternSelf(const char* szPattern, const Direction searchDirect = Direction::DOWN, const int opCodesToScan = 512, const ptrdiff_t occurrence = 1);
 	vector<CMemory> FindAllCallReferences(const uintptr_t sectionBase, const size_t sectionSize);
 
+	// E8/E9 5-byte rel32; target must land in g_GameDll or the result is null.
 	CMemory FollowNearCall(const ptrdiff_t opcodeOffset = 0x1, const ptrdiff_t nextInstructionOffset = 0x5) const;
 	CMemory FollowNearCallSelf(const ptrdiff_t opcodeOffset = 0x1, const ptrdiff_t nextInstructionOffset = 0x5);
 	CMemory ResolveRelativeAddress(const ptrdiff_t registerOffset = 0x0, const ptrdiff_t nextInstructionOffset = 0x4) const;

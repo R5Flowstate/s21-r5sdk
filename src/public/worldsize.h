@@ -1,11 +1,11 @@
 //====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
 //=============================================================================//
-// worldsize.h  -- extent of world and resolution/size of coordinate messages used in engine
+// worldsize.h -- extent of world and resolution/size of coordinate messages used in engine
 
 #ifndef WORLDSIZE_H
 #define WORLDSIZE_H

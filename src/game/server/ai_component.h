@@ -1,4 +1,4 @@
-﻿//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
 // Purpose: Base AI component
 //
@@ -17,7 +17,7 @@ class CAI_BaseNPC;
 // CAI_Component
 //
 // Purpose: Shared functionality of all classes that assume some of the 
-//			responsibilities of an owner AI. 
+// responsibilities of an owner AI. 
 //-----------------------------------------------------------------------------
 
 class CAI_Component

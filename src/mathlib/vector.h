@@ -1,6 +1,6 @@
 //====== Copyright 1996-2005, Valve Corporation, All rights reserved. =======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -85,7 +85,7 @@ public:
 	// Members
 	vec_t x, y, z;
 
-	// Construction/destruction:
+	// Construction/destruction
 	Vector3D(void);
 	Vector3D(vec_t X, vec_t Y, vec_t Z);
 
@@ -130,7 +130,7 @@ public:
 	FORCEINLINE Vector3D& operator/=(const Vector3D& v);
 	FORCEINLINE Vector3D& operator/=(float s);
 	FORCEINLINE Vector3D& operator+=(float fl); ///< broadcast add
-	FORCEINLINE Vector3D& operator-=(float fl); ///< broadcast sub			
+	FORCEINLINE Vector3D& operator-=(float fl); ///< broadcast sub 
 
 // negate the vector components
 	void	Negate();
@@ -184,7 +184,7 @@ public:
 	vec_t	DistTo(const Vector3D& vOther) const;
 
 	// Get the distance from this vector to the other one squared.
-	// NJS: note, VC wasn't inlining it correctly in several deeply nested inlines due to being an 'out of line' inline.  
+	// NJS: note, VC wasn't inlining it correctly in several deeply nested inlines due to being an 'out of line' inline. 
 	// may be able to tidy this up after switching to VC7
 	FORCEINLINE vec_t DistToSqr(const Vector3D& vOther) const
 	{
@@ -383,7 +383,7 @@ private:
 class VectorByValue : public Vector3D
 {
 public:
-	// Construction/destruction:
+	// Construction/destruction
 	VectorByValue(void) : Vector3D() {}
 	VectorByValue(vec_t X, vec_t Y, vec_t Z) : Vector3D(X, Y, Z) {}
 	VectorByValue(const VectorByValue& vOther) { *this = vOther; }
@@ -594,7 +594,6 @@ FORCEINLINE bool PointWithinViewAngle(Vector3D const& vecSrcPosition,
 		if (cosDiff > 0)
 			return true;
 
-		// a/sqrt(b) > c  == a^2 < b * c ^2
 		// IFF left and right sides are <= 0
 		float flLen2 = vecDelta.LengthSqr();
 		return (cosDiff * cosDiff <= flLen2 * flCosHalfFOV * flCosHalfFOV);
@@ -605,7 +604,6 @@ FORCEINLINE bool PointWithinViewAngle(Vector3D const& vecSrcPosition,
 		if (cosDiff < 0)
 			return false;
 
-		// a/sqrt(b) > c  == a^2 > b * c ^2
 		// IFF left and right sides are >= 0
 		float flLen2 = vecDelta.LengthSqr();
 		return (cosDiff * cosDiff >= flLen2 * flCosHalfFOV * flCosHalfFOV);
@@ -659,24 +657,11 @@ inline Vector3D::Vector3D(vec_t X, vec_t Y, vec_t Z)
 	CHECK_VALID(*this);
 }
 
-//inline Vector::Vector(const float *pFloat)					
-//{
+//inline Vector::Vector(const float *pFloat) 
 //	Assert( pFloat );
 //	x = pFloat[0]; y = pFloat[1]; z = pFloat[2];	
 //	CHECK_VALID(*this);
-//} 
 
-#if 0
-//-----------------------------------------------------------------------------
-// copy constructor
-//-----------------------------------------------------------------------------
-
-inline Vector::Vector(const Vector& vOther)
-{
-	CHECK_VALID(vOther);
-	x = vOther.x; y = vOther.y; z = vOther.z;
-}
-#endif
 
 //-----------------------------------------------------------------------------
 // initialization
@@ -1493,15 +1478,15 @@ inline vec_t Vector3D::Length(void) const
 // FIXME: Can't use until we're un-macroed in mathlib.h
 inline vec_t VectorNormalize( Vector& v )
 {
-	Assert( v.IsValid() );
-	vec_t l = v.Length();
+	Assert( v.IsValid );
+	vec_t l = v.Length;
 	if (l != 0.0f)
 	{
 		v /= l;
 	}
 	else
 	{
-		// FIXME:
+		// FIXME
 		// Just copying the existing implementation; shouldn't res.z == 0?
 		v.x = v.y = 0.0f; v.z = 1.0f;
 	}
@@ -1853,7 +1838,7 @@ class DegreeEuler;
 class QAngle;
 
 class Quaternion				// same data-layout as engine's vec4_t,
-{								//		which is a vec_t[4]
+{								// which is a vec_t[4]
 public:
 	inline Quaternion(void) {
 
@@ -1910,8 +1895,8 @@ public:
 
 // Random Quaternion that is UNIFORMLY distributed over the S^3
 // should be good for random generation of orientation for unit tests and for game
-// NOTE: Nothing trivial like Quaternion(RandomAngle(0,180)) will do the trick , 
-//       one needs to take special care to generate a uniformly distributed quaternion.
+// NOTE: Nothing trivial like Quaternion(RandomAngle(0,180)) will do the trick, 
+// one needs to take special care to generate a uniformly distributed quaternion.
 const Quaternion RandomQuaternion();
 const Quaternion RandomQuaternion();
 inline const Quaternion Conjugate(const Quaternion& q)
@@ -2128,7 +2113,7 @@ public:
 // Src data hasn't changed, but work data is of a form more friendly for SPU
 //-----------------------------------------------------------------------------
 #if defined( _PS3 )
-//typedef Vector		BoneVector;
+//typedef Vector BoneVector;
 typedef VectorAligned		BoneVector;
 typedef QuaternionAligned	BoneQuaternion;
 typedef QuaternionAligned	BoneQuaternionAligned;
@@ -2421,7 +2406,7 @@ public:
 	vec_t	LengthSqr() const;
 
 	// negate the QAngle components
-	//void	Negate(); 
+	//void	Negate; 
 
 	// No assignment operators either...
 	QAngle& operator=(const QAngle& src);
@@ -2461,7 +2446,7 @@ inline void EnsureValidValue(QAngle& x) { x.Init(); }
 class QAngleByValue : public QAngle
 {
 public:
-	// Construction/destruction:
+	// Construction/destruction
 	QAngleByValue(void) : QAngle() {}
 	QAngleByValue(vec_t X, vec_t Y, vec_t Z) : QAngle(X, Y, Z) {}
 	QAngleByValue(const QAngleByValue& vOther) { *this = vOther; }
@@ -2807,7 +2792,7 @@ inline QAngle operator*(float fl, const QAngle& v)
 
 
 //-----------------------------------------------------------------------------
-// NOTE: These are not completely correct.  The representations are not equivalent
+// NOTE: These are not completely correct. The representations are not equivalent
 // unless the QAngle represents a rotational impulse along a coordinate axis (x,y,z)
 inline void QAngleToAngularImpulse(const QAngle& angles, AngularImpulse& impulse)
 {
@@ -2896,7 +2881,7 @@ FORCEINLINE float VectorNormalize(float* v)
 #if !defined( _PS3 )
 // modified version of Microsoft's XMVector3Length
 // microsoft's version will return INF for very small vectors
-// e.g. 	Vector vTest(7.98555446e-20,-6.85012984e-21,0); VectorNormalize( vTest );
+// e.g. Vector vTest(7.98555446e-20,-6.85012984e-21,0); VectorNormalize( vTest );
 // so we clamp to epsilon instead of checking for zero
 XMFINLINE XMVECTOR XMVector3Length_Fixed
 (
@@ -3086,8 +3071,8 @@ inline const Quaternion Exp(const Vector3D& v)
 	float theta = v.Length();
 	if (theta < 0.001f)
 	{
-		// limit case, cos(theta)       ~= 1 - theta^2/2 + theta^4/24
-		//             sin(theta)/theta ~= 1 - theta^2/6 + theta^4/120
+		// limit case, cos(theta) ~= 1 - theta^2/2 + theta^4/24
+		// sin(theta)/theta ~= 1 - theta^2/6 + theta^4/120
 		float theta2_2 = theta * theta * 0.5f, theta4_24 = theta2_2 * theta2_2 * (1.0f / 6.0f);
 		float k = 1.0f - theta2_2 * (1.0f / 3.0f) + theta4_24 * 0.05f;
 		return Quaternion(k * v.x, k * v.y, k * v.z, 1 - theta2_2 + theta4_24);

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2007, Valve Corporation, All rights reserved. ============//
+//========= Copyright ï¿½ 1996-2007, Valve Corporation, All rights reserved. ============//
 //
 //	LZSS Codec. Designed for fast cheap gametime encoding/decoding. Compression results
 //	are	not aggresive as other alogrithms, but gets 2:1 on most arbitrary uncompressed data.
@@ -33,7 +33,7 @@ public:
 	unsigned char*	CompressNoAlloc( unsigned char *pInput, int inputlen, unsigned char *pOutput, unsigned int *pOutputSize );
 	unsigned int	Uncompress( unsigned char *pInput, unsigned char *pOutput );
 	//unsigned int	Uncompress( unsigned char *pInput, CUtlBuffer &buf );
-	unsigned int	SafeUncompress( unsigned char *pInput, unsigned char *pOutput, unsigned int unBufSize );
+	unsigned int	SafeUncompress( unsigned char *pInput, unsigned char *pOutput, unsigned int unBufSize, unsigned int unInputSize );
 	bool			IsCompressed( unsigned char *pInput );
 	unsigned int	GetActualSize( unsigned char *pInput );
 
@@ -68,5 +68,7 @@ FORCEINLINE CLZSS::CLZSS( int nWindowSize )
 	Assert( IsPowerOfTwo( nWindowSize ) );
 	m_nWindowSize = nWindowSize;
 }
+
+unsigned int LZSS_BoundInputBytes( const unsigned char *pInput, unsigned int unBufSize );
 #endif
 

@@ -1,6 +1,6 @@
 //===== Copyright (c) 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 //=============================================================================//
 
@@ -22,7 +22,7 @@
 MemoryPoolReportFunc_t CUtlMemoryPool::g_ReportFunc = 0;
 
 //-----------------------------------------------------------------------------
-// Error reporting...  (debug only)
+// Error reporting... (debug only)
 //-----------------------------------------------------------------------------
 
 void CUtlMemoryPool::SetErrorReportFunc(MemoryPoolReportFunc_t func)
@@ -63,8 +63,8 @@ CUtlMemoryPool::CUtlMemoryPool(int blockSize, int numElements, int growMode, con
 
 //-----------------------------------------------------------------------------
 // Purpose: Frees the memory contained in the mempool, and invalidates it for
-//			any further use.
-// Input  : *memPool - the mempool to shutdown
+// any further use.
+// Input: *memPool - the mempool to shutdown
 //-----------------------------------------------------------------------------
 CUtlMemoryPool::~CUtlMemoryPool()
 {
@@ -178,7 +178,7 @@ void CUtlMemoryPool::ReportLeaks()
 
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose
 //-----------------------------------------------------------------------------
 void CUtlMemoryPool::AddNewBlob()
 {
@@ -247,8 +247,8 @@ void* CUtlMemoryPool::AllocZero()
 
 
 //-----------------------------------------------------------------------------
-// Purpose: Allocs a single block of memory from the pool.  
-// Input  : amount - 
+// Purpose: Allocs a single block of memory from the pool. 
+// Input: amount - 
 //-----------------------------------------------------------------------------
 void* CUtlMemoryPool::Alloc(size_t amount)
 {
@@ -287,7 +287,7 @@ void* CUtlMemoryPool::Alloc(size_t amount)
 
 //-----------------------------------------------------------------------------
 // Purpose: Allocs a single block of memory from the pool, zeroes the memory before returning
-// Input  : amount - 
+// Input: amount - 
 //-----------------------------------------------------------------------------
 void* CUtlMemoryPool::AllocZero(size_t amount)
 {
@@ -301,7 +301,7 @@ void* CUtlMemoryPool::AllocZero(size_t amount)
 
 //-----------------------------------------------------------------------------
 // Purpose: Frees a block of memory
-// Input  : *memBlock - the memory to free
+// Input: *memBlock - the memory to free
 //-----------------------------------------------------------------------------
 void CUtlMemoryPool::Free(void* memBlock)
 {

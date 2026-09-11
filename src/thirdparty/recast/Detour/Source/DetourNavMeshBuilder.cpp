@@ -976,8 +976,10 @@ bool dtCreateNavMeshData(dtNavMeshCreateParams* params, unsigned char** outData,
 	const int cellsSize = rdAlign4(sizeof(dtCell)*(int)cellItems.size());
 #endif
 	
-	int polyMapCount = 0; // TODO: this data has to be reversed still from the NavMesh!
-	const int polyMapSize = polyMapCount * totPolyCount;
+	// Respawn ships this at 0 on every tile of every hull; the engine strides this
+	// section by sizeof(unsigned int)*polyCount*polyMapCount.
+	int polyMapCount = 0;
+	const int polyMapSize = rdAlign4((int)(sizeof(unsigned int)*polyMapCount*totPolyCount));
 
 	const int dataSize = headerSize + vertsSize + polysSize + polyMapSize + linksSize +
 		detailMeshesSize + detailVertsSize + detailTrisSize +

@@ -1,6 +1,6 @@
 //===== Copyright © 1996-2008, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //===========================================================================//
@@ -27,8 +27,8 @@ public:
 	virtual int				SetActiveSplitScreenPlayerSlot( int nSlot ) = 0;
 
 	virtual bool			IsValidSplitScreenSlot( int nSlot ) = 0;
-	virtual int				FirstValidSplitScreenSlot() = 0; // -1 == invalid
-	virtual int				NextValidSplitScreenSlot( int nPreviousSlot ) = 0; // -1 == invalid
+	virtual int				FirstValidSplitScreenSlot() = 0;
+	virtual int				NextValidSplitScreenSlot( int nPreviousSlot ) = 0;
 
 	virtual int				GetNumSplitScreenPlayers() = 0;
 	virtual int				GetSplitScreenPlayerEntity( int nSlot ) = 0;
@@ -45,13 +45,11 @@ class CSplitScreen : public ISplitScreen
 {
 	// Commented as 'CClientState' uses virtual functions,
 	// which are pure in the SDK since its implemented in
-	// shipped engine code, but this should be the struct:
-//public:
+	// shipped engine code, but this should be the struct
+//public
 //	struct SplitPlayer_t
-//	{
-//		bool m_bActive;
-//		CClientState m_Client;
-//	};
+// bool m_bActive;
+// CClientState m_Client;
 //
 //	SplitPlayer_t m_SplitScreenPlayers[MAX_SPLITSCREEN_CLIENTS];
 //	int m_nActiveSplitScreenUserCount;
@@ -124,19 +122,5 @@ inline CClientState* GetBaseLocalClient()
 	return g_pClientState;
 }
 
-class VSplitScreen : public IDetour
-{
-	virtual void GetAdr(void) const
-	{
-		LogVarAdr("g_SplitScreenMgr", g_pSplitScreenMgr);
-	}
-	virtual void GetFun(void) const { }
-	virtual void GetVar(void) const
-	{
-		g_pSplitScreenMgr = Module_FindPattern(g_GameDll, "40 53 48 83 EC 20 48 8D 1D ?? ?? ?? ?? 83 FA FF 75 12 48 8B 05 ?? ?? ?? ?? 48 8B CB FF 50 28 48 63 C8 EB 03 48 63 CA 48 69 C1 ?? ?? ?? ?? 66 C7 84 18 ?? ?? ?? ?? ?? ??").FindPatternSelf("48 8D").ResolveRelativeAddressSelf(0x3, 0x7).RCast<CSplitScreen*>();
-	}
-	virtual void GetCon(void) const { }
-	virtual void Detour(const bool bAttach) const { };
-};
 
 #endif // CL_SPLITSCREEN_H

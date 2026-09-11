@@ -1,4 +1,4 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: buffer serialization/deserialization.
 //
@@ -459,8 +459,8 @@ int64 CBitRead::ReadLongLong()
 // to indicate whether the loop should continue.
 // This allows variable size numbers to be stored with tolerable
 // efficiency. Numbers sizes that can be stored for various numbers of
-// encoded bits are:
-//  8-bits: 0-127
+// encoded bits are
+// 8-bits: 0-127
 // 16-bits: 128-16383
 // 24-bits: 16384-2097151
 // 32-bits: 2097152-268435455
@@ -1042,11 +1042,11 @@ void CBitWrite::WriteVarInt64(uint64 data)
 		int size;
 
 		// Here we can't really optimize for small numbers, since the data is
-		// split into three parts.  Cheking for numbers < 128, for instance,
+		// split into three parts. Cheking for numbers < 128, for instance,
 		// would require three comparisons, since you'd have to make sure part1
-		// and part2 are zero.  However, if the caller is using 64-bit integers,
+		// and part2 are zero. However, if the caller is using 64-bit integers,
 		// it is likely that they expect the numbers to often be very large, so
-		// we probably don't want to optimize for small numbers anyway.  Thus,
+		// we probably don't want to optimize for small numbers anyway. Thus,
 		// we end up with a hardcoded binary search tree...
 		if (part2 == 0)
 		{
@@ -1391,7 +1391,7 @@ void CBitWrite::WriteBitVec3Normal(const Vector3D& fa)
 //-----------------------------------------------------------------------------
 void CBitWrite::WriteBitAngles(const QAngle& fa)
 {
-	// FIXME:
+	// FIXME
 	Vector3D tmp(fa.x, fa.y, fa.z);
 	WriteBitVec3Coord(tmp);
 }

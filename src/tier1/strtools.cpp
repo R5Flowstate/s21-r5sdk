@@ -8,7 +8,7 @@ static int FastToLower(char c)
 	int i = (unsigned char)c;
 	if (i < 0x80)
 	{
-		// Brutally fast branchless ASCII tolower():
+		// Brutally fast branchless ASCII tolower
 		i += (((('A' - 1) - i) & (i - ('Z' + 1))) >> 26) & 0x20;
 	}
 	else
@@ -64,7 +64,7 @@ int	_V_stricmp_NegativeForUnequal(const char* s1, const char* s2)
 		{
 			if (!c2)
 			{
-				// c2=0 and != c1  =>  not equal
+				// c2=0 and != c1 => not equal
 				return -1;
 			}
 			iExactMatchResult = 0;
@@ -88,7 +88,7 @@ int	_V_stricmp_NegativeForUnequal(const char* s1, const char* s2)
 		{
 			if (!c2)
 			{
-				// c2=0 and != c1  =>  not equal
+				// c2=0 and != c1 => not equal
 				return -1;
 			}
 			iExactMatchResult = 0;
@@ -229,14 +229,12 @@ const char* V_strnchr(const char* pStr, char c, ssize_t n)
 
 bool V_isspace(int c)
 {
-	// The standard white-space characters are the following: space, tab, carriage-return, newline, vertical tab, and form-feed. In the C locale, V_isspace() returns true only for the standard white-space characters. 
-	//return c == ' ' || c == 9 /*horizontal tab*/ || c == '\r' || c == '\n' || c == 11 /*vertical tab*/ || c == '\f';
+	// The standard white-space characters are the following: space, tab, carriage-return, newline, vertical tab, and form-feed. In the C locale, V_isspace returns true only for the standard white-space characters. 
 	// codes of whitespace symbols: 9 HT, 10 \n, 11 VT, 12 form feed, 13 \r, 32 space
 
-	// easy to understand version, validated:
-	// return ((1 << (c-1)) & 0x80001F00) != 0 && ((c-1)&0xE0) == 0;
+	// easy to understand version, validated
 
-	// 5% faster on Core i7, 35% faster on Xbox360, no branches, validated:
+	// 5% faster on Core i7, 35% faster on Xbox360, no branches, validated
 #ifdef _X360
 	return ((1 << (c - 1)) & 0x80001F00 & ~(-int((c - 1) & 0xE0))) != 0;
 #else
@@ -273,8 +271,8 @@ bool V_IsAllDigit(const char* pString)
 
 //-----------------------------------------------------------------------------
 // Purpose: Returns the 4 bit nibble for a hex character
-// Input  : c - 
-// Output : unsigned char
+// Input: c - 
+// Output: unsigned char
 //-----------------------------------------------------------------------------
 static unsigned char V_nibble(char c)
 {
@@ -300,11 +298,11 @@ static unsigned char V_nibble(char c)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : *in - 
-//			numchars - 
-//			*out - 
-//			maxoutputbytes - 
+// Purpose
+// Input: *in - 
+// numchars - 
+// *out - 
+// maxoutputbytes - 
 //-----------------------------------------------------------------------------
 void V_hextobinary(char const* in, size_t numchars, byte* out, size_t maxoutputbytes)
 {
@@ -332,11 +330,11 @@ void V_hextobinary(char const* in, size_t numchars, byte* out, size_t maxoutputb
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : *in - 
-//			inputbytes - 
-//			*out - 
-//			outsize - 
+// Purpose
+// Input: *in - 
+// inputbytes - 
+// *out - 
+// outsize - 
 //-----------------------------------------------------------------------------
 void V_binarytohex(const byte* in, size_t inputbytes, char* out, size_t outsize)
 {
@@ -451,7 +449,7 @@ void V_SplitString2(const char* pString, const char** pSeparators, ssize_t nSepa
 
 				// We need to terminate the array here since we copy the string
 				// from the list minus the delimiter. AllocString adds 1 to len
-				//  or the null character.
+				// or the null character.
 				pSplit[nLen] = '\0';
 				outStrings.AddToTail(pSplit);
 			}
@@ -687,9 +685,8 @@ bool V_StringMatchesPattern(const char* pszSource, const char* pszPattern, int n
 
 //-----------------------------------------------------------------------------
 // Purpose: Compares file paths, ignores case and path separators
-// Input  : *a - 
-//          *b - 
-// Output : true if equal, false otherwise
+// Input: *a - 
+// Output: true if equal, false otherwise
 //-----------------------------------------------------------------------------
 bool V_ComparePath(const char* a, const char* b)
 {
@@ -721,8 +718,8 @@ bool V_ComparePath(const char* a, const char* b)
 
 //-----------------------------------------------------------------------------
 // Purpose: Changes all '/' or '\' characters into separator
-// Input  : *pName - 
-//			cSeparator - 
+// Input: *pName - 
+// cSeparator - 
 //-----------------------------------------------------------------------------
 void V_FixSlashes(char* pName, char cSeperator /* = CORRECT_PATH_SEPARATOR */)
 {
@@ -750,8 +747,8 @@ void V_AppendSlash(char* pStr, size_t strSize, char separator)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : *ppath - 
+// Purpose
+// Input: *ppath - 
 //-----------------------------------------------------------------------------
 void V_StripTrailingSlash(char* ppath)
 {
@@ -864,9 +861,9 @@ bool V_RemoveDotSlashes(char* pFilename, char separator)
 
 //-----------------------------------------------------------------------------
 // Purpose: normalizes the file path
-// Input  : *pfilePath - 
-//			separator - 
-// Output : true on success, false otherwise
+// Input: *pfilePath - 
+// separator - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool V_NormalizePath(char* pfilePath, char separator)
 {
@@ -1125,7 +1122,7 @@ bool V_MakeRelativePath(const char* pFullPath, const char* pDirectory, char* pRe
 	if (!pLastCommonPath)
 		return false;
 
-	// For each path separator remaining in the dir, need a ../
+	// For each path separator remaining in the dir, need a../
 	size_t nOutLen = 0;
 	bool bLastCharWasSeparator = true;
 	for (; *pLastCommonDir; ++pLastCommonDir)
@@ -1174,9 +1171,9 @@ bool V_MakeRelativePath(const char* pFullPath, const char* pDirectory, char* pRe
 
 //-----------------------------------------------------------------------------
 // Purpose: Strip off the last directory from dirName
-// Input  : *dirName - 
-//			maxLen - 
-// Output : Returns the new length of the string
+// Input: *dirName - 
+// maxLen - 
+// Output: Returns the new length of the string
 //-----------------------------------------------------------------------------
 size_t V_StripLastDir(char* dirName, size_t maxLen)
 {
@@ -1246,7 +1243,7 @@ size_t V_StripLastDir(char* dirName, size_t maxLen)
 
 //-----------------------------------------------------------------------------
 // Purpose: Returns a pointer to the beginning of the unqualified file name 
-//			(no path information)
+// (no path information)
 // Input:	in - file name (may be unqualified, relative or absolute path)
 // Output:	pointer to unqualified file name
 //-----------------------------------------------------------------------------
@@ -1292,11 +1289,11 @@ const wchar_t* V_UnqualifiedFileName(const wchar_t* in)
 
 //-----------------------------------------------------------------------------
 // Purpose: Composes a path and filename together, inserting a path separator
-//			if need be
+// if need be
 // Input:	path - path to use
-//			filename - filename to use
-//			dest - buffer to compose result in
-//			destSize - size of destination buffer
+// filename - filename to use
+// dest - buffer to compose result in
+// destSize - size of destination buffer
 //-----------------------------------------------------------------------------
 void V_ComposeFileName(const char* path, const char* filename, char* dest, size_t destSize)
 {
@@ -1308,15 +1305,15 @@ void V_ComposeFileName(const char* path, const char* filename, char* dest, size_
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : *in - 
-//			*out - 
-//			outSize - 
+// Purpose
+// Input: *in - 
+// *out - 
+// outSize - 
 //-----------------------------------------------------------------------------
 void V_StripExtension(const char* in, char* out, size_t outSize)
 {
 	// Find the last dot. If it's followed by a dot or a slash, then it's part of a 
-	// directory specifier like ../../somedir/./blah.
+	// directory specifier like../../somedir/./blah.
 
 	if (!in || !in[0] || !outSize)
 		return;
@@ -1351,7 +1348,7 @@ void V_StripExtension(const char* in, char* out, size_t outSize)
 // Purpose: Returns a pointer to the file extension within a file name string
 // Input:	in - file name 
 // Output:	pointer to beginning of extension (after the "."), or the passed
-//				in string if there is no extension
+// in string if there is no extension
 //-----------------------------------------------------------------------------
 const char* V_GetFileExtension(const char* path, const bool keepDot)
 {
@@ -1381,11 +1378,11 @@ const char* V_GetFileExtension(const char* path, const bool keepDot)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : *path - 
-//			*dest - 
-//			destSize - 
-// Output : void V_ExtractFileExtension
+// Purpose
+// Input: *path - 
+// *dest - 
+// destSize - 
+// Output: void V_ExtractFileExtension
 //-----------------------------------------------------------------------------
 void V_ExtractFileExtension(const char* path, char* dest, size_t destSize)
 {
@@ -1396,11 +1393,11 @@ void V_ExtractFileExtension(const char* path, char* dest, size_t destSize)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : *path - 
-//			*dest - 
-//			destSize - 
-// Output : void V_ExtractFilePath
+// Purpose
+// Input: *path - 
+// *dest - 
+// destSize - 
+// Output: void V_ExtractFilePath
 //-----------------------------------------------------------------------------
 bool V_ExtractFilePath(const char* path, char* dest, size_t destSize)
 {
@@ -1429,9 +1426,9 @@ bool V_ExtractFilePath(const char* path, char* dest, size_t destSize)
 
 //-----------------------------------------------------------------------------
 // Purpose: Extracts the base name of a file (no path, no extension, assumes '/' or '\' as path separator)
-// Input  : *in - 
-//			*out - 
-//			maxlen - 
+// Input: *in - 
+// *out - 
+// maxlen - 
 //-----------------------------------------------------------------------------
 void V_FileBase(const char* in, char* out, size_t maxlen)
 {

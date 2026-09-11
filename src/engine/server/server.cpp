@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -15,16 +15,22 @@
 #include "tier1/strtools.h"
 #include "engine/server/sv_main.h"
 #include "engine/server/server.h"
-#include "networksystem/pylon.h"
+#include "engine/server/connect_password_gate.h"
+#include "engine/shared/s21_bridge_compat.h"
+#include "networksystem/spire.h"
 #include "networksystem/bansystem.h"
+#include "game/shared/scriptnetdata_limits.h"
 #include "ebisusdk/EbisuSDK.h"
 #include "public/edict.h"
 #include "pluginsystem/pluginsystem.h"
 #include "game/server/gameinterface.h"
+#include "engine/server/datablock_oversized.h"
 #include "filesystem/filesystem.h"
+#include "tier0/platform.h"
 #include <algorithm>
 #include <locale>
 #include <codecvt>
+#include <thread>
 
 //---------------------------------------------------------------------------------
 // Console variables
@@ -47,6 +53,121 @@ static ConVar sv_nameFilterPath("sv_nameFilterPath", "chatfilters/badwords.txt",
 static CUtlVector<string> g_NameFilterWords;
 static bool g_NameFilterLoaded = false;
 
+static volatile LONG s_nBanChecksInFlight = 0;
+constexpr LONG kMaxBanChecksInFlight = 8;
+constexpr int kBanPendCap = 16;
+
+struct BanPend_t
+{
+	int nSlot;
+	PlatformUserId_t nUserID;
+	int nPort;
+	double flQueued;
+	string svIPAddr;
+	string svPersonaName;
+};
+
+static BanPend_t s_banPend[kBanPendCap];
+static int s_nBanPend = 0;
+static SRWLOCK s_banPendLock = SRWLOCK_INIT;
+static volatile LONG s_nBanBusyReject = 0;
+static volatile LONG s_nBanPendStale = 0;
+
+static void SV_BanCheckInFlightTrampoline(CClient* const pClient, const string& svIPAddr,
+	const PlatformUserId_t nUserID, const string& svPersonaName, const int nPort);
+static void SV_BanPend_DrainOne(void);
+
+static void SV_BanCheckSpawn(CClient* const pClient, const string& svIPAddr,
+	const PlatformUserId_t nUserID, const string& svPersonaName, const int nPort)
+{
+	std::thread th(SV_BanCheckInFlightTrampoline, pClient, svIPAddr, nUserID, svPersonaName, nPort);
+	th.detach();
+}
+
+static bool SV_BanPend_Push(const int nSlot, const string& svIPAddr,
+	const PlatformUserId_t nUserID, const string& svPersonaName, const int nPort)
+{
+	AcquireSRWLockExclusive(&s_banPendLock);
+	if (s_nBanPend >= kBanPendCap)
+	{
+		ReleaseSRWLockExclusive(&s_banPendLock);
+		return false;
+	}
+	BanPend_t& e = s_banPend[s_nBanPend++];
+	e.nSlot = nSlot;
+	e.nUserID = nUserID;
+	e.nPort = nPort;
+	e.flQueued = Plat_FloatTime();
+	e.svIPAddr = svIPAddr;
+	e.svPersonaName = svPersonaName;
+	ReleaseSRWLockExclusive(&s_banPendLock);
+	return true;
+}
+
+static bool SV_BanPend_Pop(BanPend_t& out)
+{
+	AcquireSRWLockExclusive(&s_banPendLock);
+	if (s_nBanPend <= 0)
+	{
+		ReleaseSRWLockExclusive(&s_banPendLock);
+		return false;
+	}
+	out = s_banPend[0];
+	for (int i = 1; i < s_nBanPend; ++i)
+		s_banPend[i - 1] = std::move(s_banPend[i]);
+	--s_nBanPend;
+	ReleaseSRWLockExclusive(&s_banPendLock);
+	return true;
+}
+
+static void SV_BanPend_DrainOne(void)
+{
+	BanPend_t e;
+	if (!SV_BanPend_Pop(e))
+		return;
+
+	if ((Plat_FloatTime() - e.flQueued) > 30.0)
+	{
+		InterlockedIncrement(&s_nBanPendStale);
+		return;
+	}
+	if (!g_pServer || e.nSlot < 0 || e.nSlot >= MAX_PLAYERS)
+	{
+		InterlockedIncrement(&s_nBanPendStale);
+		return;
+	}
+
+	CClient* const pClient = g_pServer->GetClient(e.nSlot);
+	if (!pClient || pClient->GetPlatformUserId() != e.nUserID)
+	{
+		InterlockedIncrement(&s_nBanPendStale);
+		return;
+	}
+
+	if (InterlockedIncrement(&s_nBanChecksInFlight) > kMaxBanChecksInFlight)
+	{
+		InterlockedDecrement(&s_nBanChecksInFlight);
+		if (!SV_BanPend_Push(e.nSlot, e.svIPAddr, e.nUserID, e.svPersonaName, e.nPort))
+		{
+			if (InterlockedIncrement(&s_nBanBusyReject) <= 8)
+				Warning(eDLL_T::SERVER, "[BAN] busy-reject slot=%d uid=%llu\n",
+					e.nSlot, static_cast<unsigned long long>(e.nUserID));
+			pClient->Disconnect(REP_MARK_BAD, "#Valve_Reject_Banned");
+		}
+		return;
+	}
+
+	SV_BanCheckSpawn(pClient, e.svIPAddr, e.nUserID, e.svPersonaName, e.nPort);
+}
+
+static void SV_BanCheckInFlightTrampoline(CClient* const pClient, const string& svIPAddr,
+	const PlatformUserId_t nUserID, const string& svPersonaName, const int nPort)
+{
+	SV_CheckForBanAndDisconnect(pClient, svIPAddr, nUserID, svPersonaName, nPort);
+	InterlockedDecrement(&s_nBanChecksInFlight);
+	SV_BanPend_DrainOne();
+}
+
 // Unicode-aware case conversion for better international character support
 static std::string SV_ToLowerUnicode(const std::string& input)
 {
@@ -60,7 +181,7 @@ static std::string SV_ToLowerUnicode(const std::string& input)
     
     // For better Unicode support, we could add more sophisticated conversion here
     // This basic version handles ASCII properly and leaves Unicode characters unchanged
-    // which is safer than corrupting them with ASCII-only tolower()
+    // which is safer than corrupting them with ASCII-only tolower
     
     return result;
 }
@@ -68,64 +189,82 @@ static std::string SV_ToLowerUnicode(const std::string& input)
 // Function to check if a name contains blocked game icon characters
 static bool SV_NameContainsBlockedIcons(const char* name)
 {
-    if (!name) return false;
-    
-    const unsigned char* p = reinterpret_cast<const unsigned char*>(name);
-    
-    while (*p)
-    {
-        // Check for UTF-8 sequences that represent the blocked icon characters
-        // These characters are in the Private Use Area around U+F0000-U+F0FFF
-        
-        // UTF-8 encoding for U+F0000-U+F0FFF:
-        // 4-byte sequence: 0xF3 0xB0 0x80-0xBF 0x80-0xBF
-        if (p[0] == 0xF3 && p[1] == 0xB0)
-        {
-            // This is likely one of the blocked icon characters
-            return true;
-        }
-        
-        // Also check for some other common Private Use Area ranges that might contain icons
-        // U+E000-U+F8FF (3-byte UTF-8: 0xEE-0xEF)
-        if (p[0] >= 0xEE && p[0] <= 0xEF)
-        {
-            // Check if this matches the specific icon pattern
-            // The icons you listed seem to be in a specific range
-            if (p[0] == 0xEF && p[1] >= 0x80 && p[1] <= 0xBF)
-            {
-                return true; // Block these specific Private Use Area characters
-            }
-        }
-        
-        // Move to next character
-        if (*p < 0x80)
-        {
-            // ASCII character
-            p++;
-        }
-        else if ((*p & 0xE0) == 0xC0)
-        {
-            // 2-byte UTF-8
-            p += 2;
-        }
-        else if ((*p & 0xF0) == 0xE0)
-        {
-            // 3-byte UTF-8
-            p += 3;
-        }
-        else if ((*p & 0xF8) == 0xF0)
-        {
-            // 4-byte UTF-8
-            p += 4;
-        }
-        else
-        {
-            // Invalid UTF-8, skip
-            p++;
-        }
-    }
-    
-    return false;
+	if (!name)
+		return false;
+
+	const unsigned char* p = reinterpret_cast<const unsigned char*>(name);
+	int safety = 0;
+
+	while (*p && safety++ < 2048)
+	{
+		if (p[0] == 0xF3 && p[1] == 0xB0)
+			return true;
+		if (p[0] == 0xEF && p[1] >= 0x80 && p[1] <= 0xBF)
+			return true;
+
+		const unsigned char c = p[0];
+		if (c <= 0x7F)
+		{
+			++p;
+			continue;
+		}
+
+		if (c <= 0xBF || c == 0xC0 || c == 0xC1 || c >= 0xF5)
+		{
+			++p;
+			continue;
+		}
+
+		if (c <= 0xDF)
+		{
+			if (!p[1] || (p[1] & 0xC0) != 0x80)
+			{
+				++p;
+				continue;
+			}
+			p += 2;
+			continue;
+		}
+
+		if (c <= 0xEF)
+		{
+			unsigned char lo = 0x80;
+			unsigned char hi = 0xBF;
+			if (c == 0xE0)
+				lo = 0xA0;
+			else if (c == 0xED)
+				hi = 0x9F;
+			if (!p[1] || !p[2]
+				|| p[1] < lo || p[1] > hi
+				|| (p[2] & 0xC0) != 0x80)
+			{
+				++p;
+				continue;
+			}
+			p += 3;
+			continue;
+		}
+
+		{
+			unsigned char lo = 0x80;
+			unsigned char hi = 0xBF;
+			if (c == 0xF0)
+				lo = 0x90;
+			else if (c == 0xF4)
+				hi = 0x8F;
+			if (!p[1] || !p[2] || !p[3]
+				|| p[1] < lo || p[1] > hi
+				|| (p[2] & 0xC0) != 0x80
+				|| (p[3] & 0xC0) != 0x80)
+			{
+				++p;
+				continue;
+			}
+			p += 4;
+		}
+	}
+
+	return false;
 }
 
 static void SV_LoadNameFilter()
@@ -213,7 +352,7 @@ static bool SV_NameContainsBadWord(const char* pszName)
 
 //---------------------------------------------------------------------------------
 // Purpose: Gets the number of human players on the server
-// Output : int
+// Output: int
 //---------------------------------------------------------------------------------
 int CServer::GetNumHumanPlayers(void) const
 {
@@ -231,7 +370,7 @@ int CServer::GetNumHumanPlayers(void) const
 
 //---------------------------------------------------------------------------------
 // Purpose: Gets the number of fake clients on the server
-// Output : int
+// Output: int
 //---------------------------------------------------------------------------------
 int CServer::GetNumFakeClients(void) const
 {
@@ -249,7 +388,7 @@ int CServer::GetNumFakeClients(void) const
 
 //---------------------------------------------------------------------------------
 // Purpose: Gets the number of clients on the server
-// Output : int
+// Output: int
 //---------------------------------------------------------------------------------
 int CServer::GetNumClients(void) const
 {
@@ -267,9 +406,9 @@ int CServer::GetNumClients(void) const
 
 //---------------------------------------------------------------------------------
 // Purpose: Rejects connection request and sends back a message
-// Input  : iSocket - 
-//			*pChallenge - 
-//			*szMessage - 
+// Input: iSocket - 
+// *pChallenge - 
+// *szMessage - 
 //---------------------------------------------------------------------------------
 void CServer::RejectConnection(int iSocket, netadr_t* pNetAdr, const char* szMessage)
 {
@@ -278,18 +417,34 @@ void CServer::RejectConnection(int iSocket, netadr_t* pNetAdr, const char* szMes
 
 //---------------------------------------------------------------------------------
 // Purpose: Initializes a CSVClient for a new net connection. This will only be called
-//			once for a player each game, not once for each level change.
-// Input  : *pServer - 
-//			*pChallenge - 
-// Output : pointer to client instance on success, nullptr on failure
+// once for a player each game, not once for each level change.
+// Input: *pServer - 
+// *pChallenge - 
+// Output: pointer to client instance on success, nullptr on failure
 //---------------------------------------------------------------------------------
 CClient* CServer::ConnectClient(CServer* pServer, user_creds_s* pChallenge)
 {
+	// Challenge-bind the password tag before any validation reads it.
+	ConnectPasswordGate_FilterTag(pChallenge);
+
+	if (g_bS21BridgeVerbose)
+	{
+		Msg(eDLL_T::SERVER, "S21 Bridge: ConnectClient called! state=%d, personaName=%p, personaId=%llu\n",
+			(int)pServer->m_State, pChallenge->personaName, pChallenge->personaId);
+	}
+
 	if (pServer->m_State < server_state_t::ss_active)
+	{
+		if (g_bS21BridgeVerbose)
+		{
+			Msg(eDLL_T::SERVER, "S21 Bridge: REJECTED - server state %d < ss_active (%d)\n",
+				(int)pServer->m_State, (int)server_state_t::ss_active);
+		}
 		return nullptr;
+	}
 
 	char* pszPersonaName = pChallenge->personaName;
-	SteamID_t nSteamID = pChallenge->personaId;
+	PlatformUserId_t nUserID = pChallenge->personaId;
 
 	const bool bEnableLogging = sv_showconnecting.GetBool();
 	const int nPort = int(ntohs(pChallenge->netAdr.GetPort()));
@@ -304,7 +459,7 @@ CClient* CServer::ConnectClient(CServer* pServer, user_creds_s* pChallenge)
 		pszAddresBuffer = szAddresBuffer;
 
 		Msg(eDLL_T::SERVER, "Processing connectionless challenge for '[%s]:%i' ('%llu')\n",
-			pszAddresBuffer, nPort, nSteamID);
+			pszAddresBuffer, nPort, nUserID);
 	}
 
 	// Reject if persona name contains a filtered word from asset (VPK)
@@ -320,7 +475,7 @@ CClient* CServer::ConnectClient(CServer* pServer, user_creds_s* pChallenge)
 				pszAddresBuffer = szAddresBuffer;
 			}
 			Warning(eDLL_T::SERVER, "Connection rejected for '[%s]:%i' ('%llu' name contains banned word)\n",
-				pszAddresBuffer, nPort, nSteamID);
+				pszAddresBuffer, nPort, nUserID);
 		}
 		return nullptr;
 	}
@@ -338,7 +493,7 @@ CClient* CServer::ConnectClient(CServer* pServer, user_creds_s* pChallenge)
 				pszAddresBuffer = szAddresBuffer;
 			}
 			Warning(eDLL_T::SERVER, "Connection rejected for '[%s]:%i' ('%llu' name contains blocked icon characters)\n",
-				pszAddresBuffer, nPort, nSteamID);
+				pszAddresBuffer, nPort, nUserID);
 		}
 		return nullptr;
 	}
@@ -362,31 +517,40 @@ CClient* CServer::ConnectClient(CServer* pServer, user_creds_s* pChallenge)
 	// Only proceed connection if the client's name is valid and UTF-8 encoded.
 	if (!bValidName)
 	{
+		if (g_bS21BridgeVerbose)
+		{
+			Msg(eDLL_T::SERVER, "S21 Bridge: REJECTED - invalid name (VALID_CHARSTAR=%d, UTF8=%d)\n",
+				VALID_CHARSTAR(pszPersonaName), V_IsValidUTF8(pszPersonaName));
+		}
 		pServer->RejectConnection(pServer->m_Socket, &pChallenge->netAdr, "#Valve_Reject_Invalid_Name");
 
 		if (bEnableLogging)
 		{
 			Warning(eDLL_T::SERVER, "Connection rejected for '[%s]:%i' ('%llu' has an invalid name!)\n",
-				pszAddresBuffer, nPort, nSteamID);
+				pszAddresBuffer, nPort, nUserID);
 		}
 
 		return nullptr;
 	}
 
-	if (g_BanSystem.IsBanned(&pChallenge->netAdr, nSteamID))
+	if (g_BanSystem.IsBanned(&pChallenge->netAdr, nUserID))
 	{
 		pServer->RejectConnection(pServer->m_Socket, &pChallenge->netAdr, "#Valve_Reject_Banned");
 
 		if (bEnableLogging)
 		{
 			Warning(eDLL_T::SERVER, "Connection rejected for '[%s]:%i' ('%llu' is banned from this server!)\n",
-				pszAddresBuffer, nPort, nSteamID);
+				pszAddresBuffer, nPort, nUserID);
 		}
 
 		return nullptr;
 	}
 
+	if (g_bS21BridgeVerbose)
+		Msg(eDLL_T::SERVER, "S21 Bridge: Calling engine ConnectClient...\n");
 	CClient* const pClient = CServer__ConnectClient(pServer, pChallenge);
+	if (g_bS21BridgeVerbose)
+		Msg(eDLL_T::SERVER, "S21 Bridge: Engine ConnectClient returned %p\n", pClient);
 
 	for (auto& callback : !PluginSystem()->GetConnectClientCallbacks())
 	{
@@ -410,8 +574,31 @@ CClient* CServer::ConnectClient(CServer* pServer, user_creds_s* pChallenge)
 			const string addressBufferCopy(pszAddresBuffer);
 			const string personaNameCopy(pszPersonaName);
 
-			std::thread th(SV_CheckForBanAndDisconnect, pClient, addressBufferCopy, nSteamID, personaNameCopy, nPort);
-			th.detach();
+			if (InterlockedIncrement(&s_nBanChecksInFlight) > kMaxBanChecksInFlight)
+			{
+			InterlockedDecrement(&s_nBanChecksInFlight);
+			// GetHandle() is the edict index, not the client slot: GetClient()
+			// is slot-based (cf. GetClient(nEdict - 1)). Resolve the slot by
+			// pointer scan so the drain re-resolves the same client.
+			int nSlot = -1;
+			for (int i = 0; i < MAX_PLAYERS; ++i)
+			{
+				if (pServer->GetClient(i) == pClient) { nSlot = i; break; }
+			}
+				if (nSlot < 0 || nSlot >= MAX_PLAYERS
+					|| !SV_BanPend_Push(nSlot, addressBufferCopy, nUserID, personaNameCopy, nPort))
+				{
+					if (InterlockedIncrement(&s_nBanBusyReject) <= 8)
+						Warning(eDLL_T::SERVER, "[BAN] busy-reject slot=%d uid=%llu\n",
+							nSlot, static_cast<unsigned long long>(nUserID));
+					pClient->Disconnect(REP_MARK_BAD, "#Valve_Reject_Banned");
+					return nullptr;
+				}
+			}
+			else
+			{
+				SV_BanCheckSpawn(pClient, addressBufferCopy, nUserID, personaNameCopy, nPort);
+			}
 		}
 	}
 
@@ -420,9 +607,9 @@ CClient* CServer::ConnectClient(CServer* pServer, user_creds_s* pChallenge)
 
 //---------------------------------------------------------------------------------
 // Purpose: Sends netmessage to all active clients
-// Input  : *msg       -
-//          onlyActive - 
-//          reliable   - 
+// Input: *msg -
+// onlyActive - 
+// reliable - 
 //---------------------------------------------------------------------------------
 void CServer::BroadcastMessage(CNetMessage* const msg, const bool onlyActive, const bool reliable)
 {
@@ -431,11 +618,15 @@ void CServer::BroadcastMessage(CNetMessage* const msg, const bool onlyActive, co
 
 //---------------------------------------------------------------------------------
 // Purpose: Runs the server frame
-// Input  : *pServer - 
+// Input: *pServer - 
 //---------------------------------------------------------------------------------
 void CServer::RunFrame(CServer* pServer)
 {
 	CServer__RunFrame(pServer);
+
+	// Flush dirty SNDC extension vars to clients via NET_ScriptMessage
+	SNDC_FlushDirtyVars(pServer);
+	DataBlockOversized_Pump(pServer);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

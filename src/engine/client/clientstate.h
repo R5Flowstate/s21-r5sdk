@@ -238,50 +238,14 @@ inline bool(*CClientState__ProcessServerTick)(CClientState* thisptr, SVC_ServerT
 inline bool(*CClientState__ProcessCreateStringTable)(CClientState* thisptr, SVC_CreateStringTable* msg);
 inline bool(*CClientState__ProcessUserMessage)(CClientState* thisptr, SVC_UserMessage* msg);
 
-///////////////////////////////////////////////////////////////////////////////
-class VClientState : public IDetour
+
+class VClientStringCmdRestrict : public IDetour
 {
-	virtual void GetAdr(void) const
-	{
-		LogFunAdr("CClientState::RunFrame", CClientState__RunFrame);
-		LogFunAdr("CClientState::Connect", CClientState__Connect);
-		LogFunAdr("CClientState::Disconnect", CClientState__Disconnect);
-		LogFunAdr("CClientState::ConnectionStart", CClientState__ConnectionStart);
-		LogFunAdr("CClientState::ConnectionClosing", CClientState__ConnectionClosing);
-		LogFunAdr("CClientState::HookClientStringTable", CClientState__HookClientStringTable);
-		LogFunAdr("CClientState::ProcessStringCmd", CClientState__ProcessStringCmd);
-		LogFunAdr("CClientState::ProcessServerTick", CClientState__ProcessServerTick);
-		LogFunAdr("CClientState::ProcessCreateStringTable", CClientState__ProcessCreateStringTable);
-		LogFunAdr("CClientState::ProcessUserMessage", CClientState__ProcessUserMessage);
-		LogVarAdr("g_ClientState", g_pClientState);
-		LogVarAdr("g_ClientState_Shifted", g_pClientState_Shifted);
-	}
-	virtual void GetFun(void) const
-	{
-		Module_FindPattern(g_GameDll, "40 53 48 81 EC ?? ?? ?? ?? 83 B9 ?? ?? ?? ?? ?? 48 8B D9 7D 0B").GetPtr(CClientState__RunFrame);
-		Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 48 89 74 24 ?? 48 89 7C 24 ?? 41 56 48 81 EC ?? ?? ?? ?? 48 8B 32").GetPtr(CClientState__Connect);
-		Module_FindPattern(g_GameDll, "40 56 57 41 54 41 55 41 57 48 83 EC 30 44 0F B6 FA").GetPtr(CClientState__Disconnect);
-		Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 41 56 41 57 48 83 EC ?? 48 8B 05 ?? ?? ?? ?? 48 8B F2").GetPtr(CClientState__ConnectionStart);
-		Module_FindPattern(g_GameDll, "40 53 48 83 EC 20 83 B9 ?? ?? ?? ?? ?? 48 8B DA 0F 8E ?? ?? ?? ??").GetPtr(CClientState__ConnectionClosing);
-		Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 57 48 83 EC 20 48 8B D9 48 8B FA 48 8B 89 ?? ?? ?? ?? 48 85 C9 0F 84 ?? ?? ?? ??").GetPtr(CClientState__HookClientStringTable);
-		Module_FindPattern(g_GameDll, "40 53 48 81 EC ?? ?? ?? ?? 80 B9 ?? ?? ?? ?? ?? 48 8B DA").GetPtr(CClientState__ProcessStringCmd);
-		Module_FindPattern(g_GameDll, "40 57 48 83 EC 20 83 B9 ?? ?? ?? ?? ?? 48 8B F9 7C 66").GetPtr(CClientState__ProcessServerTick);
-		Module_FindPattern(g_GameDll, "48 89 4C 24 ?? 53 56 48 81 EC ?? ?? ?? ?? 83 B9 ?? ?? ?? ?? ??").GetPtr(CClientState__ProcessCreateStringTable);
-		Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 55 48 8D AC 24 ?? ?? ?? ?? 48 81 EC ?? ?? ?? ?? 83 B9 ?? ?? ?? ?? ??").GetPtr(CClientState__ProcessUserMessage);
-	}
-	virtual void GetVar(void) const
-	{
-		g_pClientState = Module_FindPattern(g_GameDll, "0F 84 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? 48 83 C4 28").FindPatternSelf("48 8D").ResolveRelativeAddressSelf(0x3, 0x7).RCast<CClientState*>(); /*0F 84 ? ? ? ? 48 8D 0D ? ? ? ? 48 83 C4 28*/
-		g_pClientState_Shifted = reinterpret_cast<CClientState**>(reinterpret_cast<int64_t*>(g_pClientState)+1); // Shift by 8 bytes.
-	}
+	virtual void GetAdr(void) const;
+	virtual void GetFun(void) const;
+	virtual void GetVar(void) const { }
 	virtual void GetCon(void) const { }
 	virtual void Detour(const bool bAttach) const;
 };
-
-///////////////////////////////////////////////////////////////////////////////
-// Steam integration functions
-///////////////////////////////////////////////////////////////////////////////
-void SetSteamPersonaName();
-bool ShouldForceSteamOnly();
 
 ///////////////////////////////////////////////////////////////////////////////

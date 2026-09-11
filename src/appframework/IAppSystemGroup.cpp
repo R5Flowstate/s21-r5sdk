@@ -66,7 +66,9 @@ void* CAppSystemGroup::FindSystem(const char* pSystemName)
 	return NULL;
 }
 
+#ifndef CLIENT_DLL
 void VAppSystemGroup::Detour(const bool bAttach) const
 {
 	DetourSetup(&CAppSystemGroup__Destroy, &CAppSystemGroup::StaticDestroy, bAttach);
 }
+#endif // !CLIENT_DLL

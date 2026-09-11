@@ -38,7 +38,7 @@ struct AnimRecordingOverlay_s
 struct AnimRecordingAssetHeader_s
 {
 	// For both of these arrays, there is room for 15 elements, but the code that writes them stops after 12
-	// See 0x140DD9360
+	// See 
 	// Both of these take their values from mstudioposeparamdesc_t
 	char* poseParamNames[ANIR_MAX_ELEMENTS];
 	Vector2D poseParamValues[ANIR_MAX_ELEMENTS]; // { startValue, endValue - startValue }

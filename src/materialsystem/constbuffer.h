@@ -1,4 +1,9 @@
 #pragma once
+//=============================================================================//
+//
+// Purpose: Constant buffer helpers for the material system
+//
+//=============================================================================//
 #include "tier0/threadtools.h"
 #include "rtech/rstdlib.h"
 
@@ -38,23 +43,3 @@ struct GfxCbufCollection_s
 extern GfxCbufCollection_s* g_constBufferCollection;
 inline void (*v_Gfx_InitShared)(void);
 
-///////////////////////////////////////////////////////////////////////////////
-class VConstBuffer : public IDetour
-{
-	virtual void GetAdr(void) const
-	{
-		LogFunAdr("Gfx_InitShared", v_Gfx_InitShared);
-	}
-	virtual void GetFun(void) const
-	{
-		Module_FindPattern(g_GameDll, "40 53 48 83 EC ? E8 ? ? ? ? 48 8D 0D ? ? ? ? FF 15").GetPtr(v_Gfx_InitShared);
-	}
-	virtual void GetVar(void) const
-	{
-		CMemory(v_Gfx_InitShared).Offset(0x1FC).FindPatternSelf("48 8D", CMemory::Direction::DOWN).ResolveRelativeAddressSelf(0x3, 0x7).GetPtr(g_constBufferCollection);
-	}
-	virtual void GetCon(void) const
-	{ }
-	virtual void Detour(const bool bAttach) const;
-};
-///////////////////////////////////////////////////////////////////////////////

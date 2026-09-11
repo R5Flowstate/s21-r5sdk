@@ -26,7 +26,7 @@ HGetVersionExA(
 	_Inout_ LPOSVERSIONINFOA lpVersionInformation)
 {
 #ifdef DEDICATED
-	// Return false for dedicated to skip 'SetProcessDpiAwareness' in 'CEngineAPI:OnStartup()'.
+	// Return false for dedicated to skip 'SetProcessDpiAwareness' in 'CEngineAPI:OnStartup'.
 	return NULL;
 #else
 	return VGetVersionExA(lpVersionInformation);
@@ -43,7 +43,7 @@ HPeekMessage(
 	_In_ UINT wRemoveMsg)
 {
 #ifdef DEDICATED
-	// Return false for dedicated to reduce unnecessary overhead when calling 'PeekMessageA/W()' every frame.
+	// Return false for dedicated to reduce unnecessary overhead when calling 'PeekMessageA/W' every frame.
 	return NULL;
 #else
 	return VPeekMessageA(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg);

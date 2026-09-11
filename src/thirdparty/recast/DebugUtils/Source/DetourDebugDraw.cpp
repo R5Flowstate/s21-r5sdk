@@ -103,6 +103,7 @@ static void drawPolyMeshEdges(duDebugDraw* dd, const dtMeshTile* tile, const rdV
 	const dtMeshHeader* header = tile->header;
 	unsigned int c = duRGBA(0,0,0,48);
 
+	dd->begin(DU_DRAW_LINES, 1.0f, offset);
 	for (int i = 0; i < header->polyCount; ++i)
 	{
 		const dtPoly* p = &tile->polys[i];
@@ -110,7 +111,6 @@ static void drawPolyMeshEdges(duDebugDraw* dd, const dtMeshTile* tile, const rdV
 
 		const dtPolyDetail* pd = &tile->detailMeshes[i];
 
-		dd->begin(DU_DRAW_LINES, 1.0f, offset);
 		for (int j = 0; j < pd->triCount; ++j)
 		{
 			const unsigned char* t = &tile->detailTris[(pd->triBase+j)*4];
@@ -131,8 +131,8 @@ static void drawPolyMeshEdges(duDebugDraw* dd, const dtMeshTile* tile, const rdV
 				dd->vertex(tv[k], c);
 			}
 		}
-		dd->end();
 	}
+	dd->end();
 }
 
 static void drawPolyBoundaries(duDebugDraw* dd, const dtMeshTile* tile,
@@ -247,6 +247,7 @@ static void drawPolyCenters(duDebugDraw* dd, const dtMeshTile* tile, const unsig
 static void drawTraverseLinks(duDebugDraw* dd, const dtNavMesh& mesh, const dtNavMeshQuery* query,
 	const dtMeshTile* tile, const rdVec3D* offset, const duDrawTraverseLinkParams& traverseLinkParams)
 {
+	dd->begin(DU_DRAW_LINES, 2.0f, offset);
 	for (int i = 0; i < tile->header->polyCount; ++i)
 	{
 		const dtPoly* startPoly = &tile->polys[i];
@@ -303,8 +304,6 @@ static void drawTraverseLinks(duDebugDraw* dd, const dtNavMesh& mesh, const dtNa
 			{
 				const dtOffMeshConnection* con = &endTile->offMeshCons[ip - endTile->header->offMeshBase];
 
-				dd->begin(DU_DRAW_LINES, 2.0f, offset);
-
 				dd->vertex(&con->posa, col);
 				dd->vertex(&con->posb, col);
 
@@ -317,7 +316,6 @@ static void drawTraverseLinks(duDebugDraw* dd, const dtNavMesh& mesh, const dtNa
 				duAppendCross(dd, baseVert->x, baseVert->y, baseVert->z, con->rad, duRGBA(220,32,16,196));
 				duAppendCross(dd, landVert->x, landVert->y, landVert->z, con->rad, duRGBA(32,220,16,196));
 
-				dd->end();
 				continue;
 			}
 
@@ -358,8 +356,6 @@ static void drawTraverseLinks(duDebugDraw* dd, const dtNavMesh& mesh, const dtNa
 				highestPos->z
 			};
 
-			dd->begin(DU_DRAW_LINES, 2.0f, offset);
-
 			const rdVec3D* targetStartPos = startPointHighest ? &offsetEndPos : &startPos;
 			const rdVec3D* targetEndPos = startPointHighest ? &startPos : &offsetEndPos;
 
@@ -381,10 +377,9 @@ static void drawTraverseLinks(duDebugDraw* dd, const dtNavMesh& mesh, const dtNa
 			// them look incomplete.
 			const unsigned int crossCol = hasValidReverseLink ? duRGBA(255, 255, 255, 196) : duRGBA(0, 0, 0, 196);
 			duAppendCross(dd, startPos.x, startPos.y, startPos.z, 10.f, crossCol);
-
-			dd->end();
 		}
 	}
+	dd->end();
 }
 
 static void drawTileCells(duDebugDraw* dd, const dtMeshTile* tile, const rdVec3D* offset)

@@ -73,8 +73,8 @@ public:
 	virtual ConCommand		*FindCommand( const char *name ) = 0;
 	virtual const ConCommand *FindCommand( const char *name ) const = 0;
 
-	virtual void sub_140599640() = 0;
-	virtual void sub_140599BA0() = 0;
+	virtual void CvarUnknown0() = 0;
+	virtual void CvarUnknown1() = 0;
 
 	// Install a global change callback (to be called when any convar changes) 
 	virtual void			InstallGlobalChangeCallback(FnChangeCallback_t callback) = 0;
@@ -88,7 +88,7 @@ public:
 	virtual void			ConsolePrintf(PRINTF_FORMAT_STRING const char* pFormat, ...) const FMTFUNCTION(2, 3) = 0;
 	virtual void			ConsoleDPrintf(PRINTF_FORMAT_STRING const char* pFormat, ...) const FMTFUNCTION(2, 3) = 0;
 
-	virtual void sub_140598730() = 0;
+	virtual void CvarUnknown2() = 0;
 
 	// Method allowing the engine ICvarQuery interface to take over
 	// A little hacky, owing to the fact the engine is loaded
@@ -113,16 +113,13 @@ protected:	class ICVarIteratorInternal;
 public:
 	/// Iteration over all cvars. 
 	/// (THIS IS A SLOW OPERATION AND YOU SHOULD AVOID IT.)
-	/// usage: 
+	/// usage
 	/// { ICVar::Iterator iter(g_pCVar); 
-	///   for ( iter.SetFirst() ; iter.IsValid() ; iter.Next() )
-	///   {  
-	///       ConCommandBase *cmd = iter.Get();
-	///   } 
-	/// }
+	/// for ( iter.SetFirst; iter.IsValid; iter.Next )
+	/// ConCommandBase *cmd = iter.Get;
 	/// The Iterator class actually wraps the internal factory methods
 	/// so you don't need to worry about new/delete -- scope takes care
-	//  of it.
+	// of it.
 	/// We need an iterator like this because we can't simply return a 
 	/// pointer to the internal data type that contains the cvars -- 
 	/// it's a custom, protected class with unusual semantics and is

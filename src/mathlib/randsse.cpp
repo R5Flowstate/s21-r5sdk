@@ -1,4 +1,4 @@
-﻿//========= Copyright © 1996-2006, Valve Corporation, All rights reserved. ============//
+//========= Copyright © 1996-2006, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: generates 4 random numbers in the range 0..1 quickly, using SIMD
 //
@@ -9,7 +9,7 @@
 #include "mathlib/vector.h"
 #include "mathlib/ssemath.h"
 
-// memdbgon must be the last include file in a .cpp file!!!
+// memdbgon must be the last include file in a.cpp file!!!
 #include "tier0/memdbgon.h"
 
 // see knuth volume 3 for insight.

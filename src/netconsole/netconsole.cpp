@@ -18,10 +18,11 @@
 #include "netconsole/netconsole.h"
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose
 //-----------------------------------------------------------------------------
 CNetCon::CNetCon(void)
-	: m_bInitialized(false)
+	: CNetConBase(false)
+	, m_bInitialized(false)
 	, m_bQuitting(false)
 	, m_bPromptConnect(true)
 	, m_bEncryptFrames(false)
@@ -33,7 +34,7 @@ CNetCon::CNetCon(void)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose
 //-----------------------------------------------------------------------------
 CNetCon::~CNetCon(void)
 {
@@ -41,7 +42,7 @@ CNetCon::~CNetCon(void)
 
 //-----------------------------------------------------------------------------
 // Purpose: WSA and NETCON systems init
-// Output : true on success, false otherwise
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CNetCon::Init(const bool bAnsiColor, const char* pAdr, const char* pKey)
 {
@@ -109,7 +110,7 @@ bool CNetCon::Init(const bool bAnsiColor, const char* pAdr, const char* pKey)
 
 //-----------------------------------------------------------------------------
 // Purpose: WSA and NETCON systems shutdown
-// Output : true on success, false otherwise
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CNetCon::Shutdown(void)
 {
@@ -132,7 +133,7 @@ bool CNetCon::Shutdown(void)
 	{
 		bResult = true;
 	}
-	else // WSACleanup() failed.
+	else // WSACleanup failed.
 	{
 		Error(eDLL_T::CLIENT, NO_ERROR, "%s - Failed to stop Winsock: (%s)\n",
 			__FUNCTION__, NET_ErrorString(WSAGetLastError()));
@@ -182,7 +183,7 @@ void CNetCon::TermSetup(const bool bAnsiColor)
 
 	// Write console output to a file, this includes everything from local logs
 	// to messages over the wire. Note that logs emitted locally are prefixed
-	// with timestamps in () while messages over the wire are in [].
+	// with timestamps in while messages over the wire are in.
 	SpdLog_InstallSupplementalLogger("supplemental_logger_mt", "netconsole.log");
 }
 
@@ -236,7 +237,13 @@ void CNetCon::RunInput(const string& lineInput)
 
 		vector<byte> vecMsg;
 
-		const SocketHandle_t hSocket = GetSocket();
+		ConnectedNetConsoleData_s* const pData = GetData();
+		if (!pData)
+		{
+			Error(eDLL_T::CLIENT, NO_ERROR, "Failed to send RCON message: (%s)\n", "no connection data");
+			return;
+		}
+
 		bool bSend = false;
 
 		if (cmd.ArgC() > 1)
@@ -246,7 +253,7 @@ void CNetCon::RunInput(const string& lineInput)
 				const char* const pass = cmd.Arg(1);
 				const size_t passLen = strlen(pass);
 
-				bSend = Serialize(vecMsg, pass, passLen, "", 0,
+				bSend = Serialize(*pData, vecMsg, pass, passLen, "", 0,
 					netcon::request_e::SERVERDATA_REQUEST_AUTH);
 			}
 			else // Execute command query.
@@ -257,18 +264,18 @@ void CNetCon::RunInput(const string& lineInput)
 				const char* const command = cmd.GetCommandString();
 				const size_t commandLen = strlen(command);
 
-				bSend = Serialize(vecMsg, request, requestLen, command, commandLen,
+				bSend = Serialize(*pData, vecMsg, request, requestLen, command, commandLen,
 					netcon::request_e::SERVERDATA_REQUEST_EXECCOMMAND);
 			}
 		}
 		else // Single arg command query.
 		{
-			bSend = Serialize(vecMsg, lineInput.c_str(), lineInput.length(), "", 0, netcon::request_e::SERVERDATA_REQUEST_EXECCOMMAND);
+			bSend = Serialize(*pData, vecMsg, lineInput.c_str(), lineInput.length(), "", 0, netcon::request_e::SERVERDATA_REQUEST_EXECCOMMAND);
 		}
 
 		if (bSend) // Only send if serialization process was successful.
 		{
-			if (!Send(hSocket, vecMsg.data(), u32(vecMsg.size())))
+			if (!Send(pData->socket, vecMsg.data(), u32(vecMsg.size())))
 			{
 				Error(eDLL_T::CLIENT, NO_ERROR, "Failed to send RCON message: (%s)\n", "SOCKET_ERROR");
 			}
@@ -341,7 +348,7 @@ bool CNetCon::RunFrame(void)
 
 //-----------------------------------------------------------------------------
 // Purpose: checks if application should be terminated
-// Output : true for termination, false otherwise
+// Output: true for termination, false otherwise
 //-----------------------------------------------------------------------------
 bool CNetCon::GetQuitting(void) const
 {
@@ -350,7 +357,7 @@ bool CNetCon::GetQuitting(void) const
 
 //-----------------------------------------------------------------------------
 // Purpose: set whether we should quit
-// Input  : bQuit
+// Input: bQuit
 //-----------------------------------------------------------------------------
 void CNetCon::SetQuitting(const bool bQuit)
 {
@@ -359,7 +366,7 @@ void CNetCon::SetQuitting(const bool bQuit)
 
 //-----------------------------------------------------------------------------
 // Purpose: checks if we should prompt the connect message
-// Output : true for prompting, false otherwise
+// Output: true for prompting, false otherwise
 //-----------------------------------------------------------------------------
 bool CNetCon::GetPrompting(void) const
 {
@@ -368,7 +375,7 @@ bool CNetCon::GetPrompting(void) const
 
 //-----------------------------------------------------------------------------
 // Purpose: set whether we should prompt the connect message
-// Input  : bPrompt
+// Input: bPrompt
 //-----------------------------------------------------------------------------
 void CNetCon::SetPrompting(const bool bPrompt)
 {
@@ -377,7 +384,7 @@ void CNetCon::SetPrompting(const bool bPrompt)
 
 //-----------------------------------------------------------------------------
 // Purpose: connect to remote
-// Output : true on success, false otherwise
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CNetCon::Connect(const char* pHostName, const int nPort)
 {
@@ -399,7 +406,7 @@ bool CNetCon::Connect(const char* pHostName, const int nPort)
 
 //-----------------------------------------------------------------------------
 // Purpose: disconnect from current session
-// Input  : *szReason - 
+// Input: *szReason - 
 //-----------------------------------------------------------------------------
 void CNetCon::Disconnect(const char* szReason)
 {
@@ -419,16 +426,16 @@ void CNetCon::Disconnect(const char* szReason)
 
 //-----------------------------------------------------------------------------
 // Purpose: processes received message
-// Input  : *pMsgBuf - 
-//			nMsgLen - 
-//			nMaxLen - 
-// Output : true on success, false otherwise
+// Input: *pMsgBuf - 
+// nMsgLen - 
+// nMaxLen - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
-bool CNetCon::ProcessMessage(const byte* pMsgBuf, const u32 nMsgLen, const u32 nMaxLen)
+bool CNetCon::ProcessMessage(ConnectedNetConsoleData_s& data, const u32 nMaxLen)
 {
 	netcon::response response;
 
-	if (!NetconShared_UnpackEnvelope(this, pMsgBuf, nMsgLen, nMaxLen, &response, true))
+	if (!NetconShared_UnpackEnvelope(this, data, nMaxLen, &response, m_bEncryptFrames, true))
 	{
 		Disconnect("received invalid message");
 		return false;
@@ -444,9 +451,9 @@ bool CNetCon::ProcessMessage(const byte* pMsgBuf, const u32 nMsgLen, const u32 n
 			if (!i) // Means we are marked 'input only' on the rcon server.
 			{
 				vector<byte> vecMsg;
-				const bool ret = Serialize(vecMsg, "", 0, "1", 1, netcon::request_e::SERVERDATA_REQUEST_SEND_CONSOLE_LOG);
+				const bool ret = Serialize(data, vecMsg, "", 0, "1", 1, netcon::request_e::SERVERDATA_REQUEST_SEND_CONSOLE_LOG);
 
-				if (ret && !Send(GetSocket(), vecMsg.data(), (u32)vecMsg.size()))
+				if (ret && !Send(data.socket, vecMsg.data(), (u32)vecMsg.size()))
 				{
 					Error(eDLL_T::CLIENT, NO_ERROR, "Failed to send RCON message: (%s)\n", "SOCKET_ERROR");
 				}
@@ -474,23 +481,32 @@ bool CNetCon::ProcessMessage(const byte* pMsgBuf, const u32 nMsgLen, const u32 n
 
 //-----------------------------------------------------------------------------
 // Purpose: serializes message to vector
-// Input  : &vecBuf - 
-//			*szReqBuf - 
-//			nReqMsgLen - 
-//			*svReqVal - 
-//			nReqValLen - 
-//			requestType - 
-// Output : true on success, false otherwise
+// Input: &vecBuf - 
+// *szReqBuf - 
+// nReqMsgLen - 
+// *svReqVal - 
+// nReqValLen - 
+// requestType - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
-bool CNetCon::Serialize(vector<byte>& vecBuf, const char* szReqBuf, const size_t nReqMsgLen,
+bool CNetCon::Serialize(ConnectedNetConsoleData_s& data, vector<byte>& vecBuf, const char* szReqBuf, const size_t nReqMsgLen,
 	const char* szReqVal, const size_t nReqValLen, const netcon::request_e requestType) const
 {
-	return NetconClient_Serialize(this, vecBuf, szReqBuf, nReqMsgLen, szReqVal, nReqValLen, requestType, m_bEncryptFrames, true);
+	return NetconClient_Serialize(this, data, vecBuf, szReqBuf, nReqMsgLen, szReqVal, nReqValLen, requestType, m_bEncryptFrames, true);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: retrieves the remote connection data
+// Output: nullptr on failure
+//-----------------------------------------------------------------------------
+ConnectedNetConsoleData_s* CNetCon::GetData(void)
+{
+	return NetconShared_GetConnData(this, 0);
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: retrieves the remote socket
-// Output : SOCKET_ERROR (-1) on failure
+// Output: SOCKET_ERROR (-1) on failure
 //-----------------------------------------------------------------------------
 SocketHandle_t CNetCon::GetSocket(void)
 {
@@ -515,8 +531,8 @@ bool CNetCon::IsConnected(void)
 
 //-----------------------------------------------------------------------------
 // Purpose: entrypoint
-// Input  : argc - 
-//			*argv - 
+// Input: argc - 
+// *argv - 
 //-----------------------------------------------------------------------------
 int main(int argc, char* argv[])
 {

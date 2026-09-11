@@ -136,7 +136,7 @@ void SHA1::reset()
  
 void SHA1::transform(uint32 block[BLOCK_BYTES])
 {
-    /* Copy digest[] to working vars */
+    /* Copy digest to working vars */
     uint32 a = digest[0];
     uint32 b = digest[1];
     uint32 c = digest[2];
@@ -226,7 +226,7 @@ void SHA1::transform(uint32 block[BLOCK_BYTES])
     SHA1_R4(c,d,e,a,b,78);
     SHA1_R4(b,c,d,e,a,79);
  
-    /* Add the working vars back into digest[] */
+    /* Add the working vars back into digest */
     digest[0] += a;
     digest[1] += b;
     digest[2] += c;

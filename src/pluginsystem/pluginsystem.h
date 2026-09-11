@@ -140,7 +140,6 @@ public:
 
 	bool LoadInstance(PluginInstance_t& pluginInst);
 	bool UnloadInstance(PluginInstance_t& pluginInst);
-	bool ReloadInstance(PluginInstance_t& pluginInst);
 
 	void InstallCallback(PluginOperation_s* const pio);
 	void RemoveCallback(PluginOperation_s* const pio);

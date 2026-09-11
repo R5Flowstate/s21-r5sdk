@@ -33,6 +33,7 @@
 #include "NavEditor/Include/Editor.h"
 #include "NavEditor/Include/Editor_TileMesh.h"
 #include "NavEditor/Include/CameraUtils.h"
+#include "NavEditor/Include/PerfTimer.h"
 
 #include "game/server/ai_navmesh.h"
 #include "game/server/ai_hull.h"
@@ -761,8 +762,14 @@ void Editor_TileMesh::buildTile(const rdVec3D* pos)
 			if (m_buildTraversePortals)
 			{
 				// Reconnect the traverse links.
+				std::shared_mutex polyMapMutex;
+				TraverseLinkBuildContext buildCtx;
+				buildCtx.editor = this;
+				buildCtx.polyMapMutex = &polyMapMutex;
+
 				dtTraverseLinkConnectParams params;
 				createTraverseLinkParams(params);
+				params.userData = &buildCtx;
 
 				params.linkToNeighbor = false;
 				m_navMesh->connectTraverseLinks(tileRef, params);
@@ -775,6 +782,7 @@ void Editor_TileMesh::buildTile(const rdVec3D* pos)
 	}
 	
 	m_ctx->dumpLog("Build Tile (%d,%d):", tx,ty);
+	invalidateNavMeshCache();
 }
 
 void Editor_TileMesh::getTileExtents(int tx, int ty, rdVec3D* tmin, rdVec3D* tmax)
@@ -835,14 +843,308 @@ void Editor_TileMesh::removeTile(const rdVec3D* pos)
 		}
 
 		createStaticPathingData();
+		invalidateNavMeshCache();
 	}
+}
+
+struct TileBuildParams
+{
+	const rcChunkyTriMesh* chunkyMesh;
+	const rdVec3D* verts;
+	int nverts;
+	const ShapeVolume* volumes;
+	int volumeCount;
+	rcConfig cfg;
+	int polyCellRes;
+	bool buildBvTree;
+	bool filterLowHangingObstacles;
+	bool filterLedgeSpans;
+	bool filterNeighborSlopes;
+	bool filterWalkableLowHeightSpans;
+	int partitionType;
+	float agentHeight;
+	float agentRadius;
+	float agentMaxClimb;
+
+	// Off-mesh connection data (copied from InputGeom to avoid const issues).
+	rdVec3D* offMeshConVerts;
+	rdVec3D* offMeshConRefPos;
+	float* offMeshConRads;
+	float* offMeshConRefYaws;
+	unsigned char* offMeshConDirs;
+	unsigned char* offMeshConJumps;
+	unsigned char* offMeshConOrders;
+	unsigned char* offMeshConAreas;
+	unsigned short* offMeshConFlags;
+	unsigned short* offMeshConId;
+	int offMeshConCount;
+};
+
+struct TileBuildResult
+{
+	unsigned char* data;
+	int dataSize;
+	int tx;
+	int ty;
+};
+
+// Standalone tile build function — uses only local variables, safe to call from any thread.
+static unsigned char* buildTileMeshStandalone(const TileBuildParams& params, rcContext* ctx,
+	const int tx, const int ty, const rdVec3D* bmin, const rdVec3D* bmax, int& dataSize)
+{
+	const rdVec3D* verts = params.verts;
+	const int nverts = params.nverts;
+	const rcChunkyTriMesh* chunkyMesh = params.chunkyMesh;
+
+	rcConfig cfg = params.cfg;
+	cfg.bmin = *bmin;
+	cfg.bmax = *bmax;
+	cfg.bmin.x -= cfg.borderSize*cfg.cs;
+	cfg.bmin.y -= cfg.borderSize*cfg.cs;
+	cfg.bmax.x += cfg.borderSize*cfg.cs;
+	cfg.bmax.y += cfg.borderSize*cfg.cs;
+
+	rcHeightfield* solid = rcAllocHeightfield();
+	if (!solid)
+		return 0;
+	if (!rcCreateHeightfield(ctx, *solid, cfg.width, cfg.height, &cfg.bmin, &cfg.bmax, cfg.cs, cfg.ch))
+	{
+		rcFreeHeightField(solid);
+		return 0;
+	}
+
+	unsigned char* triareas = new unsigned char[chunkyMesh->maxTrisPerChunk];
+	if (!triareas)
+	{
+		rcFreeHeightField(solid);
+		return 0;
+	}
+
+	rdVec2D tbmin(cfg.bmin);
+	rdVec2D tbmax(cfg.bmax);
+
+	int cid[1024];
+	int currentNode = 0;
+	bool done = false;
+	int tileTriCount = 0;
+
+	do {
+		int currentCount = 0;
+		done = rcGetChunksOverlappingRect(chunkyMesh, &tbmin, &tbmax, cid, 1024, currentCount, currentNode);
+		for (int i = 0; i < currentCount; ++i)
+		{
+			const rcChunkyTriMeshNode& node = chunkyMesh->nodes[cid[i]];
+			const int* ctris = &chunkyMesh->tris[node.i*3];
+			const int nctris = node.n;
+
+			tileTriCount += nctris;
+
+			memset(triareas, 0, nctris * sizeof(unsigned char));
+			rcMarkWalkableTriangles(ctx, cfg.walkableSlopeAngle,
+				verts, nverts, ctris, nctris, triareas, cfg.ignoreWindingOrder);
+
+			if (!rcRasterizeTriangles(ctx, verts, nverts, ctris, triareas, nctris, *solid, cfg.walkableClimb))
+			{
+				delete[] triareas;
+				rcFreeHeightField(solid);
+				return 0;
+			}
+		}
+	} while (!done);
+
+	delete[] triareas;
+
+	if (tileTriCount == 0)
+	{
+		rcFreeHeightField(solid);
+		return 0;
+	}
+
+	if (params.filterLowHangingObstacles)
+		rcFilterLowHangingWalkableObstacles(ctx, cfg.walkableClimb, *solid);
+	if (params.filterLedgeSpans)
+		rcFilterLedgeSpans(ctx, cfg.walkableHeight, cfg.walkableClimb, params.filterNeighborSlopes, *solid);
+	if (params.filterWalkableLowHeightSpans)
+		rcFilterWalkableLowHeightSpans(ctx, cfg.walkableHeight, *solid);
+
+	rcCompactHeightfield* chf = rcAllocCompactHeightfield();
+	if (!chf)
+	{
+		rcFreeHeightField(solid);
+		return 0;
+	}
+	if (!rcBuildCompactHeightfield(ctx, cfg.walkableHeight, cfg.walkableClimb, *solid, *chf))
+	{
+		rcFreeHeightField(solid);
+		rcFreeCompactHeightfield(chf);
+		return 0;
+	}
+	rcFreeHeightField(solid);
+
+	if (!rcErodeWalkableArea(ctx, cfg.walkableRadius, *chf))
+	{
+		rcFreeCompactHeightfield(chf);
+		return 0;
+	}
+
+	// Mark areas from shape volumes.
+	for (int i = 0; i < params.volumeCount; ++i)
+	{
+		const ShapeVolume& vol = params.volumes[i];
+		switch (vol.type)
+		{
+		case VOLUME_BOX:
+			rcMarkBoxArea(ctx, &vol.verts[0], &vol.verts[1], vol.flags, vol.area, *chf);
+			break;
+		case VOLUME_CYLINDER:
+			rcMarkCylinderArea(ctx, &vol.verts[0], vol.verts[1].x, vol.verts[1].y, vol.flags, vol.area, *chf);
+			break;
+		case VOLUME_CONVEX:
+			rcMarkConvexPolyArea(ctx, vol.verts, vol.nverts, vol.hmin, vol.hmax, vol.flags, vol.area, *chf);
+			break;
+		}
+	}
+
+	rcContourSet* cset = 0;
+	rcPolyMesh* pmesh = 0;
+	rcPolyMeshDetail* dmesh = 0;
+	unsigned char* navData = 0;
+	int navDataSize = 0;
+
+	if (params.partitionType == EDITOR_PARTITION_WATERSHED)
+	{
+		if (!rcBuildDistanceField(ctx, *chf))
+			goto cleanup;
+		if (!rcBuildRegions(ctx, *chf, cfg.borderSize, cfg.minRegionArea, cfg.mergeRegionArea))
+			goto cleanup;
+	}
+	else if (params.partitionType == EDITOR_PARTITION_MONOTONE)
+	{
+		if (!rcBuildRegionsMonotone(ctx, *chf, cfg.borderSize, cfg.minRegionArea, cfg.mergeRegionArea))
+			goto cleanup;
+	}
+	else
+	{
+		if (!rcBuildLayerRegions(ctx, *chf, cfg.borderSize, cfg.minRegionArea))
+			goto cleanup;
+	}
+
+	cset = rcAllocContourSet();
+	if (!cset)
+		goto cleanup;
+	if (!rcBuildContours(ctx, *chf, cfg.maxSimplificationError, cfg.maxEdgeLen, *cset))
+		goto cleanup;
+	if (cset->nconts == 0)
+		goto cleanup;
+
+	pmesh = rcAllocPolyMesh();
+	if (!pmesh)
+		goto cleanup;
+	if (!rcBuildPolyMesh(ctx, *cset, cfg.maxVertsPerPoly, *pmesh))
+		goto cleanup;
+
+	dmesh = rcAllocPolyMeshDetail();
+	if (!dmesh)
+		goto cleanup;
+	if (!rcBuildPolyMeshDetail(ctx, *pmesh, *chf, cfg.detailSampleDist, cfg.detailSampleMaxError, *dmesh))
+		goto cleanup;
+
+	rcFreeCompactHeightfield(chf);
+	chf = 0;
+	rcFreeContourSet(cset);
+	cset = 0;
+
+	if (cfg.maxVertsPerPoly <= RD_VERTS_PER_POLYGON)
+	{
+		if (pmesh->nverts >= 0xffff)
+			goto cleanup;
+
+		for (int i = 0; i < pmesh->npolys; ++i)
+		{
+			if (pmesh->areas[i] == RC_WALKABLE_AREA)
+				pmesh->areas[i] = DT_POLYAREA_GROUND;
+
+			if (pmesh->areas[i] == DT_POLYAREA_GROUND ||
+				pmesh->areas[i] == DT_POLYAREA_TRIGGER)
+				pmesh->flags[i] |= DT_POLYFLAGS_WALK;
+
+			if (pmesh->surfa[i] <= RC_POLY_SURFAREA_TOO_SMALL_THRESHOLD)
+				pmesh->flags[i] |= DT_POLYFLAGS_TOO_SMALL;
+
+			const int nvp = pmesh->nvp;
+			const unsigned short* p = &pmesh->polys[i*nvp*2];
+
+			for (int j = 0; j < nvp; ++j)
+			{
+				if (p[j] == RD_MESH_NULL_IDX)
+					break;
+				if ((p[nvp+j] & 0x8000) == 0)
+					continue;
+				if ((p[nvp+j] & 0xf) == 0xf)
+					continue;
+
+				pmesh->flags[i] |= DT_POLYFLAGS_HAS_NEIGHBOUR;
+			}
+		}
+
+		dtNavMeshCreateParams createParams;
+		memset(&createParams, 0, sizeof(createParams));
+		createParams.verts = pmesh->verts;
+		createParams.vertCount = pmesh->nverts;
+		createParams.polys = pmesh->polys;
+		createParams.polyFlags = pmesh->flags;
+		createParams.polyAreas = pmesh->areas;
+		createParams.surfAreas = pmesh->surfa;
+		createParams.polyCount = pmesh->npolys;
+		createParams.nvp = pmesh->nvp;
+		createParams.cellResolution = params.polyCellRes;
+		createParams.detailMeshes = dmesh->meshes;
+		createParams.detailVerts = dmesh->verts;
+		createParams.detailVertsCount = dmesh->nverts;
+		createParams.detailTris = dmesh->tris;
+		createParams.detailTriCount = dmesh->ntris;
+		createParams.offMeshConVerts = params.offMeshConVerts;
+		createParams.offMeshConRefPos = params.offMeshConRefPos;
+		createParams.offMeshConRad = params.offMeshConRads;
+		createParams.offMeshConRefYaw = params.offMeshConRefYaws;
+		createParams.offMeshConDir = params.offMeshConDirs;
+		createParams.offMeshConJumps = params.offMeshConJumps;
+		createParams.offMeshConOrders = params.offMeshConOrders;
+		createParams.offMeshConAreas = params.offMeshConAreas;
+		createParams.offMeshConFlags = params.offMeshConFlags;
+		createParams.offMeshConUserID = params.offMeshConId;
+		createParams.offMeshConCount = params.offMeshConCount;
+		createParams.walkableHeight = params.agentHeight;
+		createParams.walkableRadius = params.agentRadius;
+		createParams.walkableClimb = params.agentMaxClimb;
+		createParams.tileX = tx;
+		createParams.tileY = ty;
+		createParams.tileLayer = 0;
+		createParams.bmin = pmesh->bmin;
+		createParams.bmax = pmesh->bmax;
+		createParams.cs = cfg.cs;
+		createParams.ch = cfg.ch;
+		createParams.buildBvTree = params.buildBvTree;
+
+		if (!dtCreateNavMeshData(&createParams, &navData, &navDataSize))
+			navData = 0;
+	}
+
+cleanup:
+	rcFreeCompactHeightfield(chf);
+	rcFreeContourSet(cset);
+	rcFreePolyMesh(pmesh);
+	rcFreePolyMeshDetail(dmesh);
+
+	dataSize = navDataSize;
+	return navData;
 }
 
 void Editor_TileMesh::buildAllTiles()
 {
 	if (!m_geom) return;
 	if (!m_navMesh) return;
-	
+
 	const rdVec3D* bmin = m_geom->getNavMeshBoundsMin();
 	const rdVec3D* bmax = m_geom->getNavMeshBoundsMax();
 	int gw = 0, gh = 0;
@@ -850,46 +1152,166 @@ void Editor_TileMesh::buildAllTiles()
 	const int ts = m_tileSize;
 	const int tw = (gw + ts-1) / ts;
 	const int th = (gh + ts-1) / ts;
-	
+	const int totalTiles = tw * th;
+
+	// Prepare shared build parameters (read-only during build).
+	TileBuildParams params;
+	params.chunkyMesh = m_geom->getChunkyMesh();
+	params.verts = m_geom->getMesh()->getVerts();
+	params.nverts = m_geom->getMesh()->getVertCount();
+	params.volumes = m_geom->getShapeVolumes();
+	params.volumeCount = m_geom->getShapeVolumeCount();
+	params.offMeshConVerts = m_geom->getOffMeshConnectionVerts();
+	params.offMeshConRefPos = m_geom->getOffMeshConnectionRefPos();
+	params.offMeshConRads = m_geom->getOffMeshConnectionRads();
+	params.offMeshConRefYaws = m_geom->getOffMeshConnectionRefYaws();
+	params.offMeshConDirs = m_geom->getOffMeshConnectionDirs();
+	params.offMeshConJumps = m_geom->getOffMeshConnectionJumps();
+	params.offMeshConOrders = m_geom->getOffMeshConnectionOrders();
+	params.offMeshConAreas = m_geom->getOffMeshConnectionAreas();
+	params.offMeshConFlags = m_geom->getOffMeshConnectionFlags();
+	params.offMeshConId = m_geom->getOffMeshConnectionId();
+	params.offMeshConCount = m_geom->getOffMeshConnectionCount();
+	params.polyCellRes = m_polyCellRes;
+	params.buildBvTree = m_buildBvTree;
+	params.filterLowHangingObstacles = m_filterLowHangingObstacles;
+	params.filterLedgeSpans = m_filterLedgeSpans;
+	params.filterNeighborSlopes = m_filterNeighborSlopes;
+	params.filterWalkableLowHeightSpans = m_filterWalkableLowHeightSpans;
+	params.partitionType = m_partitionType;
+	params.agentHeight = m_agentHeight;
+	params.agentRadius = m_agentRadius;
+	params.agentMaxClimb = m_agentMaxClimb;
+
+	memset(&params.cfg, 0, sizeof(params.cfg));
+	params.cfg.cs = m_cellSize;
+	params.cfg.ch = m_cellHeight;
+	params.cfg.walkableSlopeAngle = m_agentMaxSlope;
+	params.cfg.walkableHeight = (int)ceilf(m_agentHeight / m_cellHeight);
+	params.cfg.walkableClimb = (int)floorf(m_agentMaxClimb / m_cellHeight);
+	params.cfg.walkableRadius = (int)ceilf(m_agentRadius / m_cellSize);
+	params.cfg.maxEdgeLen = (int)(m_edgeMaxLen / m_cellSize);
+	params.cfg.maxSimplificationError = m_edgeMaxError;
+	params.cfg.minRegionArea = rdSqr(m_regionMinSize);
+	params.cfg.mergeRegionArea = rdSqr(m_regionMergeSize);
+	params.cfg.maxVertsPerPoly = (int)m_vertsPerPoly;
+	params.cfg.tileSize = m_tileSize;
+	params.cfg.borderSize = params.cfg.walkableRadius + 3;
+	params.cfg.width = params.cfg.tileSize + params.cfg.borderSize*2;
+	params.cfg.height = params.cfg.tileSize + params.cfg.borderSize*2;
+	params.cfg.detailSampleDist = m_detailSampleDist < 0.9f ? 0 : m_cellSize * m_detailSampleDist;
+	params.cfg.detailSampleMaxError = m_cellHeight * m_detailSampleMaxError;
+	params.cfg.ignoreWindingOrder = m_ignoreWindingOrder;
+
 	// Start the build process.
+	m_ctx->resetTimers();
 	m_ctx->startTimer(RC_TIMER_TEMP);
 
-	for (int y = 0; y < th; ++y)
-	{
-		for (int x = 0; x < tw; ++x)
-		{
-			getTileExtents(x, y, &m_lastBuiltTileBmin, &m_lastBuiltTileBmax);
-			
-			int dataSize = 0;
-			unsigned char* data = buildTileMesh(x, y, &m_lastBuiltTileBmin, &m_lastBuiltTileBmax, dataSize);
-			if (data)
-			{
-				// Remove any previous data (navmesh owns and deletes the data).
-				m_navMesh->removeTile(m_navMesh->getTileRefAt(x,y,0),0,0);
-				// Let the navmesh own the data.
+	// Phase 1: Build all tile data in parallel.
+	std::vector<TileBuildResult> results(totalTiles);
 
-				dtTileRef tileRef = 0;
-				dtStatus status = m_navMesh->addTile(data,dataSize,DT_TILE_FREE_DATA,0,&tileRef);
-				if (dtStatusFailed(status))
-					rdFree(data);
-				else
-					m_navMesh->connectTile(tileRef);
-			}
+	const int numWorkers = rdMax(1, (int)std::thread::hardware_concurrency() - 1);
+	std::atomic<int> nextTile(0);
+
+	auto workerFunc = [&]()
+	{
+		// Each thread gets its own context for logging/timing.
+		BuildContext threadCtx;
+
+		for (;;)
+		{
+			const int tileIdx = nextTile.fetch_add(1);
+			if (tileIdx >= totalTiles)
+				break;
+
+			const int tx = tileIdx % tw;
+			const int ty = tileIdx / tw;
+
+			rdVec3D tileBmin, tileBmax;
+			const float tileCs = ts * m_cellSize;
+			tileBmin.x = bmax->x - (tx+1)*tileCs;
+			tileBmin.y = bmin->y + (ty)*tileCs;
+			tileBmin.z = bmin->z;
+			tileBmax.x = bmax->x - (tx)*tileCs;
+			tileBmax.y = bmin->y + (ty+1)*tileCs;
+			tileBmax.z = bmax->z;
+
+			int dataSize = 0;
+			unsigned char* data = buildTileMeshStandalone(params, &threadCtx, tx, ty, &tileBmin, &tileBmax, dataSize);
+
+			results[tileIdx].data = data;
+			results[tileIdx].dataSize = dataSize;
+			results[tileIdx].tx = tx;
+			results[tileIdx].ty = ty;
+		}
+	};
+
+	std::vector<std::thread> workers;
+	workers.reserve(numWorkers);
+	for (int i = 0; i < numWorkers; ++i)
+		workers.emplace_back(workerFunc);
+	for (auto& w : workers)
+		w.join();
+
+	// Phase 2: Add tiles to navmesh sequentially (dtNavMesh is not thread-safe).
+	rdTimeType phaseStart = getPerfTime();
+
+	for (int i = 0; i < totalTiles; ++i)
+	{
+		if (results[i].data)
+		{
+			m_navMesh->removeTile(m_navMesh->getTileRefAt(results[i].tx, results[i].ty, 0), 0, 0);
+
+			dtTileRef tileRef = 0;
+			dtStatus status = m_navMesh->addTile(results[i].data, results[i].dataSize, DT_TILE_FREE_DATA, 0, &tileRef);
+			if (dtStatusFailed(status))
+				rdFree(results[i].data);
+			else
+				m_navMesh->connectTile(tileRef);
 		}
 	}
 
+	rdTimeType addTileEnd = getPerfTime();
+
 	connectOffMeshLinks();
+
+	rdTimeType offMeshEnd = getPerfTime();
 
 	if (m_buildTraversePortals)
 		createTraverseLinks();
 
+	rdTimeType traverseEnd = getPerfTime();
+
 	createStaticPathingData();
-	
-	// Start the build process.	
+
+	rdTimeType pathingEnd = getPerfTime();
+
+	m_ctx->log(RC_LOG_PROGRESS, ">> Add tiles:        %.1fms", getPerfTimeUsec(addTileEnd - phaseStart) / 1000.0f);
+	m_ctx->log(RC_LOG_PROGRESS, ">> Off-mesh links:   %.1fms", getPerfTimeUsec(offMeshEnd - addTileEnd) / 1000.0f);
+	m_ctx->log(RC_LOG_PROGRESS, ">> Traverse links:   %.1fms", getPerfTimeUsec(traverseEnd - offMeshEnd) / 1000.0f);
+	m_ctx->log(RC_LOG_PROGRESS, ">> Static pathing:   %.1fms", getPerfTimeUsec(pathingEnd - traverseEnd) / 1000.0f);
+
+	// Stop the build process.
 	m_ctx->stopTimer(RC_TIMER_TEMP);
 
 	m_totalBuildTimeMs = m_ctx->getAccumulatedTime(RC_TIMER_TEMP)/1000.0f;
 	m_tileCol = duRGBA(0,0,0,64);
+	invalidateNavMeshCache();
+
+	// Rebuild the last tile using the member-function path to populate
+	// intermediate results (m_solid, m_chf, m_cset, m_pmesh, m_dmesh)
+	// for the debug visualization options.
+	if (m_keepInterResults && totalTiles > 0)
+	{
+		const int lastIdx = totalTiles - 1;
+		const int lastTx = lastIdx % tw;
+		const int lastTy = lastIdx / tw;
+		getTileExtents(lastTx, lastTy, &m_lastBuiltTileBmin, &m_lastBuiltTileBmax);
+		int tempSize = 0;
+		unsigned char* tempData = buildTileMesh(lastTx, lastTy, &m_lastBuiltTileBmin, &m_lastBuiltTileBmax, tempSize);
+		if (tempData)
+			rdFree(tempData); // Discard the tile data; we only wanted the intermediates.
+	}
 }
 
 void Editor_TileMesh::removeAllTiles()
@@ -911,22 +1333,42 @@ void Editor_TileMesh::removeAllTiles()
 
 	m_traverseLinkPolyMap.clear();
 	createStaticPathingData();
+	invalidateNavMeshCache();
 }
 
-void Editor_TileMesh::buildAllHulls()
+void Editor_TileMesh::buildAllHulls(const char* hullFilter, const float cellSizeOverride, const bool force)
 {
 	for (const NavMeshDefaults_s& h : g_navMeshDefaults)
 	{
+		if (hullFilter && strcmp(h.name, hullFilter) != 0)
+			continue;
+
 		m_agentRadius = h.radius;
 		m_agentMaxClimb = h.climbHeight;
 		m_agentHeight = h.height;
 		m_navmeshName = h.name;
-		m_cellSize = h.cellSize;
+		m_cellSize = (cellSizeOverride > 0.0f) ? cellSizeOverride : h.cellSize;
 		m_polyCellRes = h.polyCellResolution;
 
 		m_ctx->resetLog();
 
-		handleSettings();
+		// Must stay free of ImGui: this path runs headless (-console).
+		int tileCountX = 0, tileCountY = 0;
+		EditorCommon_CalcTileProperties(m_geom, m_minTileBits, m_maxTileBits,
+			m_tileSize, m_cellSize, m_maxTiles, m_maxPolysPerTile, tileCountX, tileCountY);
+
+		const int tileCount = tileCountX * tileCountY;
+		printf("[bake] hull %s: cellSize=%.3f tiles=%dx%d (%d) maxTiles=%d maxPolysPerTile=%d\n",
+			h.name, m_cellSize, tileCountX, tileCountY, tileCount, m_maxTiles, m_maxPolysPerTile);
+
+		// Traverse table is quadratic in poly-group count; unclamped maps runaway here.
+		if (tileCount > 8192 && !force)
+		{
+			printf("[bake] REFUSING hull %s: %d tiles exceeds the 8192 guard. Clamp --bounds, or pass --force.\n",
+				h.name, tileCount);
+			continue;
+		}
+
 		handleBuild();
 
 		m_ctx->dumpLog("Build log %s:", h.name);

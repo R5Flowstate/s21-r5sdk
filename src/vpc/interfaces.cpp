@@ -10,8 +10,8 @@
 
 //---------------------------------------------------------------------------------
 // Purpose: register a new factory
-// Input  : createFn - 
-//          *pName    - 
+// Input: createFn - 
+// *pName - 
 //---------------------------------------------------------------------------------
 void CFactorySystem::AddFactory(InstantiateInterfaceFn createFn, const char* pName) const
 {
@@ -20,7 +20,7 @@ void CFactorySystem::AddFactory(InstantiateInterfaceFn createFn, const char* pNa
 
 //---------------------------------------------------------------------------------
 // Purpose: get a factory by name
-// Input  : *pName - 
+// Input: *pName - 
 //---------------------------------------------------------------------------------
 void* CFactorySystem::GetFactory(const char* pName) const
 {
@@ -37,7 +37,7 @@ void* CFactorySystem::GetFactory(const char* pName) const
 
 //---------------------------------------------------------------------------------
 // Purpose: get the factory system's interface version
-// Input  : *pName - 
+// Input: *pName - 
 //---------------------------------------------------------------------------------
 const char* CFactorySystem::GetVersion(void) const
 {
@@ -45,7 +45,7 @@ const char* CFactorySystem::GetVersion(void) const
 }
 
 //---------------------------------------------------------------------------------
-// Purpose: 
+// Purpose
 //---------------------------------------------------------------------------------
 void* CreateInterface(const char* pName, int* pReturnCode)
 {
@@ -53,7 +53,7 @@ void* CreateInterface(const char* pName, int* pReturnCode)
 }
 
 //---------------------------------------------------------------------------------
-// Purpose: 
+// Purpose
 //---------------------------------------------------------------------------------
 IFactorySystem* GetFactorySystem()
 {

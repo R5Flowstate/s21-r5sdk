@@ -1,6 +1,6 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -36,7 +36,7 @@
 
 
 //-----------------------------------------------------------------------------
-// The CUtlBlockMemory class:
+// The CUtlBlockMemory class
 // A growable memory class that allocates non-sequential blocks, but is indexed sequentially
 //-----------------------------------------------------------------------------
 template< class T, class I >

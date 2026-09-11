@@ -1,6 +1,6 @@
 //===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //===========================================================================//
@@ -15,7 +15,7 @@ typedef struct phyheader_s
 	int     id;
 	short   numsolids;
 	short   align;
-	int     checksum; // checksum of source .rmdl file
+	int     checksum; // checksum of source.rmdl file
 	int     keyvalueindex;
 } phyheader_t;
 

@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose:
+// Purpose
 //
 //=============================================================================//
 #include "concommandhash.h"
@@ -48,7 +48,7 @@ void CConCommandHash::Init(void)
 
 //-----------------------------------------------------------------------------
 // Purpose: Insert data into the hash table given its key (unsigned int), 
-//			WITH a check to see if the element already exists within the hash.
+// WITH a check to see if the element already exists within the hash.
 //-----------------------------------------------------------------------------
 CConCommandHash::CCommandHashHandle_t CConCommandHash::Insert(ConCommandBase* cmd)
 {
@@ -61,7 +61,7 @@ CConCommandHash::CCommandHashHandle_t CConCommandHash::Insert(ConCommandBase* cm
 }
 //-----------------------------------------------------------------------------
 // Purpose: Insert data into the hash table given its key (unsigned int),
-//          WITHOUT a check to see if the element already exists within the hash.
+// WITHOUT a check to see if the element already exists within the hash.
 //-----------------------------------------------------------------------------
 CConCommandHash::CCommandHashHandle_t CConCommandHash::FastInsert(ConCommandBase* cmd)
 {
@@ -150,9 +150,6 @@ CConCommandHash::CCommandHashHandle_t CConCommandHash::Find(const ConCommandBase
 	// or something similarly non-fatally bad. With this #if 1, we'll search
 	// by name instead of by pointer, which is more robust in the face
 	// of double registered commands, but obviously slower.
-#if 0 
-	return Find(cmd->GetName());
-#else
 	HashKey_t hashkey = Hash(cmd);
 	int iBucket = hashkey & kBUCKETMASK;
 
@@ -182,7 +179,6 @@ CConCommandHash::CCommandHashHandle_t CConCommandHash::Find(const ConCommandBase
 		"ConCommand %s couldn't be found by pointer, but was found by name!", cmd->GetName());
 #endif
 	return InvalidHandle();
-#endif
 }
 
 

@@ -1,6 +1,6 @@
-﻿//===== Copyright (c) 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright (c) 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //=============================================================================//
@@ -147,8 +147,8 @@ private:
 
 // -------------------------------------------------------------------------- // 
 // CLimitTimer
-// Use this to time whether a desired interval of time has passed.  It's extremely fast
-// to check while running.  NOTE: CMicroSecOverage() and CMicroSecLeft() are not as fast to check.
+// Use this to time whether a desired interval of time has passed. It's extremely fast
+// to check while running. NOTE: CMicroSecOverage and CMicroSecLeft are not as fast to check.
 // -------------------------------------------------------------------------- // 
 class CLimitTimer
 {
@@ -481,7 +481,7 @@ inline CAverageTimeMarker::~CAverageTimeMarker(void)
 // CLimitTimer inlines
 // -------------------------------------------------------------------------- // 
 // Purpose: Initializes the limit timer with a period of time to measure.
-// Input  : cMicroSecDuration -		How long a time period to measure
+// Input: cMicroSecDuration - How long a time period to measure
 //-----------------------------------------------------------------------------
 inline void CLimitTimer::SetLimit(uint64_t cMicroSecDuration)
 {
@@ -539,7 +539,7 @@ inline uint64_t CLimitTimer::CMicroSecLeft(void) const
 // Simple tool to support timing a block of code, and reporting the results on
 // program exit or at each iteration
 //
-//	Macros used because dbg.h uses this header, thus Msg() is unavailable
+//	Macros used because dbg.h uses this header, thus Msg is unavailable
 // -------------------------------------------------------------------------- // 
 
 #define PROFILE_SCOPE(name)                                                          \

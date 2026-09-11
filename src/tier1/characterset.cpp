@@ -1,9 +1,9 @@
-﻿//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
-// $Workfile:     $
-// $Date:         $
+// $Workfile: $
+// $Date: $
 //
 //-----------------------------------------------------------------------------
 // $Log: $
@@ -13,13 +13,13 @@
 
 #include "tier1/characterset.h"
 
-// memdbgon must be the last include file in a .cpp file!!!
+// memdbgon must be the last include file in a.cpp file!!!
 #include "tier0/memdbgon.h"
 
 //-----------------------------------------------------------------------------
 // Purpose: builds a simple lookup table of a group of important characters
-// Input  : *pParseGroup - pointer to the buffer for the group
-//			*pGroupString - null terminated list of characters to flag
+// Input: *pParseGroup - pointer to the buffer for the group
+// *pGroupString - null terminated list of characters to flag
 //-----------------------------------------------------------------------------
 void CharacterSetBuild(characterset_t* pSetBuffer, const char* pszSetString)
 {

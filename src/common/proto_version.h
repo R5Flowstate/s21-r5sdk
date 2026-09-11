@@ -1,6 +1,6 @@
 //============ Copyright Valve Corporation, All rights reserved. ==============//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -11,7 +11,7 @@
 #pragma once
 #endif
 
-// The current network protocol version.  Changing this makes clients and servers incompatible
+// The current network protocol version. Changing this makes clients and servers incompatible
 #define PROTOCOL_VERSION    529
 
 #endif

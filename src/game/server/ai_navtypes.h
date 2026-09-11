@@ -12,7 +12,7 @@
 #endif
 
 // ---------------------------
-//  Navigation Type
+// Navigation Type
 // ---------------------------
 enum Navigation_e
 {

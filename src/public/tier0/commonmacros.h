@@ -1,6 +1,6 @@
 //========= Copyright Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -48,14 +48,13 @@ inline bool IsPowerOfTwo(T value)
 #define __HACK_LINE_AS_STRING__(x) CONST_INTEGER_AS_STRING(x) //__LINE__ can only be converted to an actual number by going through this, otherwise the output is literally "__LINE__"
 #define __LINE__AS_STRING __HACK_LINE_AS_STRING__(__LINE__) //Gives you the line number in constant string form
 
-// Using ARRAYSIZE implementation from winnt.h:
+// Using ARRAYSIZE implementation from winnt.h
 #ifdef ARRAYSIZE
 #undef ARRAYSIZE
 #endif
 
 // Return the number of elements in a statically sized array.
-//   DWORD Buffer[100];
-//   RTL_NUMBER_OF(Buffer) == 100
+// DWORD Buffer[100];
 // This is also popularly known as: NUMBER_OF, ARRSIZE, _countof, NELEM, etc.
 //
 #define RTL_NUMBER_OF_V1(A) (sizeof(A)/sizeof((A)[0]))
@@ -86,8 +85,6 @@ inline bool IsPowerOfTwo(T value)
 // typedef char array_of_char[N];
 // typedef array_of_char *pointer_to_array_of_char;
 //
-// sizeof(array_of_char) == N
-// sizeof(*pointer_to_array_of_char) == N
 //
 // pointer_to_array_of_char RtlpNumberOf(reference_to_array_of_T);
 //
@@ -101,7 +98,7 @@ template <typename T, size_t N>
 char(*RtlpNumberOf(UNALIGNED T(&)[N]))[N];
 
 #ifdef _PREFAST_
-// The +0 is so that we can go:
+// The +0 is so that we can go
 // size = ARRAYSIZE(array) * sizeof(array[0]) without triggering a /analyze
 // warning about multiplying sizeof.
 #define RTL_NUMBER_OF_V2(A) (sizeof(*RtlpNumberOf(A))+0)
@@ -109,39 +106,31 @@ char(*RtlpNumberOf(UNALIGNED T(&)[N]))[N];
 #define RTL_NUMBER_OF_V2(A) (sizeof(*RtlpNumberOf(A)))
 #endif
 
-// This does not work with:
+// This does not work with
 //
-// void Foo()
-// {
-//    struct { int x; } y[2];
-//    RTL_NUMBER_OF_V2(y); // illegal use of anonymous local type in template instantiation
-// }
+// void Foo
+// struct { int x; } y[2];
+// RTL_NUMBER_OF_V2(y); // illegal use of anonymous local type in template instantiation
 //
-// You must instead do:
+// You must instead do
 //
 // struct Foo1 { int x; };
 //
-// void Foo()
-// {
-//    Foo1 y[2];
-//    RTL_NUMBER_OF_V2(y); // ok
-// }
+// void Foo
+// Foo1 y[2];
+// RTL_NUMBER_OF_V2(y); // ok
 //
 // OR
 //
-// void Foo()
-// {
-//    struct { int x; } y[2];
-//    RTL_NUMBER_OF_V1(y); // ok
-// }
+// void Foo
+// struct { int x; } y[2];
+// RTL_NUMBER_OF_V1(y); // ok
 //
 // OR
 //
-// void Foo()
-// {
-//    struct { int x; } y[2];
-//    _ARRAYSIZE(y); // ok
-// }
+// void Foo
+// struct { int x; } y[2];
+// _ARRAYSIZE(y); // ok
 
 #else
 #define RTL_NUMBER_OF_V2(A) RTL_NUMBER_OF_V1(A)

@@ -1,6 +1,6 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -37,7 +37,7 @@
 
 
 //-----------------------------------------------------------------------------
-// The CUtlFixedMemory class:
+// The CUtlFixedMemory class
 // A growable memory class that allocates non-sequential blocks, but is indexed sequentially
 //-----------------------------------------------------------------------------
 template< class T >
@@ -307,17 +307,12 @@ void CUtlFixedMemory<T>::Grow(ssize_t num)
 	}
 	else
 	{
-#if 1	// IsIdxAfter assumes that newly allocated blocks are at the end
 		BlockHeader_t* RESTRICT  pbh = m_pBlocks;
 		while (pbh->m_pNext)
 		{
 			pbh = pbh->m_pNext;
 		}
 		pbh->m_pNext = pBlockHeader;
-#else
-		pBlockHeader = m_pBlocks;
-		pBlockHeader->m_pNext = m_pBlocks;
-#endif
 	}
 }
 

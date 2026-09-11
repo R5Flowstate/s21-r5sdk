@@ -1,3 +1,4 @@
+#if defined(CLIENT_DLL)
 //===========================================================================//
 //
 // Purpose: Model loading / unloading interface
@@ -10,9 +11,7 @@
 #include "engine/modelloader.h"
 #include "engine/vis_debug.h"
 #include "datacache/mdlcache.h"
-#ifndef DEDICATED
 #include <vgui/vgui_baseui_interface.h>
-#endif // !DEDICATED
 #include <filesystem/filesystem.h>
 
 static ConVar vis_validate_on_load("vis_validate_on_load", "0", FCVAR_DEVELOPMENTONLY, "Validate visibility tree data on load");
@@ -30,7 +29,7 @@ static int s_nCellCount = 0;
 
 //-----------------------------------------------------------------------------
 // Purpose: returns whether or not the lump type could be loaded from cache
-// Input  : lumpType - 
+// Input: lumpType - 
 //-----------------------------------------------------------------------------
 bool IsLumpTypeCachable(int lumpType)
 {
@@ -88,7 +87,7 @@ bool IsLumpTypeCachable(int lumpType)
 
 //-----------------------------------------------------------------------------
 // Purpose: returns whether or not the lump type can be treated as external in code
-// Input  : lumpType - 
+// Input: lumpType - 
 //-----------------------------------------------------------------------------
 bool IsLumpTypeExternal(int lumpType)
 {
@@ -107,7 +106,7 @@ bool IsLumpTypeExternal(int lumpType)
 
 //-----------------------------------------------------------------------------
 // Purpose: returns whether or not the lump type should be loaded on the server
-// Input  : lumpType - 
+// Input: lumpType - 
 //-----------------------------------------------------------------------------
 bool IsLumpTypeForServer(int lumpType)
 {
@@ -145,42 +144,30 @@ bool IsLumpTypeForServer(int lumpType)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : *loader - 
-//			*model - 
+// Purpose
+// Input: *loader - 
+// *model - 
 //-----------------------------------------------------------------------------
 void CModelLoader::LoadModel(CModelLoader* loader, model_t* model)
 {
 	//if (!pErrorMDL)
-	//{
-	//	if (strcmp(model->szPathName, ERROR_MODEL) == 0)
-	//	{
-	//		pErrorMDL = model;
-	//	}
-	//}
+	// pErrorMDL = model;
 
 	//string svExtension = model->szPathName;
 	//size_t npos = svExtension.find(".");
 	//if (npos != string::npos)
-	//{
 	//	svExtension = svExtension.substr(npos + 1);
-	//}
 
-	//if (strcmp(svExtension.c_str(), "rmdl") == 0 && strcmp(model->szPathName, ERROR_MODEL) != 0)
-	//{
+	//if (strcmp(svExtension.c_str, "rmdl") == 0 && strcmp(model->szPathName, ERROR_MODEL) != 0)
 	//	studiohdr_t* pStudioHDR = g_MDLCache->FindMDL(g_MDLCache->m_pVTable, model->studio, 0);
-	//	if (pStudioHDR == pErrorStudioHDR)
-	//	{
-	//		model = pErrorMDL;
-	//	}
-	//}
+	// model = pErrorMDL;
 	return CModelLoader__LoadModel(loader, model);
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : *loader - 
-//			*model - 
+// Purpose
+// Input: *loader - 
+// *model - 
 //-----------------------------------------------------------------------------
 uint64_t CModelLoader::Map_LoadModelGuts(CModelLoader* loader, model_t* model)
 {
@@ -189,9 +176,7 @@ uint64_t CModelLoader::Map_LoadModelGuts(CModelLoader* loader, model_t* model)
 
 void CMapLoadHelper::Constructor(CMapLoadHelper* loader, int lumpToLoad)
 {
-#ifndef DEDICATED
 	g_pEngineVGui->UpdateProgressBar(PROGRESS_DEFAULT);
-#endif // !DEDICATED
 
 	if (lumpToLoad > HEADER_LUMPS-1)
 		Error(eDLL_T::ENGINE, EXIT_FAILURE, "Can't load lump %i, range is 0 to %i!!!\n", lumpToLoad, HEADER_LUMPS-1);
@@ -207,14 +192,546 @@ void CMapLoadHelper::Constructor(CMapLoadHelper* loader, int lumpToLoad)
 	loader->m_bUnk = false;
 	loader->m_nLumpOffset = -1;
 
-#ifdef DEDICATED
+
+	if (lumpToLoad <= s_MapHeader->lastLump)
+	{
+		const lump_t* lump = &s_MapHeader->lumps[lumpToLoad];
+
+		const int lumpOffset = lump->fileofs;
+		const int lumpSize = lump->filelen;
+
+		if (lumpSize <= 0)
+		{
+			loader->m_nLumpSize = 0;
+			loader->m_nLumpOffset = 0;
+			loader->m_nLumpVersion = 0;
+
+			// this lump has no data
+			return;
+		}
+
+		loader->m_nLumpSize = lumpSize;
+		loader->m_nLumpOffset = lumpOffset;
+		loader->m_nLumpVersion = lump->version;
+
+		FileHandle_t mapFileHandle = *s_MapFileHandle;
+
+		if (mapFileHandle == FILESYSTEM_INVALID_HANDLE)
+		{
+			Error(eDLL_T::ENGINE, EXIT_FAILURE, "Can't load map from invalid handle!!!\n");
+		}
+
+		loader->m_nUncompressedLumpSize = lumpSize;
+
+		FileSystemCache fileCache;
+		fileCache.pBuffer = nullptr;
+
+		char lumpPathBuf[MAX_PATH];
+		V_snprintf(lumpPathBuf, sizeof(lumpPathBuf), "%s.%.4X.bsp_lump", s_szMapPathName, lumpToLoad);
+
+		// Skip ReadFromCache; IFileSystem vtable is unverified. Disk fallback is correct.
+		{
+			loader->m_pRawData = new byte[lumpSize];
+			loader->m_pData = loader->m_pRawData;
+
+			FileHandle_t hLumpFile = FileSystem()->Open(lumpPathBuf, "rb");
+			if (hLumpFile != FILESYSTEM_INVALID_HANDLE)
+			{
+				DevMsg(eDLL_T::ENGINE, "Loading lump %.4x from file. Buffer: %p\n", lumpToLoad, loader->m_pRawData);
+				// IBaseFileSystem::Read, not IFileSystem::ReadEx.
+				BaseFileSystem()->Read(loader->m_pRawData, lumpSize, hLumpFile);
+				FileSystem()->Close(hLumpFile);
+			}
+			else // Seek to offset in packed BSP file to load the lump.
+			{
+				FileSystem()->Seek(mapFileHandle, loader->m_nLumpOffset, FILESYSTEM_SEEK_HEAD);
+				BaseFileSystem()->Read(loader->m_pRawData, lumpSize, mapFileHandle);
+			}
+		}
+
+		//---------------------------------------------------------------------
+		// VISIBILITY TREE VALIDATION
+		// Cache lump data for cross-validation and perform checks
+		//---------------------------------------------------------------------
+		if (vis_validate_on_load.GetBool())
+		{
+			switch (lumpToLoad)
+			{
+			case LUMP_CELL_AABB_NODES: // 0x77
+				s_pCellAABBNodes = reinterpret_cast<const dcellaabbnode_t*>(loader->m_pData);
+				s_nCellAABBNodeCount = lumpSize / sizeof(dcellaabbnode_t);
+				DevMsg(eDLL_T::ENGINE, "Loaded CELL_AABB_NODES: %d nodes (%d bytes)\n", 
+					s_nCellAABBNodeCount, lumpSize);
+				
+				// Validate if we already have objReferences
+				if (s_pObjReferences && s_nObjReferenceCount > 0)
+				{
+					ValidateCellAABBNodes(s_pCellAABBNodes, s_nCellAABBNodeCount, s_nObjReferenceCount);
+				}
+				break;
+
+			case LUMP_OBJ_REFERENCES: // 0x78
+				s_pObjReferences = reinterpret_cast<const int32_t*>(loader->m_pData);
+				s_nObjReferenceCount = lumpSize / sizeof(int32_t);
+				DevMsg(eDLL_T::ENGINE, "Loaded OBJ_REFERENCES: %d refs (%d bytes, %d bytes/ref)\n", 
+					s_nObjReferenceCount, lumpSize, (int)sizeof(int32_t));
+				
+				// Validate if we already have AABB nodes
+				if (s_pCellAABBNodes && s_nCellAABBNodeCount > 0)
+				{
+					ValidateCellAABBNodes(s_pCellAABBNodes, s_nCellAABBNodeCount, s_nObjReferenceCount);
+				}
+				break;
+
+			case LUMP_CELLS: // 0x6B
+				s_pCells = reinterpret_cast<const dcell_t*>(loader->m_pData);
+				s_nCellCount = lumpSize / sizeof(dcell_t);
+				DevMsg(eDLL_T::ENGINE, "Loaded CELLS: %d cells (%d bytes)\n", 
+					s_nCellCount, lumpSize);
+				
+				// Validate if we already have AABB nodes
+				if (s_pCellAABBNodes && s_nCellAABBNodeCount > 0)
+				{
+					ValidateCells(s_pCells, s_nCellCount, s_nCellAABBNodeCount);
+				}
+				break;
+
+			case LUMP_OBJ_REFERENCE_BOUNDS: // 0x79
+				{
+					int boundsCount = lumpSize / sizeof(dobjrefbounds_t);
+					DevMsg(eDLL_T::ENGINE, "Loaded OBJ_REFERENCE_BOUNDS: %d bounds (%d bytes)\n", 
+						boundsCount, lumpSize);
+					
+					// Check bounds count matches objReferences count
+					if (s_nObjReferenceCount > 0 && boundsCount != s_nObjReferenceCount)
+					{
+						Warning(eDLL_T::ENGINE, "OBJ_REFERENCE_BOUNDS count (%d) != OBJ_REFERENCES count (%d)!\n",
+							boundsCount, s_nObjReferenceCount);
+					}
+				}
+				break;
+
+			case LUMP_CELL_BSP_NODES: // 0x6A
+				{
+					int bspNodeCount = lumpSize / sizeof(dcellbspnode_t);
+					DevMsg(eDLL_T::ENGINE, "Loaded CELL_BSP_NODES: %d nodes (%d bytes)\n", 
+						bspNodeCount, lumpSize);
+				}
+				break;
+			}
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: drop cross-lump vis pointers before native Init; m_pRawData is
+// orphaned across map change.
+//-----------------------------------------------------------------------------
+void CMapLoadHelper::Init(void* pMapModel, const char* loadname)
+{
+	if (!s_MapLoadCount || *s_MapLoadCount == 1)
+	{
+		s_pCellAABBNodes     = nullptr;
+		s_nCellAABBNodeCount = 0;
+		s_pObjReferences     = nullptr;
+		s_nObjReferenceCount = 0;
+		s_pCells             = nullptr;
+		s_nCellCount         = 0;
+	}
+
+	CMapLoadHelper__Init(pMapModel, loadname);
+}
+
+static void Cubemap_DumpBound(const char* pszLoadName, int nSampleCount)
+{
+	const uint8_t* pTex = nullptr;
+	int nStoredCount = -1;
+	if (s_mapCubemapSet)
+	{
+		pTex = *reinterpret_cast<const uint8_t* const*>(s_mapCubemapSet);
+		nStoredCount = *reinterpret_cast<const int*>(s_mapCubemapSet + 0x18);
+	}
+
+	int nArr = -1;
+	int nMisc = -1;
+	int nType = -1;
+	const void* pRhi = nullptr;
+	if (pTex)
+	{
+		nArr = pTex[0x10];
+		nMisc = pTex[0x11];
+		nType = pTex[0x1D];
+		pRhi = *reinterpret_cast<const void* const*>(pTex + 0x80);
+	}
+
+	const char* pszKind = "none";
+	if (pTex)
+	{
+		if (nArr == 6)
+			pszKind = "DEFAULT";
+		else if (nArr > 6 && (nMisc & 2))
+			pszKind = "MAP-CUBE";
+		else
+			pszKind = "OTHER";
+	}
+
+	alignas(8) char szPath[260];
+	szPath[0] = '\0';
+	void* pLookup = nullptr;
+	int nLookupArr = -1;
+	int nLookupMisc = -1;
+	if (pszLoadName && pszLoadName[0] && v_Pak_FindAssetVoid && (v_HashNameAligned || v_HashNameUnaligned))
+	{
+		V_snprintf(szPath, sizeof(szPath), "texture/%s/cubemaps_hdr.rpak", pszLoadName);
+		uint64_t (*const pfnHash)(const char*) = ((reinterpret_cast<uintptr_t>(szPath) & 3) != 0 && v_HashNameUnaligned)
+			? v_HashNameUnaligned : v_HashNameAligned;
+		const uint64_t nGuid = pfnHash ? pfnHash(szPath) : 0;
+		pLookup = v_Pak_FindAssetVoid(nGuid, nullptr);
+		if (pLookup)
+		{
+			const uint8_t* pFound = static_cast<const uint8_t*>(pLookup);
+			nLookupArr = pFound[0x10];
+			nLookupMisc = pFound[0x11];
+		}
+		Msg(eDLL_T::ENGINE,
+			"[CUBEMAP] lookup path='%s' guid=%016llX found=%p arr=%d misc=0x%X\n",
+			szPath, static_cast<unsigned long long>(nGuid), pLookup, nLookupArr, nLookupMisc);
+	}
+
+	Msg(eDLL_T::ENGINE,
+		"[CUBEMAP] load='%s' samples=%d stored=%d tex=%p kind=%s arr=%d misc=0x%X type=%d rhi=%p\n",
+		pszLoadName ? pszLoadName : "(null)", nSampleCount, nStoredCount, pTex,
+		pszKind, nArr, nMisc, nType, pRhi);
+}
+
+static __int64 __fastcall Hook_Mod_LoadCubemapArray(void* pMap, const char* pszLoadName,
+	void* pSamples, const float* pAmbientRcp, int nSampleCount)
+{
+	const __int64 nResult = Mod_LoadCubemapArray(pMap, pszLoadName, pSamples, pAmbientRcp, nSampleCount);
+	Cubemap_DumpBound(pszLoadName, nSampleCount);
+	return nResult;
+}
+
+static void CC_CubemapDump_f(const CCommand& args)
+{
+	(void)args;
+	Cubemap_DumpBound("(dump)", -1);
+}
+
+static ConCommand sdk_cubemap_dump("sdk_cubemap_dump", CC_CubemapDump_f,
+	"Dump the live map cubemap set (arraySize/miscFlags/rhi).", FCVAR_DEVELOPMENTONLY);
+
+//-----------------------------------------------------------------------------
+// Purpose: Hook 'AddGameLump' and load the external lump from the disk instead
+// Input: *loader -
+// *model -
+//-----------------------------------------------------------------------------
+void AddGameLump()
+{
+	char lumpPathBuf[MAX_PATH];
+	V_snprintf(lumpPathBuf, sizeof(lumpPathBuf), "%s.%.4X.bsp_lump", s_szMapPathName, LUMP_GAME_LUMP);
+
+	FileHandle_t hLumpFile = FileSystem()->Open(lumpPathBuf, "rb");
+
+	if (hLumpFile != FILESYSTEM_INVALID_HANDLE)
+	{
+		// This function uses the 's_szMapPathName' internally to copy the map
+		// path to another static buffer which is used as the game lump path.
+		// We temporarily set the path to that of the game lump so that other
+		// routines are loading the game lump instead of the packed BSP.
+		char oldMapPathName[MAX_PATH];
+		strcpy(oldMapPathName, s_szMapPathName);
+		strcpy(s_szMapPathName, lumpPathBuf);
+
+		// This function uses the 's_MapFileHandle' internally.
+		// basically, the idea is to set this static filehandle
+		// to that of the GAME_LUMP lump, so it reads that instead.
+		FileHandle_t hOrigMapFileHandle = *s_MapFileHandle;
+		*s_MapFileHandle = hLumpFile;
+
+		// Set the file offset to 0, as we are loading it from
+		// the external lump instead of the one packed in the BSP.
+		lump_t* pLump = &s_MapHeader->lumps[LUMP_GAME_LUMP];
+		pLump->fileofs = 0;
+
+		v_AddGameLump();
+
+		// Restore...
+		strcpy(s_szMapPathName, oldMapPathName);
+		*s_MapFileHandle = hOrigMapFileHandle;
+
+		FileSystem()->Close(hLumpFile);
+	}
+	else
+	{
+		// Load the lump from the monolithic BSP file...
+		v_AddGameLump();
+	}
+}
+
+static void Cubemap_ResolveLive(void)
+{
+	const CModule::ModuleSections_t* pText = g_GameDll.FindSectionByName(".text");
+	const size_t nText = (pText && pText->IsSectionValid()) ? pText->m_nSectionSize : 0;
+	Msg(eDLL_T::ENGINE, "[CUBEMAP] v3 GetFun=%p text=%zu\n",
+		reinterpret_cast<void*>(Mod_LoadCubemapArray), nText);
+
+	if (Mod_LoadCubemapArray)
+		return;
+
+	static const uint8_t kInterior[] = {
+		0x48, 0x81, 0xEC, 0x30, 0x02, 0x00, 0x00,
+		0x8B, 0xAC, 0x24, 0x80, 0x02, 0x00, 0x00
+	};
+
+	const uint8_t* pHit = nullptr;
+	if (nText > sizeof(kInterior))
+	{
+		const uint8_t* p = reinterpret_cast<const uint8_t*>(pText->m_pSectionBase);
+		const uint8_t* const pEnd = p + nText - sizeof(kInterior);
+		for (; p < pEnd; ++p)
+		{
+			if (memcmp(p, kInterior, sizeof(kInterior)) == 0)
+			{
+				pHit = p;
+				break;
+			}
+		}
+	}
+
+	uint8_t* pFn = nullptr;
+	if (pHit)
+	{
+		pFn = const_cast<uint8_t*>(pHit) - 0x18;
+		if (pFn[0] != 0x48 || pFn[1] != 0x89 || pFn[2] != 0x5C || pFn[3] != 0x24)
+			pFn = nullptr;
+	}
+
+	Mod_LoadCubemapArray = reinterpret_cast<decltype(Mod_LoadCubemapArray)>(pFn);
+	if (!Mod_LoadCubemapArray)
+	{
+		Warning(eDLL_T::ENGINE, "[CUBEMAP] v3 scan miss\n");
+		return;
+	}
+
+	const CMemory fn(Mod_LoadCubemapArray);
+	fn.Offset(0x15D).ResolveRelativeAddress(3, 7).GetPtr(v_HashNameAligned);
+	fn.Offset(0x164).ResolveRelativeAddress(3, 7).GetPtr(v_HashNameUnaligned);
+	fn.Offset(0x118).FollowNearCallSelf().GetPtr(v_Pak_FindAssetVoid);
+	s_mapCubemapSet = fn.Offset(0x1A0).ResolveRelativeAddress(3, 7).RCast<uint8_t*>();
+	Msg(eDLL_T::ENGINE, "[CUBEMAP] v3 scan fn=%p set=%p\n",
+		reinterpret_cast<void*>(Mod_LoadCubemapArray), s_mapCubemapSet);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+void VModelLoader::Detour(const bool bAttach) const
+{
+	DetourSetup(&CMapLoadHelper__Init, &CMapLoadHelper::Init, bAttach);
+	if (bAttach)
+		Cubemap_ResolveLive();
+	if (Mod_LoadCubemapArray)
+		DetourSetup(&Mod_LoadCubemapArray, &Hook_Mod_LoadCubemapArray, bAttach);
+	else
+		Warning(eDLL_T::ENGINE, "[CUBEMAP] Mod_LoadCubemapArray pattern unresolved\n");
+}
+#else // !CLIENT_DLL
+//===========================================================================//
+//
+// Purpose: Model loading / unloading interface
+//
+// $NoKeywords: $
+//===========================================================================//
+
+#include "core/stdafx.h"
+#include "engine/cmodel_bsp.h"
+#include "engine/modelloader.h"
+#include "engine/vis_debug.h"
+#include "datacache/mdlcache.h"
+#include <filesystem/filesystem.h>
+
+static ConVar vis_validate_on_load("vis_validate_on_load", "0", FCVAR_DEVELOPMENTONLY, "Validate visibility tree data on load");
+static ConVar vis_dump_on_load("vis_dump_on_load", "0", FCVAR_DEVELOPMENTONLY, "Dump visibility tree data on load");
+
+// Cached lump data for cross-lump validation
+static const dcellaabbnode_t* s_pCellAABBNodes = nullptr;
+static int s_nCellAABBNodeCount = 0;
+static const int32_t* s_pObjReferences = nullptr;
+static int s_nObjReferenceCount = 0;
+static const dcell_t* s_pCells = nullptr;
+static int s_nCellCount = 0;
+
+//model_t* pErrorMDL = nullptr;
+
+//-----------------------------------------------------------------------------
+// Purpose: returns whether or not the lump type could be loaded from cache
+// Input: lumpType - 
+//-----------------------------------------------------------------------------
+bool IsLumpTypeCachable(int lumpType)
+{
+	switch (lumpType)
+	{
+	case LUMP_PLANES:
+	case LUMP_VERTICES:
+	case LUMP_SHADOW_ENVIRONMENTS:
+	case LUMP_SURFACE_NAMES:
+	case LUMP_CONTENTS_MASKS:
+	case LUMP_SURFACE_PROPERTIES:
+	case LUMP_BVH_NODES:
+	case LUMP_BVH_LEAF_DATA:
+	case LUMP_PACKED_VERTICES:
+	case LUMP_VERTEX_NORMALS:
+	case LUMP_UNKNOWN_37:
+	case LUMP_UNKNOWN_38:
+	case LUMP_UNKNOWN_39:
+	case LUMP_VERTEX_UNLIT:
+	case LUMP_VERTEX_LIT_FLAT:
+	case LUMP_VERTEX_LIT_BUMP:
+	case LUMP_VERTEX_UNLIT_TS:
+	case LUMP_MESH_INDICES:
+	case LUMP_LIGHTMAP_DATA_SKY:
+	case LUMP_CSM_AABB_NODES:
+	case LUMP_CSM_OBJ_REFERENCES:
+	case LUMP_LIGHTPROBES:
+	case LUMP_LIGHTPROBE_TREE:
+	case LUMP_LIGHTPROBE_REFERENCES:
+	case LUMP_LIGHTMAP_DATA_REAL_TIME_LIGHTS:
+	case LUMP_CELL_BSP_NODES:
+	case LUMP_CELLS:
+	case LUMP_PORTALS:
+	case LUMP_PORTAL_VERTICES:
+	case LUMP_PORTAL_EDGES:
+	case LUMP_PORTAL_VERTEX_EDGES:
+	case LUMP_PORTAL_VERTEX_REFERENCES:
+	case LUMP_PORTAL_EDGE_REFERENCES:
+	case LUMP_PORTAL_EDGE_INTERSECT_AT_EDGE:
+	case LUMP_PORTAL_EDGE_INTERSECT_AT_VERTEX:
+	case LUMP_PORTAL_EDGE_INTERSECT_HEADER:
+	case LUMP_OCCLUSION_MESH_VERTICES:
+	case LUMP_OCCLUSION_MESH_INDICES:
+	case LUMP_CELL_AABB_NODES:
+	case LUMP_OBJ_REFERENCES:
+	case LUMP_OBJ_REFERENCE_BOUNDS:
+	case LUMP_SHADOW_MESH_OPAQUE_VERTICES:
+	case LUMP_SHADOW_MESH_INDICES:
+	case LUMP_SHADOW_MESHES:
+		return true;
+	default:
+		return false;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: returns whether or not the lump type can be treated as external in code
+// Input: lumpType - 
+//-----------------------------------------------------------------------------
+bool IsLumpTypeExternal(int lumpType)
+{
+	switch (lumpType)
+	{
+	case LUMP_VERTEX_UNLIT:
+	case LUMP_VERTEX_LIT_FLAT:
+	case LUMP_VERTEX_LIT_BUMP:
+	case LUMP_VERTEX_UNLIT_TS:
+	case LUMP_LIGHTPROBES:
+		return false;
+	default:
+		return true;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: returns whether or not the lump type should be loaded on the server
+// Input: lumpType - 
+//-----------------------------------------------------------------------------
+bool IsLumpTypeForServer(int lumpType)
+{
+	switch (lumpType)
+	{
+	case LUMP_ENTITIES:
+	case LUMP_PLANES:
+	case LUMP_TEXTURE_DATA:
+	case LUMP_VERTICES:
+	case LUMP_MODELS:
+	case LUMP_SURFACE_NAMES:
+	case LUMP_CONTENTS_MASKS:
+	case LUMP_SURFACE_PROPERTIES:
+	case LUMP_BVH_NODES:
+	case LUMP_BVH_LEAF_DATA:
+	case LUMP_PACKED_VERTICES:
+	case LUMP_ENTITY_PARTITIONS:
+	case LUMP_GAME_LUMP:
+	case LUMP_LEAF_WATER_DATA:
+	case LUMP_PAKFILE:
+	case LUMP_WORLD_LIGHTS:
+	case LUMP_WORLD_LIGHT_PARENT_INFOS:
+	case LUMP_MESHES:
+	case LUMP_MATERIAL_SORT:
+	case LUMP_TWEAK_LIGHTS:
+	case LUMP_LEVEL_INFO:
+		// Used on the server at [r5apex_ds + E05940] for sky_camera entity.
+		// If this lump isn't loaded, the engine will freeze in a loop in a
+		// function at [r5apex_ds + 3157F0] (called from CVEngineServer code).
+	case LUMP_CELL_BSP_NODES:
+		return true;
+	default:
+		return false;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose
+// Input: *loader - 
+// *model - 
+//-----------------------------------------------------------------------------
+void CModelLoader::LoadModel(CModelLoader* loader, model_t* model)
+{
+	//if (!pErrorMDL)
+	// pErrorMDL = model;
+
+	//string svExtension = model->szPathName;
+	//size_t npos = svExtension.find(".");
+	//if (npos != string::npos)
+	//	svExtension = svExtension.substr(npos + 1);
+
+	//if (strcmp(svExtension.c_str, "rmdl") == 0 && strcmp(model->szPathName, ERROR_MODEL) != 0)
+	//	studiohdr_t* pStudioHDR = g_MDLCache->FindMDL(g_MDLCache->m_pVTable, model->studio, 0);
+	// model = pErrorMDL;
+	return CModelLoader__LoadModel(loader, model);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose
+// Input: *loader - 
+// *model - 
+//-----------------------------------------------------------------------------
+uint64_t CModelLoader::Map_LoadModelGuts(CModelLoader* loader, model_t* model)
+{
+	return CModelLoader__Map_LoadModelGuts(loader, model);
+}
+
+void CMapLoadHelper::Constructor(CMapLoadHelper* loader, int lumpToLoad)
+{
+
+	if (lumpToLoad > HEADER_LUMPS-1)
+		Error(eDLL_T::ENGINE, EXIT_FAILURE, "Can't load lump %i, range is 0 to %i!!!\n", lumpToLoad, HEADER_LUMPS-1);
+
+	loader->m_nLumpID = lumpToLoad;
+	loader->m_nLumpSize = 0;
+	loader->m_pData = nullptr;
+	loader->m_pRawData = nullptr;
+	loader->m_pUncompressedData = nullptr;
+	loader->m_nUncompressedLumpSize = 0;
+	loader->m_bUncompressedDataExternal = 0;
+	loader->m_bExternal = false;
+	loader->m_bUnk = false;
+	loader->m_nLumpOffset = -1;
+
 	// Some of the lump loading code that is specific to
 	// the client is heavily inline in code, which makes
 	// it hard to patch it out from there.. to fix this,
 	// we just check from here and return if its cl only
 	if (!IsLumpTypeForServer(lumpToLoad))
 		return;
-#endif // DEDICATED
 
 	if (lumpToLoad <= s_MapHeader->lastLump)
 	{
@@ -272,9 +789,6 @@ void CMapLoadHelper::Constructor(CMapLoadHelper* loader, int lumpToLoad)
 				DevMsg(eDLL_T::ENGINE, "Loading lump %.4x from file. Buffer: %p\n", lumpToLoad, loader->m_pRawData);
 				FileSystem()->ReadEx(loader->m_pRawData, lumpSize, lumpSize, hLumpFile);
 				FileSystem()->Close(hLumpFile);
-
-				loader->m_pRawData = nullptr;
-				loader->m_bExternal = IsLumpTypeExternal(lumpToLoad);
 			}
 			else // Seek to offset in packed BSP file to load the lump.
 			{
@@ -359,8 +873,8 @@ void CMapLoadHelper::Constructor(CMapLoadHelper* loader, int lumpToLoad)
 
 //-----------------------------------------------------------------------------
 // Purpose: Hook 'AddGameLump' and load the external lump from the disk instead
-// Input  : *loader - 
-//			*model - 
+// Input: *loader - 
+// *model - 
 //-----------------------------------------------------------------------------
 void AddGameLump()
 {
@@ -414,3 +928,4 @@ void VModelLoader::Detour(const bool bAttach) const
 	DetourSetup(&CMapLoadHelper__CMapLoadHelper, &CMapLoadHelper::Constructor, bAttach);
 	DetourSetup(&v_AddGameLump, &AddGameLump, bAttach);
 }
+#endif // CLIENT_DLL

@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose:
+// Purpose
 //
 //=============================================================================//
 #include "core/stdafx.h"
@@ -15,9 +15,9 @@ static ConVar ai_ainDebugConnect("ai_ainDebugConnect", "0", FCVAR_DEVELOPMENTONL
 
 //-----------------------------------------------------------------------------
 // Purpose: debug logs node connections
-// Input  : node1 - 
-//			node2 - 
-//			*pszFormat - 
+// Input: node1 - 
+// node2 - 
+// *pszFormat - 
 //			... - 
 //-----------------------------------------------------------------------------
 void CAI_Network::DebugConnectMsg(int node1, int node2, const char* pszFormat, ...)
@@ -46,17 +46,8 @@ void CAI_Network::DebugConnectMsg(int node1, int node2, const char* pszFormat, .
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: gets the AI Network VTable
-// Output : void*
-//-----------------------------------------------------------------------------
-void* CAI_Network::GetVTable(void) const
-{
-	return m_pVTable;
-}
-
-//-----------------------------------------------------------------------------
 // Purpose: gets the number of node links
-// Output : int
+// Output: int
 //-----------------------------------------------------------------------------
 int CAI_Network::NumLinks(void) const
 {
@@ -64,28 +55,8 @@ int CAI_Network::NumLinks(void) const
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: gets the number of zones
-// Input  : idx - 
-// Output : int
-//-----------------------------------------------------------------------------
-int CAI_Network::NumZones(const int idx) const
-{
-	Assert(idx >= 0 && idx < sizeof(m_iNumZones));
-	return m_iNumZones[idx];
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: gets the number of hints
-// Output : int
-//-----------------------------------------------------------------------------
-int CAI_Network::NumHints(void) const
-{
-	return m_iNumHints;
-}
-
-//-----------------------------------------------------------------------------
 // Purpose: gets the number of script nodes
-// Output : int
+// Output: int
 //-----------------------------------------------------------------------------
 int CAI_Network::NumScriptNodes(void) const
 {
@@ -94,7 +65,7 @@ int CAI_Network::NumScriptNodes(void) const
 
 //-----------------------------------------------------------------------------
 // Purpose: gets the path nodes
-// Output : int
+// Output: int
 //-----------------------------------------------------------------------------
 int CAI_Network::NumPathNodes(void) const
 {
@@ -102,28 +73,9 @@ int CAI_Network::NumPathNodes(void) const
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: gets the specified hint from static array
-// Input  : nIndex - 
-// Output : int
-//-----------------------------------------------------------------------------
-short CAI_Network::GetHint(int nIndex) const
-{
-	return m_Hints[nIndex];
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: gets the pointer to script node array
-// Output : CAI_ScriptNode*
-//-----------------------------------------------------------------------------
-CAI_ScriptNode* CAI_Network::GetScriptNodes(void) const
-{
-	return m_ScriptNode;
-}
-
-//-----------------------------------------------------------------------------
 // Purpose: gets the pointer to path node
-// Input  : id - 
-// Output : CAI_Node**
+// Input: id - 
+// Output: CAI_Node**
 //-----------------------------------------------------------------------------
 CAI_Node* CAI_Network::GetPathNode(int id) const
 {
@@ -135,28 +87,6 @@ CAI_Node* CAI_Network::GetPathNode(int id) const
 
 	Assert(0);
 	return NULL;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: adds a path node
-// Input  : *origin - 
-//          jaw - 
-// Output : CAI_Node*
-//-----------------------------------------------------------------------------
-CAI_Node* CAI_Network::AddPathNode(const Vector3D* origin, const float jaw)
-{
-	return CAI_Network__AddPathNode(this, origin, jaw);
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: creates a node link
-// Input  : srcID - 
-//          destID - 
-// Output : CAI_NodeLink*
-//-----------------------------------------------------------------------------
-CAI_NodeLink* CAI_Network::CreateNodeLink(int srcID, int destID)
-{
-	return CAI_Network__CreateNodeLink(this, srcID, destID);
 }
 
 //-----------------------------------------------------------------------------

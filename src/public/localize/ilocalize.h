@@ -37,7 +37,7 @@ public:
   //void* func_80[3];
 
 
-  //virtual void ConstructString(CLocalize*, char*, __int64, __int64, ...);
+  //virtual void ConstructString(CLocalize*, char*, __int64, __int64,...);
 
   //__int64(__fastcall* GetNameByIndex)(CLocalize*, int);
   //__int64(__fastcall* GetValueByIndex)(CLocalize*, int);

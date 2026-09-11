@@ -38,7 +38,7 @@ void CURLInitCommonOptions(CURL* curl, const char* remote,
     curl_easy_setopt(curl, CURLOPT_URL, remote);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, writeData);
     curl_easy_setopt(curl, CURLOPT_READDATA, readData);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "R5R HTTPS/1.0");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "R5F HTTPS/1.0");
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, params.writeFunction);
     curl_easy_setopt(curl, CURLOPT_READFUNCTION, params.readFunction);
 
@@ -282,5 +282,28 @@ bool CURLHandleError(CURL* curl, const CURLcode res, string& outMessage, const b
 
 void CURLFormatUrl(string& outUrl, const char* host, const char* api)
 {
+    // A host that already carries a scheme is used verbatim, which is how a local
+    // master server on plain HTTP is reachable. Everything else keeps the implicit
+    // https:// so existing configuration is unaffected.
+    if (V_strnicmp(host, "http://", 7) == NULL)
+    {
+        static bool bWarnedInsecure = false;
+        if (!bWarnedInsecure)
+        {
+            bWarnedInsecure = true;
+            Warning(eDLL_T::COMMON, "Master server host '%s' uses plain HTTP; "
+                "authentication tokens will cross the network unencrypted\n", host);
+        }
+
+        outUrl = Format("%s%s", host, api);
+        return;
+    }
+
+    if (V_strnicmp(host, "https://", 8) == NULL)
+    {
+        outUrl = Format("%s%s", host, api);
+        return;
+    }
+
     outUrl = Format("%s%s%s", "https://", host, api);
 }

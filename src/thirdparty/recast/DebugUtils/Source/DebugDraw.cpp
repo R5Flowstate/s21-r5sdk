@@ -531,24 +531,26 @@ void duAppendCross(struct duDebugDraw* dd, const float x, const float y, const f
 }
 
 duDisplayList::duDisplayList(int cap) :
-	m_prim(DU_DRAW_UNDEFINED),
-	m_primSize(1.0f),
 	m_pos(0),
 	m_color(0),
+	m_uv(0),
 	m_size(0),
 	m_cap(0),
-	m_depthMask(true)
+	m_depthMask(true),
+	m_textured(false)
 {
 	if (cap < 8)
 		cap = 8;
 	resize(cap);
 	rdVset(&m_drawOffset, 0.0f,0.0f,0.0f);
+	memset(&m_curSeg, 0, sizeof(m_curSeg));
 }
 
 duDisplayList::~duDisplayList()
 {
 	delete [] m_pos;
 	delete [] m_color;
+	delete [] m_uv;
 }
 
 void duDisplayList::resize(int cap)
@@ -564,13 +566,21 @@ void duDisplayList::resize(int cap)
 		memcpy(newColor, m_color, sizeof(unsigned int)*m_size);
 	delete [] m_color;
 	m_color = newColor;
-	
+
+	rdVec2D* newUv = new rdVec2D[cap];
+	if (m_size)
+		memcpy(newUv, m_uv, sizeof(rdVec2D)*m_size);
+	delete [] m_uv;
+	m_uv = newUv;
+
 	m_cap = cap;
 }
 
 void duDisplayList::clear()
 {
 	m_size = 0;
+	m_segments.clear();
+	memset(&m_curSeg, 0, sizeof(m_curSeg));
 }
 
 void duDisplayList::depthMask(bool state)
@@ -578,13 +588,21 @@ void duDisplayList::depthMask(bool state)
 	m_depthMask = state;
 }
 
+void duDisplayList::texture(bool state)
+{
+	m_textured = state;
+}
+
 void duDisplayList::begin(const duDebugDrawPrimitives prim, const float size, const rdVec3D* offset)
 {
 	rdAssert(prim != DU_DRAW_UNDEFINED);
 
-	clear();
-	m_prim = prim;
-	m_primSize = size;
+	m_curSeg.prim = prim;
+	m_curSeg.primSize = size;
+	m_curSeg.startIndex = m_size;
+	m_curSeg.count = 0;
+	m_curSeg.textured = m_textured;
+
 	if (offset)
 		rdVcopy(&m_drawOffset, offset);
 }
@@ -597,7 +615,11 @@ void duDisplayList::vertex(const float x, const float y, const float z, unsigned
 	rdVset(p,x,y,z);
 	rdVadd(p,p,&m_drawOffset);
 	m_color[m_size] = color;
+	rdVec2D* t = &m_uv[m_size];
+	t->x = 0.0f;
+	t->y = 0.0f;
 	m_size++;
+	m_curSeg.count++;
 }
 
 void duDisplayList::vertex(const rdVec3D* pos, unsigned int color)
@@ -605,18 +627,72 @@ void duDisplayList::vertex(const rdVec3D* pos, unsigned int color)
 	vertex(pos->x,pos->y,pos->z,color);
 }
 
+void duDisplayList::vertex(const rdVec3D* pos, unsigned int color, const rdVec2D* uv)
+{
+	if (m_size+1 >= m_cap)
+		resize(m_cap*2);
+	rdVec3D* p = &m_pos[m_size];
+	rdVset(p, pos->x, pos->y, pos->z);
+	rdVadd(p,p,&m_drawOffset);
+	m_color[m_size] = color;
+	m_uv[m_size] = *uv;
+	m_size++;
+	m_curSeg.count++;
+}
+
+void duDisplayList::vertex(const float x, const float y, const float z, unsigned int color, const float u, const float v)
+{
+	if (m_size+1 >= m_cap)
+		resize(m_cap*2);
+	rdVec3D* p = &m_pos[m_size];
+	rdVset(p,x,y,z);
+	rdVadd(p,p,&m_drawOffset);
+	m_color[m_size] = color;
+	rdVec2D* t = &m_uv[m_size];
+	t->x = u;
+	t->y = v;
+	m_size++;
+	m_curSeg.count++;
+}
+
 void duDisplayList::end()
 {
+	if (m_curSeg.count > 0)
+		m_segments.push_back(m_curSeg);
+
 	rdVset(&m_drawOffset, 0.0f,0.0f,0.0f);
 }
 
 void duDisplayList::draw(struct duDebugDraw* dd)
 {
 	if (!dd) return;
-	if (!m_size) return;
+	if (m_segments.empty()) return;
+
 	dd->depthMask(m_depthMask);
-	dd->begin(m_prim, m_primSize);
-	for (int i = 0; i < m_size; ++i)
-		dd->vertex(&m_pos[i], m_color[i]);
-	dd->end();
+
+	for (int s = 0; s < (int)m_segments.size(); ++s)
+	{
+		const Segment& seg = m_segments[s];
+		if (seg.textured)
+			dd->texture(true);
+
+		dd->begin(seg.prim, seg.primSize);
+		const int end = seg.startIndex + seg.count;
+
+		if (seg.textured)
+		{
+			for (int i = seg.startIndex; i < end; ++i)
+				dd->vertex(&m_pos[i], m_color[i], &m_uv[i]);
+		}
+		else
+		{
+			for (int i = seg.startIndex; i < end; ++i)
+				dd->vertex(&m_pos[i], m_color[i]);
+		}
+
+		dd->end();
+		if (seg.textured)
+			dd->texture(false);
+	}
 }
+

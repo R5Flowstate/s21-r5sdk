@@ -1,11 +1,19 @@
 cmake_minimum_required( VERSION 3.16 )
 
+# Prefer the Windows `py` launcher, then python3/python from PATH. No machine-local
+# absolute fallbacks -- set SDK_PYTHON_EXECUTABLE on the cmake command line if needed.
+if( NOT SDK_PYTHON_EXECUTABLE )
+	find_program( SDK_PYTHON_EXECUTABLE NAMES py python3 python
+		DOC "Python launcher for build-time checks"
+	)
+endif()
+
 macro( add_sdk_project PROJECT_NAME )
 add_module( "shared_lib" ${PROJECT_NAME} "vpc" ${FOLDER_CONTEXT} TRUE TRUE )
 
 start_sources()
 
-if( NOT ${PROJECT_NAME} STREQUAL "dedicated" )
+if( NOT ${PROJECT_NAME} STREQUAL "server" )
 file( GLOB PNG_SOURCES
     "${ENGINE_SOURCE_DIR}/resource/png/*.png"
 )
@@ -14,18 +22,10 @@ add_sources( SOURCE_GROUP "Resource"
     "${PNG_SOURCES}"
 )
 
-# Add Steam integration for non-dedicated builds
-add_sources( SOURCE_GROUP "Steam"
-    "${ENGINE_SOURCE_DIR}/engine/client/steam_integration.cpp"
-    "${ENGINE_SOURCE_DIR}/engine/client/steam_integration.h"
-    "${ENGINE_SOURCE_DIR}/engine/client/steam_api_wrapper.cpp"
-)
 endif()
 
 add_sources( SOURCE_GROUP "Core"
     "assert.h"
-    "dllmain.cpp"
-    "init.cpp"
     "init.h"
     "logdef.cpp"
     "logdef.h"
@@ -39,6 +39,28 @@ add_sources( SOURCE_GROUP "Core"
     "termutil.cpp"
     "termutil.h"
 )
+
+# Role-specific init/dllmain TUs (do not #include .cpp into dual wrappers -- breaks PCH/type visibility).
+if( ${PROJECT_NAME} STREQUAL "client" )
+add_sources( SOURCE_GROUP "Core"
+    "init_client.cpp"
+    "dllmain_client.cpp"
+)
+else()
+add_sources( SOURCE_GROUP "Core"
+    "init_server.cpp"
+    "dllmain_server.cpp"
+)
+endif()
+
+if( ${PROJECT_NAME} STREQUAL "client" )
+add_sources( SOURCE_GROUP "Core"
+    "detour_registry.cpp"
+    "detour_registry.h"
+    "detour_validator.cpp"
+    "detour_validator.h"
+)
+endif()
 
 target_link_libraries( ${PROJECT_NAME} PRIVATE
     "advapi32.lib"
@@ -54,27 +76,11 @@ target_link_libraries( ${PROJECT_NAME} PRIVATE
     "boost_charconv"
     "boost_regex"
 
-    "vpc"
-    "memoverride"
-    "tier0"
-    "tier1"
-    "tier2"
-    "launcher"
-    "appframework"
-
-    "vstdlib"
     "vpklib"
     "mathlib"
-    "vphysics"
 
     "SigCache_Pb"
-    "LiveAPI_Pb"
     "NetCon_Pb"
-
-    "rson"
-    "rtech_game"
-    "playlists"
-    "stryder"
 
     "liblzham"
     "libzstd"
@@ -94,42 +100,87 @@ target_link_libraries( ${PROJECT_NAME} PRIVATE
     "libmbedcrypto"
     "libmbedtls"
     "libmbedx509"
-
-    "networksystem"
-    "pluginsystem"
-    "filesystem"
-    "datacache"
-    "EbisuSDK"
-    "GFSDK"
-    "RDSDK"
-
-    "localize"
-
-    "vscript"
-    "game_shared_static"
 )
 
-if( NOT ${PROJECT_NAME} STREQUAL "dedicated" )
+# Dual foundation + dual-body shared: client inject links *_cl (CLIENT_DLL so
+# strict dual-body TUs compile the live-client half). Server keeps plain libs.
+# Every lib whose TUs reach a dual-ABI public header (convar.h, iconvar.h,
+# ivscript.h, gametrace.h, basehandle.h) must appear on both sides -- a plain
+# lib here would put a second ConVar/ConCommand layout in the same binary.
+if( ${PROJECT_NAME} STREQUAL "client" )
+target_link_libraries( ${PROJECT_NAME} PRIVATE
+    "vpc_cl"
+    "memoverride_cl"
+    "tier0_cl"
+    "tier1_cl"
+    "tier2_cl"
+    "launcher_cl"
+    "appframework_cl"
+    "vstdlib_cl"
+    "vphysics_cl"
+    "rson_cl"
+    "playlists_cl"
+    "stryder_cl"
+    "pluginsystem_cl"
+    "localize_cl"
+    "game_shared_static_cl"
+    "EbisuSDK_cl"
+    "rtech_game_cl"
+    "filesystem_cl"
+    "datacache_cl"
+    # spire's ConVars are dual-ABI; a plain networksystem here reads m_pParent
+    # from the S3 offset while tier1_cl writes it at the S21 one.
+    "networksystem_cl"
+    # sqapi/sqvm are dual-body too; a plain vscript here gives the client the S3
+    # stack layout and AVs in sq_pushbool the first time a native runs.
+    "vscript_cl"
+)
+else()
+target_link_libraries( ${PROJECT_NAME} PRIVATE
+    "vpc"
+    "memoverride"
+    "tier0"
+    "tier1"
+    "tier2"
+    "launcher"
+    "appframework"
+    "vstdlib"
+    "vphysics"
+    "rson"
+    "playlists"
+    "stryder"
+    "pluginsystem"
+    "localize"
+    "game_shared_static"
+    "EbisuSDK"
+    "rtech_game"
+    "filesystem"
+    "datacache"
+    "networksystem"
+    "vscript"
+)
+endif()
+
+if( NOT ${PROJECT_NAME} STREQUAL "server" )
 target_link_libraries( ${PROJECT_NAME} PRIVATE
     "libimgui"
 
     "milessdk"
-    "codecs"
 
-    "inputsystem"
-    "materialsystem"
 
     "studiorender"
 
     "vguimatsurface"
     "vgui"
     "rui"
-    "datatable"
-
-    "particles"
+    "datatable_cl"
 
     "d3d11.lib"
-    "${THIRDPARTY_SOURCE_DIR}/nvapi/amd64/nvapi64.lib"
+)
+target_link_libraries( ${PROJECT_NAME} PRIVATE
+    "codecs_cl"
+    "inputsystem_cl"
+    "materialsystem_cl"
 )
 endif()
 
@@ -139,35 +190,32 @@ target_link_libraries( ${PROJECT_NAME} PRIVATE
 )
 endif()
 
-# Determine the compiler definitions and link libraries per project.
-if( ${PROJECT_NAME} STREQUAL "gamesdk" )
-end_sources()
-
-target_link_libraries( ${PROJECT_NAME} PRIVATE
-    "engine"
-    "server_static"
-    "client_static"
-)
-target_compile_definitions( ${PROJECT_NAME} PRIVATE
-    "GAMESDK"
-)
-
-elseif( ${PROJECT_NAME} STREQUAL "dedicated" )
+# Bridge products only: client.dll + server.dll (no hybrid gamesdk product).
+if( ${PROJECT_NAME} STREQUAL "server" )
 end_sources()
 
 target_link_libraries( ${PROJECT_NAME} PRIVATE
     "materialsystem_nodx" # Needs the No-DirectX version for patching.
     "engine_ds"
     "server_static"
+    # Required for V_Datatable::Detour and the disk-CSV datatable override.
+    # datatable.cpp has no client-only deps (only core/tier1/filesystem) so it
+    # links cleanly into the dedicated server. Without this, V_Datatable would
+    # have to be skipped on server -- but its GetFun()/GetVar() populate inline
+    # function pointers (v_Script_GetDatatableRowCount, v_HashNameAligned, etc.)
+    # that game_shared_static's vscript_shared.cpp calls unconditionally.
+    "datatable"
 )
 target_compile_definitions( ${PROJECT_NAME} PRIVATE
     "MATERIALSYSTEM_NODX"
     "SERVER_DLL"
     "DEDICATED"
 )
+# Target name "server" already emits server.dll (no OUTPUT_NAME override).
 
 elseif( ${PROJECT_NAME} STREQUAL "client" )
-end_sources( "${BUILD_OUTPUT_DIR}/bin/x64_retail/" )
+# Inject client.dll at game root (not legacy bin/x64_retail game-module layout).
+end_sources()
 
 target_link_libraries( ${PROJECT_NAME} PRIVATE
     "engine_cl"
@@ -175,8 +223,44 @@ target_link_libraries( ${PROJECT_NAME} PRIVATE
 )
 target_compile_definitions( ${PROJECT_NAME} PRIVATE
     "CLIENT_DLL"
+    "GAMEDLL_S21"
 )
+# Client product + every client-only lib it links. core is add_subdirectory'd
+# last, so these targets already exist. Plain (server) twins keep /EHsc.
+apply_client_seh_options( ${PROJECT_NAME} )
+apply_client_seh_options( client_static )
+apply_client_seh_options( engine_cl )
+apply_client_seh_options( game_shared_static_cl )
+apply_client_seh_options( tier0_cl )
+apply_client_seh_options( tier1_cl )
+apply_client_seh_options( tier2_cl )
+apply_client_seh_options( launcher_cl )
+apply_client_seh_options( appframework_cl )
+apply_client_seh_options( vstdlib_cl )
+apply_client_seh_options( vphysics_cl )
+apply_client_seh_options( rson_cl )
+apply_client_seh_options( playlists_cl )
+apply_client_seh_options( stryder_cl )
+apply_client_seh_options( pluginsystem_cl )
+apply_client_seh_options( localize_cl )
+apply_client_seh_options( datatable_cl )
+apply_client_seh_options( studiorender )
+apply_client_seh_options( vguimatsurface )
+apply_client_seh_options( vgui )
+apply_client_seh_options( rui )
+apply_client_seh_options( memoverride_cl )
+apply_client_seh_options( EbisuSDK_cl )
+apply_client_seh_options( rtech_game_cl )
+apply_client_seh_options( filesystem_cl )
+apply_client_seh_options( datacache_cl )
+apply_client_seh_options( networksystem_cl )
+apply_client_seh_options( vscript_cl )
+apply_client_seh_options( codecs_cl )
+apply_client_seh_options( inputsystem_cl )
+apply_client_seh_options( materialsystem_cl )
 
+else()
+message( FATAL_ERROR "add_sdk_project: unknown product '${PROJECT_NAME}' (expected client or server)" )
 endif()
 
 target_include_directories( ${PROJECT_NAME} PRIVATE
@@ -198,11 +282,29 @@ target_link_options( ${PROJECT_NAME} PRIVATE
     $<$<CONFIG:Debug>:/FORCE:MULTIPLE>
 )
 
+# Fail the build on duplicate ConVar/ConCommand names within one product.
+# Absent script is a skip so a tree without tools/ still builds.
+set( CONVAR_CHECK_SCRIPT "${ENGINE_SOURCE_DIR}/../tools/check_convar_names.py" )
+if( SDK_PYTHON_EXECUTABLE AND EXISTS "${CONVAR_CHECK_SCRIPT}" )
+	add_custom_command( TARGET ${PROJECT_NAME} PRE_BUILD
+		COMMAND "${SDK_PYTHON_EXECUTABLE}"
+			"${CONVAR_CHECK_SCRIPT}"
+			--product ${PROJECT_NAME}
+			--root "${ENGINE_SOURCE_DIR}/.."
+		COMMENT "check_convar_names (${PROJECT_NAME})"
+		VERBATIM
+	)
+elseif( SDK_PYTHON_EXECUTABLE )
+	message( STATUS "check_convar_names: no script; skipping for ${PROJECT_NAME}" )
+else()
+	message( STATUS "check_convar_names: no python found; skipping for ${PROJECT_NAME}" )
+endif()
+
 add_custom_command( TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -P ${ENGINE_SOURCE_DIR}/cmake/PostBuild.cmake
 )
 
-if( ${PROJECT_NAME} STREQUAL "dedicated" )
+if( ${PROJECT_NAME} STREQUAL "server" )
 set_target_properties( ${PROJECT_NAME} PROPERTIES
     VS_DEBUGGER_COMMAND "r5apex_ds.exe"
 )
@@ -227,73 +329,10 @@ set_target_properties( ${PROJECT_NAME} PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "$(ProjectDir)../../../${BUILD_OUTPUT_DIR}/"
 )
 
-# Auto-detect Steamworks support (checks for SDK availability)
-if( DEFINED ENV{STEAM_SDK_DIR} )
-    set(STEAM_SDK_DIR $ENV{STEAM_SDK_DIR})
-endif()
-
-if( NOT STEAM_SDK_DIR AND EXISTS "${THIRDPARTY_SOURCE_DIR}/steamworks/sdk" )
-    set(STEAM_SDK_DIR "${THIRDPARTY_SOURCE_DIR}/steamworks/sdk")
-endif()
-
-# Auto-enable Steamworks if SDK is found and required files exist
-set(USE_STEAMWORKS OFF)
-if( STEAM_SDK_DIR AND EXISTS "${STEAM_SDK_DIR}/public/steam/steam_api.h" )
-    if( WIN32 )
-        if( CMAKE_SIZEOF_VOID_P EQUAL 8 )
-            set(_STEAM_LIB_CHECK "${STEAM_SDK_DIR}/redistributable_bin/win64/steam_api64.lib")
-        else()
-            set(_STEAM_LIB_CHECK "${STEAM_SDK_DIR}/redistributable_bin/steam_api.lib")
-        endif()
-        if( EXISTS "${_STEAM_LIB_CHECK}" )
-            set(USE_STEAMWORKS ON)
-        endif()
-    else()
-        # For non-Windows platforms, just check for header existence
-        set(USE_STEAMWORKS ON)
-    endif()
-endif()
-
-if( USE_STEAMWORKS AND STEAM_SDK_DIR )
-    message(STATUS "Auto-detected Steamworks SDK - Building with Steamworks from: ${STEAM_SDK_DIR}")
-else()
-    message(STATUS "Steamworks SDK not found - Building without Steamworks support")
-endif()
-
-if( USE_STEAMWORKS AND STEAM_SDK_DIR )
-    if( NOT ${PROJECT_NAME} STREQUAL "dedicated" )
-        # Add USE_STEAMWORKS define to all files in the target
-        target_compile_definitions(${PROJECT_NAME} PRIVATE USE_STEAMWORKS)
-        
-        # Exclude steam_api_wrapper.cpp from precompiled headers to avoid type conflicts
-        # between r5sdk's sdkint.h and Steam's steamtypes.h
-        set_source_files_properties(
-            "${ENGINE_SOURCE_DIR}/engine/client/steam_api_wrapper.cpp"
-            PROPERTIES
-            SKIP_PRECOMPILE_HEADERS ON
-            INCLUDE_DIRECTORIES "${STEAM_SDK_DIR}/public;${STEAM_SDK_DIR}/public/steam"
-        )
-        if( WIN32 )
-            if( CMAKE_SIZEOF_VOID_P EQUAL 8 )
-                set(_STEAM_IMP "${STEAM_SDK_DIR}/redistributable_bin/win64/steam_api64.lib")
-            else()
-                set(_STEAM_IMP "${STEAM_SDK_DIR}/redistributable_bin/steam_api.lib")
-            endif()
-            if( EXISTS "${_STEAM_IMP}" )
-                if( NOT TARGET steamworks_api )
-                    add_library(steamworks_api SHARED IMPORTED GLOBAL)
-                    set_target_properties(steamworks_api PROPERTIES IMPORTED_IMPLIB "${_STEAM_IMP}")
-                endif()
-                target_link_libraries( ${PROJECT_NAME} PRIVATE steamworks_api )
-            else()
-                message(WARNING "Steamworks library not found at: ${_STEAM_IMP}")
-            endif()
-        endif()
-    endif()
-endif()
+r5sdk_attach_pe_identity( ${PROJECT_NAME} )
 
 endmacro()
 
-add_sdk_project( "gamesdk" )
-add_sdk_project( "dedicated" )
+# Bridge products: client.dll + server.dll (dedicated server inject).
 add_sdk_project( "client" )
+add_sdk_project( "server" )

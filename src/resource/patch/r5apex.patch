@@ -201,11 +201,9 @@
 // patches bellow.
 // The immediate to access 0x1671CAA80 has been increased with 4 bytes to create enough space
 // for 3rd elem in int array at 0x1671CAA78, 0x1671CAA80 is now at 0x1671CAA84.
-// *** sub_1403F4F80 ***
 0x3F45EF: mov eax, dword ptr ds:[r13+r15*4+0x271CAA84]
 0x3F482A: mov dword ptr ds:[r13+r15*4+0x271CAA84], eax
 
-// *** sub_1403F4AA0 ***
 0x3F4091: mov dword ptr ds:[0x00000001671CAA84], 0x3
 0x3F409B: mov dword ptr ds:[0x00000001671CAA88], 0x3
 0x3F40A5: mov dword ptr ds:[0x00000001671CAA8C], 0x3 // NEW: sets the 3rd elem
@@ -218,7 +216,6 @@
 // reach our next static element so enough space.
 0x3F40B7: mov byte ptr ds:[0x00000001671CAA90], 0x1
 
-// *** sub_1403F4A30 ***
 0x3F3E84: mov dword ptr ds:[0x00000001671CAA84], 0x3
 0x3F3E8E: mov dword ptr ds:[0x00000001671CAA88], 0x3
 // Jump to code cave to set the 3rd (new) element, because there was not enough space left in
@@ -273,32 +270,23 @@
 // to a long jmp to return gadget (which for all these functions either sets the slot result (-1)
 // to the provided pointer, or into EAX).
 
-// *** sub_1408AD8D0 ***
 0x8ACD28: jmp 0x00000001408ADA0E // long jump to return gadget if slot = -1 (used to be short jmp to rest of code exec).
 
-// *** sub_1405F2320 ***
 0x5F1841: jmp 0x00000001405F252D
 
-// *** sub_1405F2570 ***
 0x5F1A7A: jmp 0x00000001405F2766
 
-// *** sub_140608EE0 ***
 0x608692: jmp 0x0000000140609370
 
-// *** sub_14085D900 ***
 0x85D57E: je 0x000000014085E22C
 
-// *** sub_1408AD720 ***
 0x8ACB78: jmp 0x00000001408AD8AE
 
-// *** sub_140951D30 ***
 0x95118D: jmp 0x0000000140951E8B
 
-// *** sub_140954C60 ***
 0x955206: jmp 0x0000000140955EC9
 0x955309: jmp 0x0000000140955FD3
 
-// *** sub_140A46ED0 ***
 0xA46531: jmp 0x0000000140A4722E
 // ------------------------------------------------------------------------------------------------
 

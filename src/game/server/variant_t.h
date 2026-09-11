@@ -1,6 +1,6 @@
-﻿//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //=============================================================================//
@@ -49,27 +49,25 @@ public:
 	void SetString( string_t str ) { iszVal = str, fieldType = FIELD_STRING; }
 	void SetInt( int val ) { iVal = val, fieldType = FIELD_INTEGER; }
 	void SetFloat( float val ) { flVal = val, fieldType = FIELD_FLOAT; }
-	void SetEntity( CBaseEntity *val );
 	void SetVector3D( const ::Vector3D &val ) { vecVal[0] = val[ 0 ]; vecVal[ 1 ] = val[ 1 ]; vecVal[ 2 ] = val[ 2 ]; fieldType = FIELD_VECTOR; }
 	void SetPositionVector3D( const ::Vector3D &val ) { vecVal[ 0 ] = val[ 0 ]; vecVal[ 1 ] = val[ 1 ]; vecVal[ 2 ] = val[ 2 ]; fieldType = FIELD_POSITION_VECTOR; }
 	void SetColor32( color32 val ) { rgbaVal = val; fieldType = FIELD_COLOR32; }
 	void SetColor32( int r, int g, int b, int a ) { rgbaVal.r = (byte)r; rgbaVal.g = (byte)g; rgbaVal.b = (byte)b; rgbaVal.a = (byte)a; fieldType = FIELD_COLOR32; }
 	void Set( fieldtype_t ftype, void *data );
-	void SetOther( void *data );
 	bool Convert( fieldtype_t newType );
 
 	// !TODO[AMOS]: If found, make this a ptr and link it to the one in the game engine!
-	//static typedescription_t m_SaveBool[];
-	//static typedescription_t m_SaveInt[];
-	//static typedescription_t m_SaveFloat[];
-	//static typedescription_t m_SaveEHandle[];
-	//static typedescription_t m_SaveString[];
-	//static typedescription_t m_SaveColor[];
-	//static typedescription_t m_SaveVector[];
-	//static typedescription_t m_SavePositionVector[];
-	//static typedescription_t m_SaveVMatrix[];
-	//static typedescription_t m_SaveVMatrixWorldspace[];
-	//static typedescription_t m_SaveMatrix3x4Worldspace[];
+	//static typedescription_t m_SaveBool;
+	//static typedescription_t m_SaveInt;
+	//static typedescription_t m_SaveFloat;
+	//static typedescription_t m_SaveEHandle;
+	//static typedescription_t m_SaveString;
+	//static typedescription_t m_SaveColor;
+	//static typedescription_t m_SaveVector;
+	//static typedescription_t m_SavePositionVector;
+	//static typedescription_t m_SaveVMatrix;
+	//static typedescription_t m_SaveVMatrixWorldspace;
+	//static typedescription_t m_SaveMatrix3x4Worldspace;
 
 protected:
 	//-------------------------------------------------------------------------

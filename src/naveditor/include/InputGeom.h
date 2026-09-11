@@ -111,7 +111,8 @@ class InputGeom
 	enum MeshFormat
 	{
 		MESH_OBJ,
-		MESH_PLY
+		MESH_PLY,
+		MESH_BSP
 	};
 
 	rcChunkyTriMesh* m_chunkyMesh;
@@ -139,7 +140,11 @@ class InputGeom
 
 	/// @name Convex Volumes.
 	///@{
-	static const int MAX_VOLUMES = 256;
+	// A dense map's out-of-bounds trigger set alone can exceed a few hundred:
+	// mp_rr_district carries 508 trigger_out_of_bounds entities decoding to 512
+	// volumes, and at 256 half of them were dropped and the bake kept navmesh
+	// inside them. ShapeVolume is 160 bytes, so the headroom is cheap.
+	static const int MAX_VOLUMES = 2048;
 	ShapeVolume m_volumes[MAX_VOLUMES];
 	int m_volumeCount;
 	///@}
@@ -202,6 +207,10 @@ public:
 						 const float height, unsigned short flags, unsigned char area);
 	int addConvexVolume(const rdVec3D* verts, const int nverts,
 						 const float minh, const float maxh, unsigned short flags, unsigned char area);
+	int addClipVolumesFromEntityPartition(const std::string& entPath);
+	// A .bsp load finds its own '_script.ent' unless this is turned off, which
+	// the caller does when it supplies the partition itself or wants none.
+	static void setAutoClipVolumes(bool enable);
 	void deleteShapeVolume(int i);
 	void drawBoxVolumes(struct duDebugDraw* dd, const rdVec3D* offset, const int hilightIdx = -1);
 	void drawCylinderVolumes(struct duDebugDraw* dd, const rdVec3D* offset, const int hilightIdx = -1);

@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //=============================================================================//
@@ -29,17 +29,15 @@
 #include "pluginsystem/modsystem.h"
 #ifndef DEDICATED
 #include "client/clientstate.h"
-#include "client/community_party.h"
 #endif // !DEDICATED
-#include <codecs/miles/miles_impl.h>
 
 CUtlVector<CUtlString> g_InstalledMaps;
 static CustomPakData_s s_customPakData;
 
 //-----------------------------------------------------------------------------
 // Purpose: load a custom pak and add it to the list
-// Input  : *pakFile - 
-// Output : pak handle, PAK_INVALID_HANDLE on failure
+// Input: *pakFile - 
+// Output: pak handle, PAK_INVALID_HANDLE on failure
 //-----------------------------------------------------------------------------
 PakHandle_t CustomPakData_s::LoadAndAddPak(const char* const pakFile, const bool isMod)
 {
@@ -65,8 +63,8 @@ PakHandle_t CustomPakData_s::LoadAndAddPak(const char* const pakFile, const bool
 
 //-----------------------------------------------------------------------------
 // Purpose: unload the SDK pak file by index
-// Input  : index - index into `handles`
-// Output : true if the given pak is unloaded
+// Input: index - index into `handles`
+// Output: true if the given pak is unloaded
 //-----------------------------------------------------------------------------
 bool CustomPakData_s::UnloadAndRemovePak(const int index)
 {
@@ -95,9 +93,9 @@ bool CustomPakData_s::UnloadAndRemovePak(const int index)
 }
 //-----------------------------------------------------------------------------
 // Purpose: preload a custom pak; this keeps it available throughout the
-//          duration of the process, unless manually removed by user.
-// Input  : *pakFile - 
-// Output : pak handle, PAK_INVALID_HANDLE on failure
+// duration of the process, unless manually removed by user.
+// Input: *pakFile - 
+// Output: pak handle, PAK_INVALID_HANDLE on failure
 //-----------------------------------------------------------------------------
 PakHandle_t CustomPakData_s::PreloadAndAddPak(const char* const pakFile)
 {
@@ -116,8 +114,8 @@ PakHandle_t CustomPakData_s::PreloadAndAddPak(const char* const pakFile)
 
 //-----------------------------------------------------------------------------
 // Purpose: unloads all non-preloaded custom pak handles, keep calling this
-//          over time until it returns true
-// Output : true if the non-preloaded paks are unloaded
+// over time until it returns true
+// Output: true if the non-preloaded paks are unloaded
 //-----------------------------------------------------------------------------
 bool CustomPakData_s::UnloadAndRemoveNonPreloaded(const bool modsOnly)
 {
@@ -149,8 +147,8 @@ bool CustomPakData_s::UnloadAndRemoveNonPreloaded(const bool modsOnly)
 
 //-----------------------------------------------------------------------------
 // Purpose: unloads all preloaded custom pak handles, keep calling this
-//          over time until it returns true
-// Output : true if the preloaded paks are unloaded
+// over time until it returns true
+// Output: true if the preloaded paks are unloaded
 //-----------------------------------------------------------------------------
 bool CustomPakData_s::UnloadAndRemovePreloaded()
 {
@@ -168,37 +166,9 @@ bool CustomPakData_s::UnloadAndRemovePreloaded()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: loads the base SDK pak file by type
-// Input  : *pakFile - 
-//          type     - 
-// Output : pak handle, PAK_INVALID_HANDLE on failure
-//-----------------------------------------------------------------------------
-PakHandle_t CustomPakData_s::LoadBasePak(const char* const pakFile, const PakType_e type)
-{
-    const PakHandle_t pakId = g_pakLoadApi->LoadAsync(pakFile, AlignedMemAlloc(), 4, 0);
-
-    // the file is most likely missing
-    assert(pakId != PAK_INVALID_HANDLE);
-    handles[type] = pakId;
-
-    return pakId;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: unload the SDK base pak file by type, keep calling this
-//          over time until it returns true
-// Input  : type - 
-// Output : true if the given pak is unloaded
-//-----------------------------------------------------------------------------
-bool CustomPakData_s::UnloadBasePak(const PakType_e type)
-{
-    return UnloadAndRemovePak(type);
-}
-
-//-----------------------------------------------------------------------------
 // Purpose: checks if level has changed
-// Input  : *levelName - 
-// Output : true if level name deviates from previous level
+// Input: *levelName - 
+// Output: true if level name deviates from previous level
 //-----------------------------------------------------------------------------
 static bool Mod_LevelHasChanged(const char* const levelName)
 {
@@ -207,8 +177,8 @@ static bool Mod_LevelHasChanged(const char* const levelName)
 
 //-----------------------------------------------------------------------------
 // Purpose: checks if playlist has changed
-// Input  : *playlistName - 
-// Output : true if playlist name deviates from previous playlist
+// Input: *playlistName - 
+// Output: true if playlist name deviates from previous playlist
 //-----------------------------------------------------------------------------
 static bool Mod_PlaylistHasChanged(const char* const playlistName)
 {
@@ -295,8 +265,8 @@ void Mod_GetAllInstalledMaps()
 
 //-----------------------------------------------------------------------------
 // Purpose: returns whether the load job for given pak id is finished
-// Input  : pakId - 
-// Output : true if the load job is finished
+// Input: pakId - 
+// Output: true if the load job is finished
 //-----------------------------------------------------------------------------
 static bool Mod_IsPakLoadFinished(const PakHandle_t pakId)
 {
@@ -319,7 +289,7 @@ static bool Mod_IsPakLoadFinished(const PakHandle_t pakId)
 
 //-----------------------------------------------------------------------------
 // Purpose: returns whether the load job for custom pak batch for given common
-//          pak is finished
+// pak is finished
 //-----------------------------------------------------------------------------
 static bool Mod_IsCustomPakLoadFinished(const int commonType)
 {
@@ -351,9 +321,9 @@ static bool Mod_IsCustomPakLoadFinished(const int commonType)
 
 //-----------------------------------------------------------------------------
 // Purpose: formats the path to a file residing inside the paks directory
-// Input  : (&pOut)   - 
-//          *rootPath - 
-//          *fileName - 
+// Input: (&pOut) - 
+// *rootPath - 
+// *fileName - 
 //-----------------------------------------------------------------------------
 template <typename T, int N>
 static void Mod_FormatPakPath(T(&pOut)[N], const char* const rootPath, const char* const fileName)
@@ -433,9 +403,9 @@ static void Mod_PreloadAllPaks()
         ModSystem()->LockModList();
 
         // Preload mod paks.
-        FOR_EACH_VEC(ModSystem()->GetModList(), i)
+        FOR_EACH_VEC(ModSystem()->GetResolvedModList(), i)
         {
-            const CModSystem::ModInstance_t* const mod = ModSystem()->GetModList()[i];
+            const CModSystem::ModInstance_t* const mod = ModSystem()->GetResolvedModList()[i];
 
             if (!mod->IsEnabled())
                 continue;
@@ -449,7 +419,7 @@ static void Mod_PreloadAllPaks()
 
 //-----------------------------------------------------------------------------
 // Purpose: unloads all preloaded paks
-// Output : true if the preloaded paks are unloaded
+// Output: true if the preloaded paks are unloaded
 //-----------------------------------------------------------------------------
 static bool Mod_UnloadPreloadedPaks()
 {
@@ -461,9 +431,9 @@ static bool Mod_UnloadPreloadedPaks()
 
 //-----------------------------------------------------------------------------
 // Purpose: initiates the reprocess of all user level mod paks, call this when
-//          the playlist changes as we need to re-evaluate which paks need to
-//          be unloaded and loaded as some mod paks are necessary on certain
-//          playlists while others aren't
+// the playlist changes as we need to re-evaluate which paks need to
+// be unloaded and loaded as some mod paks are necessary on certain
+// playlists while others aren't
 //-----------------------------------------------------------------------------
 void Mod_InitiateUserLevelModPaksReprocess()
 {
@@ -490,13 +460,7 @@ void Mod_CancelUserLevelModPaksReprocess()
 static const char* Mod_GetTargetPlaylistForPreload()
 {
 #ifndef DEDICATED
-    // For client builds, we need to be aware of our party because the engine
-    // uses this to precache level assets; it calls Party_GetTargetMap() which
-    // internally does the same thing as Party_GetTargetPlaylist(), except it
-    // retrieves the target map from the given 'target' playlist. We need to
-    // resolve the playlist that was used to retrieve the target level so we
-    // can load the correct level mod paks.
-    return Party_GetTargetPlaylist();
+    return Playlists_GetCurrentName();
 #else
     // For server builds, life's a lot easier; we just take whatever our
     // current playlist is and return that.
@@ -506,8 +470,8 @@ static const char* Mod_GetTargetPlaylistForPreload()
 
 //-----------------------------------------------------------------------------
 // Purpose: handles the level change, update's SDK's internal state and loads
-//          the level's load screen
-// Input  : *levelName - 
+// the level's load screen
+// Input: *levelName - 
 //-----------------------------------------------------------------------------
 static void Mod_HandleLevelChanged(const char* const levelName)
 {
@@ -536,9 +500,6 @@ static void Mod_HandleLevelChanged(const char* const levelName)
         if (!s_customPakData.inLobby)
             s_customPakData.lastPrecachedLevel = levelName;
 
-#ifndef DEDICATED
-        Miles_HandleLevelChanged();
-#endif // !DEDICATED
     }
 
     // We should retain all paks in lobby, do not initiate a reprocess unless
@@ -562,9 +523,9 @@ static void Mod_HandleLevelChanged(const char* const levelName)
 
 //-----------------------------------------------------------------------------
 // Purpose: loads the level settings file relative from provided root
-// Input  : *levelName - 
-//          *rootPath - 
-// Output : KeyValues*, nullptr on failure
+// Input: *levelName - 
+// *rootPath - 
+// Output: KeyValues*, nullptr on failure
 //-----------------------------------------------------------------------------
 static KeyValues* Mod_GetLevelSettings(const char* const levelName, const char* const rootPath)
 {
@@ -576,8 +537,8 @@ static KeyValues* Mod_GetLevelSettings(const char* const levelName, const char* 
 
 //-----------------------------------------------------------------------------
 // Purpose: loads the level core settings file.
-// Input  : *levelName - 
-// Output : KeyValues*, nullptr on failure
+// Input: *levelName - 
+// Output: KeyValues*, nullptr on failure
 //-----------------------------------------------------------------------------
 KeyValues* Mod_GetLevelCoreSettings(const char* const levelName)
 {
@@ -593,8 +554,8 @@ enum PakLoadContext_e
 
 //-----------------------------------------------------------------------------
 // Purpose: determines if the pak should be loaded in the current context
-// Input  : mode - 
-// Output : true if we should load it, false otherwise
+// Input: mode - 
+// Output: true if we should load it, false otherwise
 //-----------------------------------------------------------------------------
 static bool Mod_ShouldLoadPakInCurrentContext(const int mode)
 {
@@ -612,8 +573,8 @@ static bool Mod_ShouldLoadPakInCurrentContext(const int mode)
 
 //-----------------------------------------------------------------------------
 // Purpose: loads paks specified inside the level settings file
-// Input  : *settingsKV - 
-//          *rootPath   - 
+// Input: *settingsKV - 
+// *rootPath - 
 //-----------------------------------------------------------------------------
 static void Mod_LoadLevelPaks(KeyValues* const settingsKV, const char* const rootPath)
 {
@@ -657,7 +618,7 @@ static void Mod_LoadLevelPaks(KeyValues* const settingsKV, const char* const roo
 
 //-----------------------------------------------------------------------------
 // Purpose: load core mod paks for this level
-// Input  : *levelName - 
+// Input: *levelName - 
 //-----------------------------------------------------------------------------
 static void Mod_LoadLevelCorePaks(const char* const levelName)
 {
@@ -672,7 +633,7 @@ static void Mod_LoadLevelCorePaks(const char* const levelName)
 
 //-----------------------------------------------------------------------------
 // Purpose: load user mod paks for this level
-// Input  : *levelName - 
+// Input: *levelName - 
 //-----------------------------------------------------------------------------
 static void Mod_LoadLevelModPaks(const char* const levelName)
 {
@@ -686,9 +647,9 @@ static void Mod_LoadLevelModPaks(const char* const levelName)
 
     ModSystem()->LockModList();
 
-    FOR_EACH_VEC(ModSystem()->GetModList(), i)
+    FOR_EACH_VEC(ModSystem()->GetResolvedModList(), i)
     {
-        const CModSystem::ModInstance_t* const mod = ModSystem()->GetModList()[i];
+        const CModSystem::ModInstance_t* const mod = ModSystem()->GetResolvedModList()[i];
 
         if (!mod->IsEnabled())
             continue;
@@ -711,7 +672,7 @@ static void Mod_LoadLevelModPaks(const char* const levelName)
 
 //-----------------------------------------------------------------------------
 // Purpose: load all mod paks for this level
-// Input  : modsOnly - 
+// Input: modsOnly - 
 //-----------------------------------------------------------------------------
 static void Mod_LoadAllLevelPaks(const bool modsOnly)
 {
@@ -725,7 +686,7 @@ static void Mod_LoadAllLevelPaks(const bool modsOnly)
 
 //-----------------------------------------------------------------------------
 // Purpose: unloads all paks loaded by the level settings file
-// Input  : modsOnly - 
+// Input: modsOnly - 
 //-----------------------------------------------------------------------------
 static bool Mod_UnloadLevelPaks(const bool modsOnly)
 {
@@ -748,7 +709,7 @@ static bool Mod_UnloadLevelPaks(const bool modsOnly)
         // otherwise the fallback models won't render; the new
         // gather props solution does not attempt to obtain
         // studio hardware data on bad mdl handles. See
-        // 'GatherStaticPropsSecondPass_PreInit()' for details.
+        // 'GatherStaticPropsSecondPass_PreInit' for details.
         g_StudioMdlFallbackHandler.DisableLegacyGatherProps();
     }
 
@@ -757,9 +718,9 @@ static bool Mod_UnloadLevelPaks(const bool modsOnly)
 
 //-----------------------------------------------------------------------------
 // Purpuse: scans the list of loaded common paks and returns the type we should
-//          unload; all paks starting from the tail until (and including) the
-//          returned type should be unloaded.
-// Output : int, maps to CommonPakData_s::PakType_e
+// unload; all paks starting from the tail until (and including) the
+// returned type should be unloaded.
+// Output: int, maps to CommonPakData_s::PakType_e
 //-----------------------------------------------------------------------------
 static int Mod_GetTargetPakToUnloadType()
 {
@@ -780,7 +741,7 @@ static int Mod_GetTargetPakToUnloadType()
 
 //-----------------------------------------------------------------------------
 // Purpose: handles custom pak unload for type
-// Output : true if the custom pak(s) unload jobs are finished
+// Output: true if the custom pak(s) unload jobs are finished
 //-----------------------------------------------------------------------------
 static bool Mod_HandleCustomPakUnloadForType(const int type)
 {
@@ -820,8 +781,8 @@ static bool Mod_HandleCustomPakUnloadForType(const int type)
 
 //-----------------------------------------------------------------------------
 // Purpose: unloads all paks until and including the given pak type
-// Input  : pakType - maps to CommonPakData_s::PakType_e
-// Output : true if all paks have been successfully loaded, false otherwise
+// Input: pakType - maps to CommonPakData_s::PakType_e
+// Output: true if all paks have been successfully loaded, false otherwise
 //-----------------------------------------------------------------------------
 static bool Mod_UnloadPaksUntilType(const int pakType)
 {
@@ -915,7 +876,7 @@ static void Mod_LoadAndUnloadPaksWithLock()
 
 //-----------------------------------------------------------------------------
 // Purpose: handle load of custom paks based on current common pak
-// Input  : type - maps to CommonPakData_s::PakType_e
+// Input: type - maps to CommonPakData_s::PakType_e
 //-----------------------------------------------------------------------------
 static void Mod_HandleCustomPakLoadForType(const int type)
 {
@@ -941,13 +902,13 @@ static void Mod_HandleCustomPakLoadForType(const int type)
 
 //-----------------------------------------------------------------------------
 // Purpose: loads the main pak and forces the global state to unfinished and
-//          returns false if its still in progress. If the main pak finished
-//          loading, the custom pak linked to this pak will start loading and
-//          code will force the global state to unfinished and return false
-//          for this pak as well if its still in progress.
-// Input  : &cpd - 
-//          index - 
-// Output : true if all load jobs have finished, false otherwise
+// returns false if its still in progress. If the main pak finished
+// loading, the custom pak linked to this pak will start loading and
+// code will force the global state to unfinished and return false
+// for this pak as well if its still in progress.
+// Input: &cpd - 
+// index - 
+// Output: true if all load jobs have finished, false otherwise
 //-----------------------------------------------------------------------------
 static bool Mod_HandlePakLoadJobStateUpdate(CommonPakData_s& cpd, const int index)
 {
@@ -974,7 +935,7 @@ static bool Mod_HandlePakLoadJobStateUpdate(CommonPakData_s& cpd, const int inde
 
 //-----------------------------------------------------------------------------
 // Purpose: handles the unload of user level mod paks if the reprocess flag is
-//          set, this will be set if we change the playlist
+// set, this will be set if we change the playlist
 //-----------------------------------------------------------------------------
 static bool Mod_HandleUserLevelModPaksUnload()
 {
@@ -1001,7 +962,7 @@ static bool Mod_HandleUserLevelModPaksUnload()
 
 //-----------------------------------------------------------------------------
 // Purpose: handles the load of user level mod paks if the reprocess flag is
-//          set, this will be set if we change the playlist
+// set, this will be set if we change the playlist
 //-----------------------------------------------------------------------------
 static void Mod_HandleUserLevelModPaksLoad()
 {
@@ -1046,7 +1007,7 @@ static ConCommand pak_emulateremount("pak_emulateremount", Pak_EmulateRemount_f,
 
 //-----------------------------------------------------------------------------
 // Purpose: returns whether we should remount all paks, for example, when we
-//          have assets loaded with discarded streaming data.
+// have assets loaded with discarded streaming data.
 //-----------------------------------------------------------------------------
 static bool Mod_ShouldRemountPaks()
 {
@@ -1138,17 +1099,17 @@ static void Mod_RunPakJobFrame()
 
 //-----------------------------------------------------------------------------
 // Purpose: initiates asset precache for the given level
-// Input  : *fullLevelFileName - is vpk/<target>_<levelName>.bsp, so it can be:
-//                               vpk/server_mp_lobby.bsp
-//          *levelName         - is mp_lobby, mp_rr_box, or whatever map we are
-//                               precaching. However, if the to-precache VPK 
-//                               doesn't have a map by design, such as the VPK
-//                               vpk/client_mp_common.bsp for example, then the
-//                               levelName parameter will be nullptr!
-//          allowVpkLoadFail   - whether to error or not when the VPK for the
-//                               given level failed to load. NOTE that we will
-//                               always error when a VPK without a BSP level,
-//                               such as vpk/client_frontend.bsp, fails to load
+// Input: *fullLevelFileName - is vpk/<target>_<levelName>.bsp, so it can be
+// vpk/server_mp_lobby.bsp
+// *levelName - is mp_lobby, mp_rr_box, or whatever map we are
+// precaching. However, if the to-precache VPK 
+// doesn't have a map by design, such as the VPK
+// vpk/client_mp_common.bsp for example, then the
+// levelName parameter will be nullptr!
+// allowVpkLoadFail - whether to error or not when the VPK for the
+// given level failed to load. NOTE that we will
+// always error when a VPK without a BSP level,
+// such as vpk/client_frontend.bsp, fails to load
 //-----------------------------------------------------------------------------
 static void Mod_PrecacheLevelAssets(const char* const fullLevelFileName, const char* const levelName, const bool allowVpkLoadFail)
 {
@@ -1160,7 +1121,7 @@ static void Mod_PrecacheLevelAssets(const char* const fullLevelFileName, const c
 
 //-----------------------------------------------------------------------------
 // Purpose: loads the load screen pak for the given level
-// Input  : *levelName
+// Input: *levelName
 //-----------------------------------------------------------------------------
 static void Mod_LoadLoadscreenPakForLevel(const char* const levelName)
 {

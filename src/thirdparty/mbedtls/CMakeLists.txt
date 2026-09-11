@@ -128,6 +128,16 @@ endif()
 
 end_sources()
 
+# MSVC 14.50 LTCG ICE (C1001/LNK1000) in c2.dll on mbedtls TUs.
+set_target_properties( ${PROJECT_NAME} PROPERTIES
+    INTERPROCEDURAL_OPTIMIZATION OFF
+    INTERPROCEDURAL_OPTIMIZATION_RELEASE OFF
+    INTERPROCEDURAL_OPTIMIZATION_PROFILE OFF
+)
+target_compile_options( ${PROJECT_NAME} PRIVATE
+    "$<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/GL->"
+)
+
 target_include_directories( ${PROJECT_NAME} PRIVATE
     "${THIRDPARTY_SOURCE_DIR}/mbedtls/include/"
 )

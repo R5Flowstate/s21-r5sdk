@@ -30,6 +30,7 @@ add_sources( SOURCE_GROUP "Core/Include"
 )
 
 add_sources( SOURCE_GROUP "IO"
+    "EntityVolumes.cpp"
     "Filelist.cpp"
     "MeshLoaderBsp.cpp"
     "MeshLoaderObj.cpp"
@@ -37,6 +38,7 @@ add_sources( SOURCE_GROUP "IO"
 )
 
 add_sources( SOURCE_GROUP "IO/Include"
+    "include/EntityVolumes.h"
     "include/Filelist.h"
     "include/MeshLoaderBsp.h"
     "include/MeshLoaderObj.h"

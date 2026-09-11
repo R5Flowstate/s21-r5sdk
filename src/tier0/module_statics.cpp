@@ -11,10 +11,10 @@
 
 //-----------------------------------------------------------------------------
 // Purpose: get address of imported function in target module
-// Input  : *szModuleName       - 
-//          *szSymbolName       - 
-//          bGetSymbolReference - 
-// Output : CMemory
+// Input: *szModuleName - 
+// *szSymbolName - 
+// bGetSymbolReference - 
+// Output: CMemory
 //-----------------------------------------------------------------------------
 CMemory CModule::GetImportedSymbol(QWORD pModuleBase, const char* szModuleName,
 	const char* szSymbolName, const bool bGetSymbolReference)
@@ -71,9 +71,9 @@ CMemory CModule::GetImportedSymbol(QWORD pModuleBase, const char* szModuleName,
 
 //-----------------------------------------------------------------------------
 // Purpose: get address of exported symbol in this module
-// Input  : *pModuleBase - 
-//          szSymbolName - 
-// Output : CMemory
+// Input: *pModuleBase - 
+// szSymbolName - 
+// Output: CMemory
 //-----------------------------------------------------------------------------
 CMemory CModule::GetExportedSymbol(QWORD pModuleBase, const char* szSymbolName)
 {

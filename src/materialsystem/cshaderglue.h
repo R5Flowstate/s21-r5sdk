@@ -4,8 +4,6 @@
 class CShaderGlue // Most of these found in CShaderGlue::SetupShader
 {
 public:
-	int SetupShader(uint64_t nCount, uint64_t a3, void* pRawMaterialGlueWithoutVTable);
-
 	void* m_pVTable; //0x0000
 	char pad_0008[8]; //0x0008 Dispatcher Context, Some SEH try and catch thing.
 	uint64_t m_nUnknown1; //0x0010
@@ -23,35 +21,11 @@ static_assert(sizeof(CShaderGlue) == 0x40); // [ PIXIE ]: All vars have proper d
 #pragma pack(pop)
 
 /*
-  if ( *(_BYTE *)(v19 + a1 + 32) != byte_14171A08A ) // (v19 + a1 + 32) = m_nByte1
+  if ( *(_BYTE *)(v19 + a1 + 32) != ) // (v19 + a1 + 32) = m_nByte1
   {
-	byte_14171A08A = *(_BYTE *)(v19 + a1 + 32);
-	qword_14171AE78 = -1i64;
+	 = *(_BYTE *)(v19 + a1 + 32);
+	 = -1i64;
   }
 */
 
-/* ==== CSHADERGLUE ================================================================================================================================================== */
-inline int(*CShaderGlue_SetupShader)(CShaderGlue* thisptr, uint64_t nCount, uint64_t a3, void* pRawMaterialGlueWithoutVTable);
 
-inline void* g_pShaderGlueVFTable = nullptr;
-
-///////////////////////////////////////////////////////////////////////////////
-class VShaderGlue : public IDetour
-{
-	virtual void GetAdr(void) const
-	{
-		LogConAdr("CShaderGlue::`vftable'", g_pShaderGlueVFTable);
-		LogFunAdr("CShaderGlue::SetupShader", CShaderGlue_SetupShader);
-	}
-	virtual void GetFun(void) const 
-	{
-		CShaderGlue_SetupShader = CMemory(g_pShaderGlueVFTable).WalkVTable(4).Deref().RCast<int(*)(CShaderGlue*, uint64_t, uint64_t, void*)>();
-	}
-	virtual void GetVar(void) const { }
-	virtual void GetCon(void) const
-	{
-		g_pShaderGlueVFTable = g_GameDll.GetVirtualMethodTable(".?AVCShaderGlue@@");
-	}
-	virtual void Detour(const bool bAttach) const { }
-};
-///////////////////////////////////////////////////////////////////////////////

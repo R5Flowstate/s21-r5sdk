@@ -1,0 +1,61 @@
+#pragma once
+#include "thirdparty/curl/include/curl/curl.h"
+#include "bansystem.h"
+#include "serverlisting.h"
+#include "localize/ilocalize.h"
+
+extern ConVar spire_matchmaking_hostname;
+extern ConVar spire_host_update_interval;
+extern ConVar spire_host_visibility;
+extern ConVar spire_showdebuginfo;
+
+struct MSEulaData_t
+{
+	int version;
+	string language;
+	string contents;
+};
+
+class CSpire
+{
+public:
+	CSpire() { SetLanguage(g_LanguageNames[0]); }
+
+	bool GetServerList(vector<NetGameServer_t>& outServerList, string& outMessage) const;
+	bool GetServerByToken(NetGameServer_t& slOutServer, string& outMessage, const string& svToken) const;
+	bool PostServerHost(string& outMessage, string& svOutToken, string& outHostIp, const NetGameServer_t& netGameServer) const;
+
+	bool GetBannedList(const CBanSystem::BannedList_t& inBannedVec, CBanSystem::BannedList_t** outBannedVec) const;
+	bool CheckForBan(const string& ipAddress, const uint64_t userId, const string& personaName, string& outReason, CBanSystem::Banned_t::BanType_e& outBanType, string& outExpiryTimestamp) const;
+
+	bool AuthForConnection(const uint64_t userId, const char* ipAddress, const char* authCode, const char* platformToken, string& outToken, string& outMessage, const char* personaName = nullptr) const;
+
+	bool GetEULA(MSEulaData_t& outData, string& outMessage) const;
+	bool IsEnabled() const;
+
+	inline void SetLanguage(const char* lang)
+	{
+		AUTO_LOCK(m_StringMutex);
+		m_Language = lang;
+	};
+	inline const string& GetLanguage() const
+	{
+		AUTO_LOCK(m_StringMutex);
+		return m_Language;
+	};
+
+private:
+	void ExtractError(const rapidjson::Document& resultBody, string& outMessage, CURLINFO status, const char* errorText = nullptr) const;
+	void ExtractError(const string& response, string& outMessage, CURLINFO status, const char* messageText = nullptr) const;
+
+	void LogBody(const rapidjson::Document& responseJson) const;
+	bool SendRequest(const char* endpoint, const rapidjson::Document& requestJson, rapidjson::Document& responseJson, string& outMessage, CURLINFO& status, const char* errorText = nullptr) const;
+	bool QueryServer(const char* endpoint, const char* request, string& outResponse, string& outMessage, CURLINFO& outStatus) const;
+
+	void SetDisabledMessage(string& outMsg) const;
+
+private:
+	string m_Language;
+	mutable CThreadFastMutex m_StringMutex;
+};
+extern CSpire g_Spire;

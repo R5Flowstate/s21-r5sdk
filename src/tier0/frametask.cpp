@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: 
+// Purpose
 // 
 //-----------------------------------------------------------------------------
 //
@@ -37,7 +37,7 @@ void CFrameTask::RunFrame()
 
 //-----------------------------------------------------------------------------
 // Purpose: is the task finished
-// Output : true if finished, false otherwise
+// Output: true if finished, false otherwise
 //-----------------------------------------------------------------------------
 bool CFrameTask::IsFinished() const
 {
@@ -46,8 +46,8 @@ bool CFrameTask::IsFinished() const
 
 //-----------------------------------------------------------------------------
 // Purpose: adds function to list, to be called after 'i' frames.
-// Input  : functor - 
-//          frames - 
+// Input: functor - 
+// frames - 
 //-----------------------------------------------------------------------------
 void CFrameTask::Dispatch(std::function<void()> functor, unsigned int frames)
 {

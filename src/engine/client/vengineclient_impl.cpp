@@ -11,8 +11,8 @@
 
 //---------------------------------------------------------------------------------
 // Purpose: define if commands from the server should be restricted or not.
-// Input  : bRestricted - 
-// Output :
+// Input: bRestricted - 
+// Output 
 //---------------------------------------------------------------------------------
 void CEngineClient::SetRestrictServerCommands(bool bRestricted)
 {
@@ -20,19 +20,9 @@ void CEngineClient::SetRestrictServerCommands(bool bRestricted)
 }
 
 //---------------------------------------------------------------------------------
-// Purpose: get value for if commands are restricted from servers.
-// Input  :
-// Output : bool
-//---------------------------------------------------------------------------------
-bool CEngineClient::GetRestrictServerCommands() const
-{
-	return g_pClientState->m_bRestrictServerCommands;
-}
-
-//---------------------------------------------------------------------------------
 // Purpose: define if commands on the client should be restricted or not.
-// Input  : bRestricted - 
-// Output :
+// Input: bRestricted - 
+// Output 
 //---------------------------------------------------------------------------------
 void CEngineClient::SetRestrictClientCommands(bool bRestricted)
 {
@@ -40,19 +30,9 @@ void CEngineClient::SetRestrictClientCommands(bool bRestricted)
 }
 
 //---------------------------------------------------------------------------------
-// Purpose: get value for if commands are restricted for clients.
-// Input  :
-// Output : bool
-//---------------------------------------------------------------------------------
-bool CEngineClient::GetRestrictClientCommands() const
-{
-	return g_pClientState->m_bRestrictClientCommands;
-}
-
-//---------------------------------------------------------------------------------
 // Purpose: get local player
-// Input  :
-// Output : int
+// Input 
+// Output: int
 //---------------------------------------------------------------------------------
 int CEngineClient::GetLocalPlayer()
 {
@@ -62,9 +42,9 @@ int CEngineClient::GetLocalPlayer()
 
 //---------------------------------------------------------------------------------
 // Purpose: execute client command
-// Input  : *thisptr     - 
-//          *szCmdString - 
-// Output :
+// Input: *thisptr - 
+// *szCmdString - 
+// Output 
 //---------------------------------------------------------------------------------
 void CEngineClient::_ClientCmd(CEngineClient* thisptr, const char* const szCmdString)
 {

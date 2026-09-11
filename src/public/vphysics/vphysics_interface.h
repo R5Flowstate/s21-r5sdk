@@ -16,25 +16,23 @@ public:
 	virtual ~IPhysicsCollision(void) {}
 
 private:
-	// TODO: reverse these:
-	virtual void sub_14058C3B0() = 0;
-	virtual void sub_14058C3F0() = 0;
-	virtual void sub_14058CD80() = 0;
-	virtual void sub_14058C6E0() = 0;
-	virtual void sub_14058C6F0() = 0;
-	virtual void sub_14058CDD0() = 0;
-	virtual void sub_14058CB50() = 0;
-	virtual void sub_14058C980() = 0;
-	virtual void sub_14058D3D0() = 0;
-	virtual void sub_14058D400() = 0;
-	virtual void sub_14058C0D0() = 0;
-	virtual void sub_14058C060() = 0;
+	// Unmapped collision vtable slots; keep for layout.
+	virtual void PhysicsCollisionUnknown0() = 0;
+	virtual void PhysicsCollisionUnknown1() = 0;
+	virtual void PhysicsCollisionUnknown2() = 0;
+	virtual void PhysicsCollisionUnknown3() = 0;
+	virtual void PhysicsCollisionUnknown4() = 0;
+	virtual void PhysicsCollisionUnknown5() = 0;
+	virtual void PhysicsCollisionUnknown6() = 0;
+	virtual void PhysicsCollisionUnknown7() = 0;
+	virtual void PhysicsCollisionUnknown8() = 0;
+	virtual void PhysicsCollisionUnknown9() = 0;
+	virtual void PhysicsCollisionUnknown10() = 0;
+	virtual void PhysicsCollisionUnknown11() = 0;
 
 public:
 	virtual void VCollideLoad(vcollide_t* const pOutput, const int numSolids, const char* const pBuffer) = 0;
 	virtual void VCollideUnload(vcollide_t* const pVCollide) = 0;
-
-	// TODO: there is more past this, see r5apex.exe @1413A9420
 };
 
 abstract_class IVPhysicsDebugOverlay

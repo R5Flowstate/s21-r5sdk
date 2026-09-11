@@ -9,8 +9,12 @@ bool CMeshVertexBuilder::Begin(CMatRenderContext* const ctx, const int vertexCou
 
     m_vertexParams.vertexFormat.position3d = 1;
     m_vertexParams.vertexFormat.color = 1;
-
-    m_vertexParams.vertexStructSize = sizeof(Vector3D) + sizeof(Color);
+#if defined(CLIENT_DLL)
+    // S21 input layout expects these extra format bits.
+    m_vertexParams.vertexFormat.unknown3 = 1;
+    m_vertexParams.vertexFormat.texCoordFlags = 2;
+#endif // CLIENT_DLL
+    m_vertexParams.vertexStructSize = sizeof(MeshVertex_s);
     m_vertexParams.vertexBlockIndex = 0;
     m_vertexParams.vertexBufferOffset = 0;
     m_vertexParams.vertexCount = 0;

@@ -1,4 +1,9 @@
 #pragma once
+//=============================================================================//
+//
+// Purpose: In-game developer menu UI
+//
+//=============================================================================//
 #ifndef DEDICATED
 #include "common/sdkdefs.h"
 #include "imgui_surface.h"
@@ -20,7 +25,7 @@ public:
 	void ClearPresetCommands(void);
 
 private:
-	struct PresetCommand_t; // forward declaration for prototype
+	struct PresetCommand_t;
 	void DrawMenuRecursive(const vector<PresetCommand_t>& commands);
 
 private:

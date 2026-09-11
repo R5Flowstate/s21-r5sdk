@@ -29,7 +29,7 @@ struct PakLoadFuncs_s
 	// the patch handler for this asset type will be called which
 	// allows for patching the asset with the one from the new pak.
 	// - the class size should contain both the header size and the
-	//   rest of the class itself
+	// rest of the class itself
 	void (*const RegisterAsset)(const uint32 assetType, const uint32 assetVersion, const char* const assetTypeName,
 						  const void* const loadHandler, const void* const unloadHandler, const void* const patchHandler,
 						  CAlignedMemAlloc* const allocator, const uint32 headerSize, const uint32 classSize,

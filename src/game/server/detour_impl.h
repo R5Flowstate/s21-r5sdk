@@ -4,6 +4,7 @@
 #include "thirdparty/recast/Detour/Include/DetourNode.h"
 #include "thirdparty/recast/Detour/Include/DetourNavMeshQuery.h"
 #include "game/server/ai_navmesh.h"
+#include "game/server/detour_layout_asserts.h"
 
 //-------------------------------------------------------------------------
 // RUNTIME: DETOUR

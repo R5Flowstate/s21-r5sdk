@@ -5,6 +5,7 @@
 //===========================================================================//
 #include "engine/client/clientstate.h"
 #include "datablock_receiver.h"
+#include "tier0/dbg.h"
 #include "common/proto_oob.h"
 #include "engine/common.h"
 #include "engine/host_cmd.h"
@@ -75,7 +76,25 @@ bool ClientDataBlockReceiver::ProcessDataBlock(const double startTime, const sho
 	if (transferId != m_TransferId || m_bCompletedRecv)
 		return false;
 
-	// initialize the receiver if this is the firs fragment
+	if (transferSize < 1 || transferSize > MAX_DATABLOCK_TRANSFER_SIZE)
+	{
+		Warning(eDLL_T::ENGINE, "[DATABLOCK-CLAMP] reject transferSize=%d\n", transferSize);
+		return false;
+	}
+
+	if (currentBlockId < 0 || currentBlockId >= MAX_DATABLOCK_FRAGMENTS)
+	{
+		Warning(eDLL_T::ENGINE, "[DATABLOCK-CLAMP] reject blockId=%d\n", currentBlockId);
+		return false;
+	}
+
+	if (blockBufferBytes < 1 || blockBufferBytes > MAX_DATABLOCK_FRAGMENT_SIZE || !blockBuffer)
+	{
+		Warning(eDLL_T::ENGINE, "[DATABLOCK-CLAMP] reject fragBytes=%d\n", blockBufferBytes);
+		return false;
+	}
+
+	// initialize the receiver if this is the first fragment
 	if (!m_bStartedRecv)
 		StartBlockReceiver(transferSize, startTime);
 
@@ -87,12 +106,17 @@ bool ClientDataBlockReceiver::ProcessDataBlock(const double startTime, const sho
 	if (!m_BlockStatus[currentBlockId])
 	{
 		const int scratchBufferOffset = currentBlockId * MAX_DATABLOCK_FRAGMENT_SIZE;
+		const int destOff = scratchBufferOffset + (int)(sizeof(ClientDataBlockHeader_s) - 1);
+		const int allocBytes = MAX_DATABLOCK_TRANSFER_SIZE + (int)sizeof(ClientDataBlockHeader_s);
 
-		if (blockBufferBytes + scratchBufferOffset <= m_nTransferSize)
-			memcpy(m_pScratchBuffer + scratchBufferOffset + (sizeof(ClientDataBlockHeader_s) -1), blockBuffer, blockBufferBytes);
-
-		++m_nBlockAckTick;
-		m_BlockStatus[currentBlockId] = true;
+		if (m_pScratchBuffer &&
+			scratchBufferOffset + blockBufferBytes <= m_nTransferSize &&
+			destOff >= 0 && destOff + blockBufferBytes <= allocBytes)
+		{
+			memcpy(m_pScratchBuffer + destOff, blockBuffer, blockBufferBytes);
+			++m_nBlockAckTick;
+			m_BlockStatus[currentBlockId] = true;
+		}
 	}
 
 	// check if we have recv'd enough fragments to decode the data
@@ -101,6 +125,9 @@ bool ClientDataBlockReceiver::ProcessDataBlock(const double startTime, const sho
 
 	AcknowledgeTransmission();
 	m_bCompletedRecv = true;
+
+	if (!m_pScratchBuffer)
+		return false;
 
 	const ClientDataBlockHeader_s* const pHeader = reinterpret_cast<ClientDataBlockHeader_s*>(m_pScratchBuffer);
 
@@ -116,7 +143,9 @@ bool ClientDataBlockReceiver::ProcessDataBlock(const double startTime, const sho
 
 		// copy the encoded data in the newly allocated buffer so we can decode back
 		// into the data block buffer we copied the encoded data from
-		const int compressedSize = m_nTransferSize -1;
+		const int compressedSize = m_nTransferSize - 1;
+		if (compressedSize < 1 || compressedSize > SNAPSHOT_SCRATCH_BUFFER_SIZE)
+			return false;
 
 		memcpy(pEncodedDataBuf, dataLocation, compressedSize);
 		const int numDecode = LZ4_decompress_safe(pEncodedDataBuf, dataLocation, compressedSize, SNAPSHOT_SCRATCH_BUFFER_SIZE);
@@ -143,9 +172,9 @@ bool ClientDataBlockReceiver::ProcessDataBlock(const double startTime, const sho
 }
 
 //-----------------------------------------------------------------------------
-// NOTE: detoured for 2 reasons:
+// NOTE: detoured for 2 reasons
 // 1: when a corrupt or malformed compress packet is sent, the code never freed
-//    the temporary copy buffer it made to decode the data into the scratch buf
+// the temporary copy buffer it made to decode the data into the scratch buf
 // 2: exploring other compression algorithms for potential optimizations
 //-----------------------------------------------------------------------------
 static bool HK_ProcessDataBlock(ClientDataBlockReceiver* receiver, const double startTime,
@@ -156,7 +185,3 @@ static bool HK_ProcessDataBlock(ClientDataBlockReceiver* receiver, const double 
 		currentBlockId, blockBuffer, blockBufferBytes);
 }
 
-void VClientDataBlockReceiver::Detour(const bool bAttach) const
-{
-	DetourSetup(&ClientDataBlockReceiver__ProcessDataBlock, HK_ProcessDataBlock, bAttach);
-}

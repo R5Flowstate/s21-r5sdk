@@ -97,6 +97,7 @@ inline void(*JT_EndJobGroup)(const JobID_t jobId);
 inline unsigned int (*JT_AllocateJob)(); // Returns an index to the 'job_JT_Context' array
 inline JobID_t(*JTGuts_AddJob_Internal)(JobTypeID_t jobTypeId, JobID_t jobId, void* callbackfunc, void* callbackArg, int jobIndex, JobContext_s* context);
 
+#ifndef CLIENT_DLL
 ///////////////////////////////////////////////////////////////////////////////
 class VJobThread : public IDetour
 {
@@ -141,5 +142,6 @@ class VJobThread : public IDetour
 	virtual void Detour(const bool bAttach) const;
 };
 ///////////////////////////////////////////////////////////////////////////////
+#endif // !CLIENT_DLL
 
 #endif // JOBTHREAD_H

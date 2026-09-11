@@ -32,6 +32,10 @@ macro( apply_project_settings )
     option( OPTION_CERTAIN "This build is certain; debug statements (such as DevMsg(...)) will NOT be compiled" OFF )
     option( OPTION_RETAIL "This build is retail; enable this among with 'OPTION_CERTAIN' to form a release build" OFF )
 
+    # Legacy single game_shared_static CLIENT_DLL force (client-only rebuilds).
+    # Dual product builds use game_shared_static_cl instead; leave OFF.
+    option( R5SDK_UNIFY_CLIENT_SHARED "Force CLIENT_DLL on plain game_shared_static (legacy single-shared rebuilds)" OFF )
+
     # Set common defines
     add_compile_definitions(
         "_CRT_SECURE_NO_WARNINGS"
@@ -82,6 +86,9 @@ macro( apply_project_settings )
     set( CMAKE_EXE_LINKER_FLAGS_PROFILE "${CMAKE_EXE_LINKER_FLAGS_PROFILE} /PROFILE" )
 
     # Set settings for Release configuration
+    # Default /EHsc (server/dedicated). Client inject uses /EHa via
+    # apply_client_seh_options so catch(...) can also catch SEH; apply that
+    # macro to the client product and every client-only *_cl lib it links.
     add_compile_options(
         $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/GF>
         $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/MT>
@@ -110,6 +117,18 @@ macro( apply_project_settings )
         "${THIRDPARTY_SOURCE_DIR}/boost/"
         "${THIRDPARTY_SOURCE_DIR}/imgui/"
         "${THIRDPARTY_SOURCE_DIR}/recast/"
+    )
+endmacro()
+
+# -----------------------------------------------------------------------------
+# Client-only SEH model (/EHa). Overrides the global /EHsc for that target.
+# -----------------------------------------------------------------------------
+macro( apply_client_seh_options TARGET )
+    # /EHa vs /EHsc: __try/__except works under both. /EHa makes C++ catch(...)
+    # also catch structured exceptions and changes the compiler's unwind
+    # assumptions. Client inject uses /EHa; server keeps global /EHsc.
+    target_compile_options( ${TARGET} PRIVATE
+        $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/EHa>
     )
 endmacro()
 

@@ -1,15 +1,10 @@
 /*
+ * Integer/alias typedefs and helpers for engine-compat paths.
+ * Not runtime-generated output.
+ */
 
-   This file contains definitions used in the Hex-Rays decompiler output.
-   It has type definitions and convenience macros to make the
-   output more readable.
-
-   Copyright (c) 2007-2020 Hex-Rays
-
-*/
-
-#ifndef HEXRAYS_DEFS_H
-#define HEXRAYS_DEFS_H
+#ifndef PSEUDODEFS_H
+#define PSEUDODEFS_H
 
 #if defined(__GNUC__)
   typedef          long long ll;
@@ -37,9 +32,9 @@
 //C++17 specifics
 #if ((defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || __cplusplus >= 201703L)
 #define SDK_HAS_CPP17 1
-#define HEXRAYS_CONSTEXPR constexpr
+#define SDK_CONSTEXPR constexpr
 #else
-#define HEXRAYS_CONSTEXPR
+#define SDK_CONSTEXPR
 #endif
 
 // R5Sdk: commented as we already define these.
@@ -48,21 +43,21 @@
 //typedef unsigned short ushort;
 //typedef unsigned long ulong;
 //
-//typedef          char   int8;
-//typedef   signed char   sint8;
-//typedef unsigned char   uint8;
-//typedef          short  int16;
-//typedef   signed short  sint16;
-//typedef unsigned short  uint16;
-//typedef          int    int32;
-//typedef   signed int    sint32;
-//typedef unsigned int    uint32;
-//typedef ll              int64;
-//typedef ll              sint64;
-//typedef ull             uint64;
+//typedef char int8;
+//typedef signed char sint8;
+//typedef unsigned char uint8;
+//typedef short int16;
+//typedef signed short sint16;
+//typedef unsigned short uint16;
+//typedef int int32;
+//typedef signed int sint32;
+//typedef unsigned int uint32;
+//typedef ll int64;
+//typedef ll sint64;
+//typedef ull uint64;
 #include "sdkint.h"
 
-// Partially defined types. They are used when the decompiler does not know
+// Partially defined types. They are used when the analysis does not know
 // anything about the type except its size.
 #define _BYTE  uint8
 #define _WORD  uint16
@@ -72,7 +67,7 @@
 #define _LONGLONG __int128
 #endif
 
-// Non-standard boolean types. They are used when the decompiler cannot use
+// Non-standard boolean types. They are used when the analysis cannot use
 // the standard "bool" type because of the size mismatch but the possible
 // values are only 0 and 1. See also 'BOOL' type below.
 typedef int8 _BOOL1;
@@ -92,7 +87,7 @@ typedef int BOOL;       // uppercase BOOL is usually 4 bytes
 typedef int bool;       // we want to use bool in our C programs
 #endif
 
-#define __pure  // pure function:
+#define __pure  // pure function
                 // when given the same arguments, always returns the same value
                 // has no side effects
 
@@ -117,7 +112,7 @@ typedef int bool;       // we want to use bool in our C programs
 #  define HIGH_IND(x,part_type)  LAST_IND(x,part_type)
 #  define LOW_IND(x,part_type)   0
 #endif
-// first unsigned macros:
+// first unsigned macros
 #define BYTEn(x, n)   (*((_BYTE*)&(x)+n))
 #define WORDn(x, n)   (*((_WORD*)&(x)+n))
 #define DWORDn(x, n)  (*((_DWORD*)&(x)+n))
@@ -220,7 +215,7 @@ template<class T> bool is_mul_ok(T count, T elsize)
 }
 
 // multiplication that saturates (yields the biggest value) instead of overflowing
-// such a construct is useful in "operator new[]"
+// such a construct is useful in "operator new"
 template<class T> bool saturated_mul(T count, T elsize)
 {
   return is_mul_ok(count, elsize) ? count * elsize : T(-1);
@@ -228,7 +223,7 @@ template<class T> bool saturated_mul(T count, T elsize)
 
 #include <stddef.h> // for size_t
 
-// memcpy() with determined behavior: it always copies
+// memcpy with determined behavior: it always copies
 // from the start to the end of the buffer
 // note: it copies byte by byte, so it is not equivalent to, for example, rep movsd
 inline void *qmemcpy(void *dst, const void *src, size_t cnt)
@@ -252,7 +247,7 @@ template<class T> T __ROL__(T value, int count)
   {
     count %= nbits;
     T high = value >> (nbits - count);
-    if HEXRAYS_CONSTEXPR( T(-1) < 0 ) // signed value
+    if SDK_CONSTEXPR( T(-1) < 0 ) // signed value
       high &= ~((T(-1) << count));
     value <<= count;
     value |= high;
@@ -398,7 +393,7 @@ inline uint8   abs8(int8     x) { return x >= 0 ? x : -x; }
 inline uint16  abs16(int16   x) { return x >= 0 ? x : -x; }
 inline uint32  abs32(int32   x) { return x >= 0 ? x : -x; }
 inline uint64  abs64(int64   x) { return x >= 0 ? x : -x; }
-//inline uint128 abs128(int128 x) { return x >= 0 ? x : -x; }
+//inline uint128 abs128(int128 x) { return x >= 0 ? x: -x; }
 
 #include <string.h>     // for memcpy
 #include <type_traits>  // for enable_if
@@ -453,7 +448,7 @@ void __noreturn __break(uint16 code, uint16 subcode);
 // In the decompilation listing there are some objects declared as _UNKNOWN
 // because we could not determine their types. Since the C compiler does not
 // accept void item declarations, we replace them by anything of our choice,
-// for example a char:
+// for example a char
 
 #define _UNKNOWN char
 
@@ -462,18 +457,18 @@ void __noreturn __break(uint16 code, uint16 subcode);
 //#define vsnprintf _vsnprintf
 #endif
 
-// The ADJ() macro is used for shifted pointers.
+// The ADJ macro is used for shifted pointers.
 // While compilers do not understand it, it makes the code more readable.
-// A shifted pointer is declared like this, for example:
-//      char *__shifted(mystruct,8) p;
+// A shifted pointer is declared like this, for example
+// char *__shifted(mystruct,8) p;
 // It means: while 'p' points to 'char', it also points to the middle of 'mystruct'.
 // More precisely, it is at the offset of 8 bytes from the beginning of 'mystruct'.
 //
-// The ADJ() macro performs the necessary adjustment.
-// The __parentof() and __deltaof() functions are made up, they do not exist.
-// __parentof() returns the parent structure type.
-// __deltaof() returns the shift amount.
+// The ADJ macro performs the necessary adjustment.
+// The __parentof and __deltaof functions are made up, they do not exist.
+// __parentof returns the parent structure type.
+// __deltaof returns the shift amount.
 
 #define ADJ(p) (__parentof(p) *)(p-__deltaof(p))
 
-#endif // HEXRAYS_DEFS_H
+#endif // PSEUDODEFS_H

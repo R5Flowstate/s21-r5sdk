@@ -1,11 +1,11 @@
 /******************************************************************************
 -------------------------------------------------------------------------------
-File   : IStreamOverlay.cpp
-Date   : 08:01:2025
+File : IStreamOverlay.cpp
+Date : 08:01:2025
 Author : Kawe Mazidjatari
 Purpose: Implements the in-game texture streaming debug overlay
 -------------------------------------------------------------------------------
-History:
+History
 - 08:01:2025 | 19:05 : Created by Kawe Mazidjatari
 
 ******************************************************************************/
@@ -67,7 +67,11 @@ void CStreamOverlay::Shutdown(void)
 //-----------------------------------------------------------------------------
 void CStreamOverlay::UpdateWindowAvailability(void)
 {
-	const bool enabled = stream_overlay->GetBool();
+	// stream_overlay is `extern ConVar*` resolved from the engine's
+	// ConVar registry. In safe-mode SDK builds the pointer is nullptr;
+	// an unguarded `->GetBool` call was crashing the whole render
+	// pipeline. Treat missing cvar as "overlay off".
+	const bool enabled = (stream_overlay != nullptr) && stream_overlay->GetBool();
 
 	if (enabled == m_lastAvailability)
 		return;

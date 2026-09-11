@@ -21,6 +21,12 @@
 #include "NavEditor/Include/ChunkyTriMesh.h"
 #include "NavEditor/Include/MeshLoaderObj.h"
 #include "NavEditor/Include/MeshLoaderPly.h"
+#include "NavEditor/Include/MeshLoaderBsp.h"
+#include "NavEditor/Include/EntityVolumes.h"
+
+// A .bsp load pulls the out-of-bounds brushes out of its own '_script.ent'
+// unless the caller supplies the partition itself or asks for none.
+static bool s_autoClipVolumes = true;
 #include "DebugUtils/Include/DebugDraw.h"
 #include "DebugUtils/Include/RecastDebugDraw.h"
 #include "Detour/Include/DetourNavMesh.h"
@@ -101,6 +107,9 @@ bool InputGeom::loadMesh(rcContext* ctx, const std::string& filepath, const Mesh
 	case MESH_PLY:
 		m_mesh = new rcMeshLoaderPly;
 		break;
+	case MESH_BSP:
+		m_mesh = new rcMeshLoaderBsp;
+		break;
 	default: // Unhandled mesh format.
 		assert(0);
 	}
@@ -130,6 +139,18 @@ bool InputGeom::loadMesh(rcContext* ctx, const std::string& filepath, const Mesh
 	{
 		ctx->log(RC_LOG_ERROR, "buildTiledNavigation: Failed to build chunky mesh.");
 		return false;
+	}
+
+	if (format == MESH_BSP && s_autoClipVolumes)
+	{
+		// The script partition sits beside the BSP and is where the map's
+		// playable bounds survive; a dedicated-server strip zeroes the brush
+		// AABBs in LUMP_MODELS, so nothing else describes them.
+		const std::string entPath = rcFindScriptEntPath(filepath);
+		if (entPath.empty())
+			printf("InputGeom: no '_script.ent' beside '%s' -- baking unclipped\n", filepath.c_str());
+		else
+			addClipVolumesFromEntityPartition(entPath);
 	}
 
 	return true;
@@ -347,6 +368,8 @@ bool InputGeom::load(rcContext* ctx, const std::string& filepath)
 		return loadMesh(ctx, filepath, MESH_OBJ);
 	if (extension == ".ply")
 		return loadMesh(ctx, filepath, MESH_PLY);
+	if (extension == ".bsp")
+		return loadMesh(ctx, filepath, MESH_BSP);
 
 	return false;
 }
@@ -449,7 +472,7 @@ bool InputGeom::saveGeomSet(const BuildSettings* settings)
 }
 
 static const int MAX_CHUNK_INDICES = 0xffff;
-static int s_chunkIndices[MAX_CHUNK_INDICES];
+static thread_local int s_chunkIndices[MAX_CHUNK_INDICES];
 
 bool InputGeom::raycastMesh(const rdVec3D* src, const rdVec3D* dst, const unsigned int mask, int* vidx, float* tmin) const
 {
@@ -716,6 +739,38 @@ int InputGeom::addConvexVolume(const rdVec3D* verts, const int nverts,
 	vol->type = VOLUME_CONVEX;
 
 	return m_volumeCount-1;
+}
+
+void InputGeom::setAutoClipVolumes(bool enable)
+{
+	s_autoClipVolumes = enable;
+}
+
+// The map's out-of-bounds trigger brushes, added as RC_NULL_AREA volumes so no
+// navmesh is emitted inside them. The geometry still rasterises, so ceilings
+// keep filtering the floors beneath them -- deleting the triangles instead
+// would resurrect surfaces that lost their headroom test.
+int InputGeom::addClipVolumesFromEntityPartition(const std::string& entPath)
+{
+	std::vector<EntityClipVolume> volumes;
+	if (!rcLoadEntityClipVolumes(entPath, volumes))
+		return 0;
+
+	int added = 0;
+	for (size_t i = 0; i < volumes.size(); ++i)
+	{
+		const EntityClipVolume& vol = volumes[i];
+		if (addConvexVolume(vol.verts, vol.nverts, vol.hmin, vol.hmax, 0, RC_NULL_AREA) < 0)
+		{
+			printf("InputGeom: clip volume limit (%d) reached, %zu volume(s) not applied\n",
+				MAX_VOLUMES, volumes.size() - i);
+			break;
+		}
+		++added;
+	}
+
+	printf("InputGeom: %d out-of-bounds clip volume(s) active\n", added);
+	return added;
 }
 
 void InputGeom::deleteShapeVolume(int i)

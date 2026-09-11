@@ -1,6 +1,6 @@
 //====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
 //
-// Purpose: 
+// Purpose
 //
 //=============================================================================
 
@@ -267,7 +267,7 @@ public:
 	// Replace all instances of one character with another.
 	CUtlString Replace( char cFrom, char cTo );
 
-	/// Replace one string with the other (single pass).  Passing a NULL to pchTo is same as calling Remove
+	/// Replace one string with the other (single pass). Passing a NULL to pchTo is same as calling Remove
 	CUtlString Replace( char const *pchFrom, const char *pchTo, bool bCaseSensitive = false ) const; 
 
 	/// helper func for caseless replace
@@ -552,8 +552,8 @@ typedef	CUtlConstStringBase<wchar_t>	CUtlConstWideString;
 
 //-----------------------------------------------------------------------------
 // Purpose: General purpose string class good for when it
-//			is rarely expected to be empty, and/or will undergo
-//			many modifications/appends.
+// is rarely expected to be empty, and/or will undergo
+// many modifications/appends.
 //-----------------------------------------------------------------------------
 class CUtlStringBuilder
 {
@@ -592,7 +592,7 @@ public:
 	bool IsValid() const;
 
 	// gets the string
-	// never returns NULL, use IsValid() to see if it's never been set
+	// never returns NULL, use IsValid to see if it's never been set
 	const char *String() const;
 	const char *Get() const { return String(); }
 	operator const char *() const { return String(); }
@@ -633,11 +633,11 @@ public:
 
 	// If you want to take ownership of the ptr, you can use this. So for instance if you had 
 	// a CUtlString you wanted to move it to a CUtlStringConst without making a copy, you 
-	// could do: CUtlStringConst strConst( strUtl.Detach() );
+	// could do: CUtlStringConst strConst( strUtl.Detach );
 	// Also used for fast temporaries when a string that does not need to be retained is being 
-	// returned from a func. ie: return (str.Detach());
+	// returned from a func. ie: return (str.Detach);
 	// All strings in this file can take a CUtlStringResult as a constructor parm and will take ownership directly.
-	//CUtlStringResult Detach();
+	//CUtlStringResult Detach;
 
 	// Set directly and don't look for a null terminator in pValue.
 	// nChars is the string length. "abcd" nChars==3 would copy and null
@@ -675,14 +675,14 @@ public:
 
 	ptrdiff_t IndexOf(const char *pstrTarget) const;
 
-	// remove whitespace from the string; anything that is isspace()
+	// remove whitespace from the string; anything that is isspace
 	size_t RemoveWhitespace();
 
 	// trim whitepace from the beginning and end of the string
 	size_t TrimWhitespace();
 
 	// Allows setting the size to anything under the current
-	// capacity.  Typically should not be used unless there was a specific
+	// capacity. Typically should not be used unless there was a specific
 	// reason to scribble on the string. Will not touch the string contents,
 	// but will append a NULL. Returns true if the length was changed.
 	bool SetLength(size_t nLen);
@@ -693,8 +693,8 @@ public:
 	// For operations that are long and/or complex - if something fails
 	// along the way, the error will be set and can be queried at the end.
 	// The string is undefined in the error state, but will likely hold the
-	// last value before the error occurred.  The string is cleared
-	// if ClearError() is called.  The error can be set be the user, and it
+	// last value before the error occurred. The string is cleared
+	// if ClearError is called. The error can be set be the user, and it
 	// will also be set if a dynamic allocation fails in string operations
 	// where it needs to grow the capacity.
 	void SetError()			{ m_data.SetError(true); }
@@ -709,7 +709,7 @@ public:
 	size_t VAppendFormat(const char *pFormat, va_list args);
 	void Truncate(size_t nChars);
 
-	// Access() With no assertion check - should only be used for tests
+	// Access With no assertion check - should only be used for tests
 	char *AccessNoAssert()
 	{
 		if (!IsValid())
@@ -717,7 +717,7 @@ public:
 		return m_data.Access();
 	}
 
-	// SetError() With no assertion check - should only be used for tests
+	// SetError With no assertion check - should only be used for tests
 	void SetErrorNoAssert() { m_data.SetError(false); }
 
 	size_t ReplaceCaseless(const char *pstrTarget, const char *pstrReplacement) {
@@ -770,14 +770,14 @@ private:
 	{
 		// Note: If it's ever desired to have the embedded string be larger than
 		// 63 (0x40-1), just make the sentinal 0xFF, and the error something (0xFF also
-		// is fine).  Then shrink the scrap size by 1 and add a uint8 for the error state.
+		// is fine). Then shrink the scrap size by 1 and add a uint8 for the error state.
 		// The error byte is only valid if the heap is on (already have that restriction).
-		// and then embedded strings can get back to being up to 254.  It's not done this
-		// way now just to make the tests for IsHeap()/HasError() faster since they
+		// and then embedded strings can get back to being up to 254. It's not done this
+		// way now just to make the tests for IsHeap/HasError faster since they
 		// are often both tested together the compiler can do nice bit test optimizations.
 		STRING_TYPE_SENTINEL = 0x80,
 		STRING_TYPE_ERROR = 0x40
-	}; // if Data.Stack.BytesLeft() or Data.Heap.sentinel == this value, data is in heap
+	}; // if Data.Stack.BytesLeft or Data.Heap.sentinel == this value, data is in heap
 
 	union Data
 	{
@@ -797,9 +797,9 @@ private:
 		struct _Stack
 		{
 		private:
-			// last byte is doing a hack double duty.  It holds how many bytes 
+			// last byte is doing a hack double duty. It holds how many bytes 
 			// are left in the string; so when the string is 'full' it will be
-			// '0' and thus suffice as the terminating null.  This is why
+			// '0' and thus suffice as the terminating null. This is why
 			// we hold remaining chars instead of 'string length'
 			char m_szString[MAX_STACK_STRLEN + 1];
 		public:
@@ -898,12 +898,12 @@ private:
 		void StaticAssertTests()
 		{
 			// If this fails when the heap sentinel and where the stack string stores its bytes left
-			// aren't aliases.  This is needed so that regardless of how the 'sentinel' to mark
+			// aren't aliases. This is needed so that regardless of how the 'sentinel' to mark
 			// that the string is on the heap is set, it is set as expected on both sides of the union.
 			COMPILE_TIME_ASSERT(offsetof(_Heap, sentinel) == (offsetof(_Stack, m_szString) + MAX_STACK_STRLEN));
 
 			// Lots of code assumes it can look at m_data.Stack.m_nBytesLeft for an empty string; which
-			// means that it will equal MAX_STACK_STRLEN.  Therefor it must be a different value than
+			// means that it will equal MAX_STACK_STRLEN. Therefor it must be a different value than
 			// the STRING_TYPE_SENTINEL which will be set if the string is in the heap.
 			COMPILE_TIME_ASSERT(MAX_STACK_STRLEN < STRING_TYPE_SENTINEL);
 			COMPILE_TIME_ASSERT(MAX_STACK_STRLEN < STRING_TYPE_ERROR);
@@ -1162,7 +1162,7 @@ inline void CUtlStringBuilder::SetDirect(const char *pchSource, size_t nChars)
 		// Also assign it anyways so we don't risk the caller having a buffer
 		// running into random bytes.
 #ifdef _DEBUG
-		// Suppress a bogus noisy warning:
+		// Suppress a bogus noisy warning
 		// warning C6385: Invalid data: accessing 'pszString', the readable size is 'nChars' bytes, but '1001' bytes might be read
 		ANALYZE_SUPPRESS(6385);
 		Assert(pszString[nChars] == '\0');
@@ -1192,7 +1192,7 @@ inline void CUtlStringBuilder::SetPtr(char *pchString)
 
 //-----------------------------------------------------------------------------
 // Purpose: Sets the string to be the new value, taking ownership of the pointer
-//			This API will clear the error state if it was set.
+// This API will clear the error state if it was set.
 //-----------------------------------------------------------------------------
 inline void CUtlStringBuilder::SetPtr(char *pchString, size_t nLength)
 {
@@ -1218,7 +1218,7 @@ inline size_t CUtlStringBuilder::Length() const
 
 
 //-----------------------------------------------------------------------------
-// Purpose: format something sprintf() style, and take it as the new value of this CUtlStringBuilder
+// Purpose: format something sprintf style, and take it as the new value of this CUtlStringBuilder
 //-----------------------------------------------------------------------------
 inline size_t CUtlStringBuilder::Format(const char *pFormat, ...)
 {
@@ -1232,7 +1232,7 @@ inline size_t CUtlStringBuilder::Format(const char *pFormat, ...)
 int V_vscprintf(const char *format, va_list argptr);
 
 //-----------------------------------------------------------------------------
-// Purpose: Helper for Format() method
+// Purpose: Helper for Format method
 //-----------------------------------------------------------------------------
 inline size_t CUtlStringBuilder::VFormat(const char *pFormat, va_list args)
 {
@@ -1245,7 +1245,7 @@ inline size_t CUtlStringBuilder::VFormat(const char *pFormat, va_list args)
 	len = V_vscprintf(pFormat, args);
 #else
 	// ISO spec defines the NULL/0 case as being valid and will return the
-	// needed length. Verified on PS3 as well.  Ignore that bsd/linux/mac
+	// needed length. Verified on PS3 as well. Ignore that bsd/linux/mac
 	// have vasprintf which will allocate a buffer. We'd rather have the
 	// self growing buffer management ourselves. Even the best implementations
 	// There does not seem to be a magic vasprintf that is significantly
@@ -1287,7 +1287,7 @@ inline size_t CUtlStringBuilder::AppendFormat(const char *pFormat, ...)
 
 
 //-----------------------------------------------------------------------------
-// Purpose: implementation helper for AppendFormat()
+// Purpose: implementation helper for AppendFormat
 //-----------------------------------------------------------------------------
 inline size_t CUtlStringBuilder::VAppendFormat(const char *pFormat, va_list args)
 {
@@ -1301,7 +1301,7 @@ inline size_t CUtlStringBuilder::VAppendFormat(const char *pFormat, va_list args
 #else
 
 	// ISO spec defines the NULL/0 case as being valid and will return the
-	// needed length. Verified on PS3 as well.  Ignore that bsd/linux/mac
+	// needed length. Verified on PS3 as well. Ignore that bsd/linux/mac
 	// have vasprintf which will allocate a buffer. We'd rather have the
 	// self growing buffer management ourselves. Even the best implementations
 	// There does not seem to be a magic vasprintf that is significantly
@@ -1345,7 +1345,7 @@ inline void CUtlStringBuilder::Append(const char *pchAddition)
 
 //-----------------------------------------------------------------------------
 // Purpose: concatenate the provided string to our current content
-//			when the additional string length is known
+// when the additional string length is known
 //-----------------------------------------------------------------------------
 inline void CUtlStringBuilder::Append(const char *pchAddition, size_t cbLen)
 {

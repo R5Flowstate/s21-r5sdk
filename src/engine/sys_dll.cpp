@@ -37,7 +37,7 @@
 #include "vstdlib/keyvaluessystem.h"
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose
 //-----------------------------------------------------------------------------
 bool CSourceAppSystemGroup::StaticPreInit(CSourceAppSystemGroup* pSourceAppSystemGroup)
 {
@@ -45,7 +45,7 @@ bool CSourceAppSystemGroup::StaticPreInit(CSourceAppSystemGroup* pSourceAppSyste
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose
 //-----------------------------------------------------------------------------
 bool CSourceAppSystemGroup::StaticCreate(CSourceAppSystemGroup* pSourceAppSystemGroup)
 {
@@ -53,12 +53,12 @@ bool CSourceAppSystemGroup::StaticCreate(CSourceAppSystemGroup* pSourceAppSystem
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose
 //-----------------------------------------------------------------------------
 int CModAppSystemGroup::StaticMain(CModAppSystemGroup* pModAppSystemGroup)
 {
 	int nRunResult = RUN_OK;
-	HEbisuSDK_Init(); // Not here in retail. We init EbisuSDK here though.
+	HEbisuSDK_Init(); // Bridge inits Ebisu here (stock path does not).
 
 	g_pEngine->SetQuitting(IEngine::QUIT_NOTQUITTING);
 	if (g_pEngine->Load(pModAppSystemGroup->IsServerOnly(), g_pEngineParms->baseDirectory))
@@ -164,7 +164,7 @@ int HSys_Error_Internal(char* fmt, va_list args)
 	Error(eDLL_T::ENGINE, NO_ERROR, "_______________________________________________________________\n");
 	Error(eDLL_T::ENGINE, NO_ERROR, "] ENGINE ERROR ################################################\n");
 
-	int nLen = vsprintf(buffer, fmt, args);
+	const int nLen = V_vsnprintf(buffer, sizeof(buffer), fmt, args);
 	bool shouldNewline = true;
 	
 	if (nLen > 0)
@@ -176,6 +176,7 @@ int HSys_Error_Internal(char* fmt, va_list args)
 	return Sys_Error_Internal(fmt, args);
 }
 
+#ifndef CLIENT_DLL
 void VSys_Dll::Detour(const bool bAttach) const
 {
 	DetourSetup(&CModAppSystemGroup__Main, &CModAppSystemGroup::StaticMain, bAttach);
@@ -187,3 +188,4 @@ void VSys_Dll::Detour(const bool bAttach) const
 
 	DetourSetup(&Sys_Error_Internal, &HSys_Error_Internal, bAttach);
 }
+#endif // !CLIENT_DLL

@@ -1,6 +1,7 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+#if defined(CLIENT_DLL)
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 //===========================================================================//
 
@@ -9,9 +10,7 @@
 #ifdef _WIN32
 #pragma once
 #endif
-#ifdef CLIENT_DLL
 #error "game/server/baseanimating.h included in client build"
-#endif
 #include "baseentity.h"
 #include "public/studio.h"
 #include "public/datacache/idatacache.h"
@@ -162,3 +161,174 @@ class VBaseAnimating : public IDetour
 ///////////////////////////////////////////////////////////////////////////////
 
 #endif // BASEANIMATING_H
+#else // !CLIENT_DLL
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//
+// Purpose
+//
+//===========================================================================//
+
+#ifndef BASEANIMATING_H
+#define BASEANIMATING_H
+#ifdef _WIN32
+#pragma once
+#endif
+#include "baseentity.h"
+#include "public/studio.h"
+#include "public/datacache/idatacache.h"
+#include "game/shared/animation.h"
+
+// m_animNetworkFlags bit, cross-mapped from the client: C_BaseAnimating::ScriptIsScriptAnimModifierActive
+// ( @ ): return (m_animNetworkFlags & 2) != 0. Sits in the same ANF_* bitfield as the
+// ANF_UPDATE_POS_PARENTED / ANF_UPDATE_POS_UNPARENTED flags (see game/shared/dt_extend.cpp, DT_BaseAnimating).
+static constexpr int ANF_SCRIPT_ANIM_MODIFIER = 0x2;
+
+class CBaseAnimating : public CBaseEntity
+{
+public:
+	void DrawServerHitboxes(const float duration = 0.0f);
+	int DrawServerHitboxRange(const int firstBox, const int maxBoxes, const float duration);
+
+	void LockStudioHdr(void);
+	void HitboxToWorldTransforms(uint32_t iBone, matrix3x4_t* transforms);
+
+	CStudioHdr*			GetModelPtr(void);
+	float				GetModelScale() const { return m_flModelScale; }
+	int					GetCamoIndex() const { return m_camoIndex; } // diag: sdk_camo_dump (what the dedi sends)
+
+	void				SetEnableScriptAnimModifier(bool bEnable);
+
+protected:
+	void* __vftable;
+	bool m_markedForServerInterpolation;
+	bool m_animRemoveFromServerInterpolationNextFrame;
+	char gap_b12[2];
+	float m_flGroundSpeed;
+	float m_flLastEventCheck;
+	int m_nForceBone;
+	Vector3D m_vecForce;
+	int m_nSkin;
+	short m_skinMod;
+	char gap_b32[2];
+	int m_nBody;
+	int m_camoIndex;
+	int m_decalIndex;
+	int m_nHitboxSet;
+	float m_flModelScale;
+	int m_nRagdollImpactFXTableId;
+	float m_flSkyScaleStartTime;
+	float m_flSkyScaleEndTime;
+	float m_flSkyScaleStartValue;
+	float m_flSkyScaleEndValue;
+	char gap_b5c[4];
+	char m_SequenceTransitioner[368];
+	float m_flIKGroundContactTime;
+	float m_flIKGroundMinHeight;
+	float m_flIKGroundMaxHeight;
+	float m_flEstIkFloor;
+	float m_flEstIkOffset;
+	char gap_ce4[4];
+	char m_pIk[8];
+	int m_ikPrevSequence;
+	bool m_bSequenceFinished;
+	bool m_bSequenceLooped;
+	bool m_bSequenceLoops;
+	bool m_continueAnimatingAfterRagdoll;
+	float m_lockedAnimDeltaYaw;
+	bool m_threadedBoneSetup;
+	bool m_settingUpBones;
+	char gap_cfe[2];
+	float m_flDissolveStartTime;
+	int m_baseAnimatingActivity;
+	float m_flPoseParameter[12];
+	bool m_poseParameterOverTimeActive;
+	char gap_d39[3];
+	float m_poseParameterGoalValue[12];
+	float m_poseParameterEndTime[12];
+	float m_lastTimeSetPoseParametersSameAs;
+	bool m_bClientSideAnimation;
+	bool m_bReallyClientSideAnimation;
+	char gap_da2[2];
+	int m_nNewSequenceParity;
+	int m_nResetEventsParity;
+	char gap_dac[4];
+	memhandle_t m_boneCacheHandle;
+	short m_fBoneCacheFlags; // END CBASEANIMATING
+	char gap_dba[2];
+	int m_animNetworkFlags;
+	bool m_animActive;
+	bool m_animCollisionEnabled;
+	bool m_animPlantingEnabled;
+	bool m_animInitialCorrection;
+	bool m_animWaitingForCleanup;
+	char gap_dc5[3];
+	int m_animWaitingForCleanupTime;
+	char gap_dcc[4];
+	__int64 m_recordedAnim;
+	int m_recordedAnimIndex;
+	int m_recordedAnimCachedFrameIndex;
+	float m_recordedAnimPlaybackRate;
+	float m_recordedAnimPlaybackTime;
+	matrix3x4_t m_recordedAnimTransform;
+	EHANDLE m_recordedAnimPlaybackEnt;
+	float m_recordedAnimBlendTime;
+	Vector3D m_recordedAnimBlendOffset;
+	Vector3D m_recordedAnimBlendAngles;
+	AnimRelativeData m_animRelativeData;
+	EHANDLE m_syncingWithEntity;
+	char gap_ec4[4];
+	PredictedAnimEventData m_predictedAnimEventData;
+	int m_animRefEntityAttachmentIndex;
+	int m_fireAttachmentSmartAmmoIndex;
+	int m_fireAttachmentChestFocusIndex;
+	int m_fireAttachmentModelIndex;
+	char m_keyHitboxes[160];
+	CStudioHdr* m_pStudioHdr;
+	int m_animSequence;
+	float m_animCycle;
+	int m_animModelIndex;
+	float m_animStartTime;
+	float m_animStartCycle;
+	float m_animPlaybackRate;
+	bool m_animFrozen;
+	char gap_ff9[7];
+	__int64 m_createdProp[8];
+	int m_numCreatedProps;
+	char gap_1044[4];
+	__int64 m_currentFramePropEvents[16];
+	int m_numCurrentFramePropEvents;
+	char gap_10cc[4];
+	__int64 m_activeScriptAnimWindows[8];
+	int m_numActiveScriptAnimWindows;
+	char gap_1114[4];
+	__int64 m_currentFrameWindowEvents[16];
+	int m_numCurrentFrameWindowEvents;
+	char gap_119c[4];
+	__int64 m_AnimSyncScriptProps[8];
+	int m_numAnimSyncScriptProps;
+	char padding_unknown[8];
+};
+
+static_assert(sizeof(CBaseAnimating) == 0x11F0);
+
+inline CBaseAnimating*(*CBaseAnimating__LockStudioHdr)(CBaseAnimating* thisp);
+
+///////////////////////////////////////////////////////////////////////////////
+class VBaseAnimating : public IDetour
+{
+	virtual void GetAdr(void) const
+	{
+		LogFunAdr("CBaseAnimating::LockStudioHdr", CBaseAnimating__LockStudioHdr);
+	}
+	virtual void GetFun(void) const
+	{
+		Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 48 89 74 24 ?? 41 56 48 83 EC 20 0F BF 41 58").GetPtr(CBaseAnimating__LockStudioHdr);
+	}
+	virtual void GetVar(void) const { }
+	virtual void GetCon(void) const { }
+	virtual void Detour(const bool bAttach) const { }
+};
+///////////////////////////////////////////////////////////////////////////////
+
+#endif // BASEANIMATING_H
+#endif // CLIENT_DLL

@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose:
+// Purpose
 //
 //=============================================================================//
 #pragma once
@@ -79,8 +79,8 @@ public:
 // CAI_NetworkManager
 // 
 // Purpose: The entity in the level responsible for building the network if it
-//          isn't there, saving & loading of the network, and holding the 
-//          CAI_Network instance.
+// isn't there, saving & loading of the network, and holding the 
+// CAI_Network instance.
 //
 //-----------------------------------------------------------------------------
 
@@ -101,7 +101,7 @@ public:
 
 private:
 	// !TODO[ AMOS ]: If found, change to ptr and hook up to engine!
-	//static bool				gm_fNetworksLoaded;							// Have AINetworks been loaded
+	//static bool gm_fNetworksLoaded; // Have AINetworks been loaded
 
 	void* _vftable;
 	CAI_NetworkEditTools* m_pEditOps;

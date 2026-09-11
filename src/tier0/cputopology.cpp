@@ -11,8 +11,8 @@
 //---------------------------------------------------------------------------------
 // Name: ICpuToplogy
 // Desc: Specifies the interface that each class that provides an implementation
-//       for extracting cpu topology must conform to.  This is the Implementor
-//       class in the traditional Bridge Pattern.
+// for extracting cpu topology must conform to. This is the Implementor
+// class in the traditional Bridge Pattern.
 //---------------------------------------------------------------------------------
 class ICpuTopology
 {
@@ -36,9 +36,9 @@ namespace
 //---------------------------------------------------------------------------------
 // Name: DefaultImpl
 // Desc: Provides a default implementation for the ICpuTopology interface when
-//       GetLogicalProcessorInformation and CPUID are not supported for whatever
-//       reason.  This is a ConcreteImplementor class in the traditional Bridge
-//       Pattern.
+// GetLogicalProcessorInformation and CPUID are not supported for whatever
+// reason. This is a ConcreteImplementor class in the traditional Bridge
+// Pattern.
 //---------------------------------------------------------------------------------
 class DefaultImpl : public ICpuTopology
 {
@@ -85,8 +85,8 @@ public:
 //---------------------------------------------------------------------------------
 // Name: GlpiImpl
 // Desc: Provides the GetLogicalProcessorInformation implementation for the
-//       ICpuTopology interface.  This is a ConcreteImplementor class in the
-//       traditional Bridge Pattern.
+// ICpuTopology interface. This is a ConcreteImplementor class in the
+// traditional Bridge Pattern.
 //---------------------------------------------------------------------------------
 class GlpiImpl : public ICpuTopology
 {
@@ -95,7 +95,7 @@ public:
     //-----------------------------------------------------------------------------
     // Name: GlpiImpl::GlpiImpl
     // Desc: Initializes the internal structures/data with information retrieved
-    //       from a call to GetLogicalProcessorInformation.
+    // from a call to GetLogicalProcessorInformation.
     //-----------------------------------------------------------------------------
                             GlpiImpl() : m_pSlpi( NULL ),
                                          m_nItems( 0 )
@@ -134,7 +134,7 @@ public:
     //-----------------------------------------------------------------------------
     // Name: GlpiImpl::NumberOfProcessCores
     // Desc: Gets the total number of physical processor cores available to the
-    //       current process.
+    // current process.
     //-----------------------------------------------------------------------------
     virtual DWORD       NumberOfProcessCores() const
     {
@@ -156,7 +156,7 @@ public:
     //-----------------------------------------------------------------------------
     // Name: GlpiImpl::NumberOfSystemCores
     // Desc: Gets the total number of physical processor cores enabled on the
-    //       system.
+    // system.
     //-----------------------------------------------------------------------------
     virtual DWORD       NumberOfSystemCores() const
     {
@@ -172,7 +172,7 @@ public:
     //-----------------------------------------------------------------------------
     // Name: GlpiImpl::CoreAffinityMask
     // Desc: Gets an affinity mask that corresponds to the requested processor
-    //       core.
+    // core.
     //-----------------------------------------------------------------------------
     virtual DWORD_PTR   CoreAffinityMask( DWORD coreIdx ) const
     {
@@ -210,11 +210,11 @@ PDWORD
     //-----------------------------------------------------------------------------
     // Name: GlpiImpl::VerifyGlpiFn_
     // Desc: Gets a pointer to the GetLogicalProcessorInformation function only if
-    //       it is supported on the current platform.
-    //       GetLogicalProcessorInformation is supported on Windows Server 2003 and
-    //       XP64, however there is a bug with the implementation.  Therefore, only
-    //       GetLogicalProcessorInformation on Windows Vista is supported in this
-    //       sample.
+    // it is supported on the current platform.
+    // GetLogicalProcessorInformation is supported on Windows Server 2003 and
+    // XP64, however there is a bug with the implementation. Therefore, only
+    // GetLogicalProcessorInformation on Windows Vista is supported in this
+    // sample.
     //-----------------------------------------------------------------------------
     static GlpiFnPtr        VerifyGlpiFn_()
     {
@@ -288,11 +288,11 @@ PDWORD
 //---------------------------------------------------------------------------------
 // Name: ApicExtractor
 // Desc: A utility class that provides an interface for decoding a processor
-//       APIC ID.  An APIC ID is an 8-bit identifier given to each logical
-//       processor on system boot and can be retrieved by the CPUID instruction.
-//       Each APIC ID is composed of a PACKAGE_ID, CORE_ID and SMT_ID that describe
-//       the relationship of a logical processor within the processor topology of
-//       the system.
+// APIC ID. An APIC ID is an 8-bit identifier given to each logical
+// processor on system boot and can be retrieved by the CPUID instruction.
+// Each APIC ID is composed of a PACKAGE_ID, CORE_ID and SMT_ID that describe
+// the relationship of a logical processor within the processor topology of
+// the system.
 //---------------------------------------------------------------------------------
 class ApicExtractor
 {
@@ -358,10 +358,10 @@ public:
     //-----------------------------------------------------------------------------
     // Name: ApicExtractor::SetPackageTopology
     // Desc: You should call SetPackageTopology with the number of logical
-    //       processors per package and number of cores per package before calling
-    //       the sub id accessors (SmtId(), CoreId(), PackageId(), PackageCoreId())
-    //       as this information is required to effectively decode an APIC ID into
-    //       its sub parts.
+    // processors per package and number of cores per package before calling
+    // the sub id accessors (SmtId, CoreId, PackageId, PackageCoreId)
+    // as this information is required to effectively decode an APIC ID into
+    // its sub parts.
     //-----------------------------------------------------------------------------
     void        SetPackageTopology( DWORD nLogProcsPerPkg, DWORD nCoresPerPkg )
     {
@@ -388,9 +388,9 @@ public:
 private:
     //-----------------------------------------------------------------------------
     // Name: ApicExtractor::GetMaskWidth_
-    // Desc: Gets the width of a sub id bit field in an APIC ID.  The width of a
-    //       sub id (CORE_ID, SMT_ID) is only wide enough to support the maximum
-    //       number of ids that needs to be represented in the topology.
+    // Desc: Gets the width of a sub id bit field in an APIC ID. The width of a
+    // sub id (CORE_ID, SMT_ID) is only wide enough to support the maximum
+    // number of ids that needs to be represented in the topology.
     //-----------------------------------------------------------------------------
     static BYTE GetMaskWidth_( BYTE maxIds )
     {
@@ -424,8 +424,8 @@ private:
 //---------------------------------------------------------------------------------
 // Name: Cpuid
 // Desc: A utility class that wraps the functionality of the CPUID instruction.
-//       Call the Call() method with the desired CPUID function, and use the
-//       register accessors to retrieve the register values.
+// Call the Call method with the desired CPUID function, and use the
+// register accessors to retrieve the register values.
 //---------------------------------------------------------------------------------
 class Cpuid
 {
@@ -467,8 +467,8 @@ public:
 
     //-----------------------------------------------------------------------------
     // Name: Cpuid::Call
-    // Desc: Calls the CPUID instruction with the specified function.  Returns TRUE
-    //       if the CPUID function was supported, FALSE if it wasn't.
+    // Desc: Calls the CPUID instruction with the specified function. Returns TRUE
+    // if the CPUID function was supported, FALSE if it wasn't.
     //-----------------------------------------------------------------------------
     BOOL        Call( FnSet fnSet, DWORD fn )
     {
@@ -483,7 +483,7 @@ public:
     //-----------------------------------------------------------------------------
     // Name: Cpuid::IsVendor
     // Desc: Compares a string with the vendor string encoded in the CPUID
-    //       instruction.
+    // instruction.
     //-----------------------------------------------------------------------------
     static BOOL IsVendor( const char* strVendor )
     {
@@ -496,9 +496,9 @@ public:
 
     //-----------------------------------------------------------------------------
     // Name: Cpuid::IsFnSupported
-    // Desc: Checks to see if a CPUID function is supported.  Different processors
-    //       support different functions.  This method is automatically called from
-    //       the Call() method, so you don't need to call it beforehand.
+    // Desc: Checks to see if a CPUID function is supported. Different processors
+    // support different functions. This method is automatically called from
+    // the Call method, so you don't need to call it beforehand.
     //-----------------------------------------------------------------------------
     static BOOL IsFnSupported( FnSet fnSet, DWORD fn )
     {
@@ -527,10 +527,10 @@ private:
     //-----------------------------------------------------------------------------
     // Name: Cpuid::Cpuid
     // Desc: This constructor is private and is only used to set a Cpuid object to
-    //       initial values retrieved from CPUID functions 0x00000000 and
-    //       0x80000000.  Good for caching values from the CPUID instruction that
-    //       are not variable, like the encoded vendor string and the maximum
-    //       supported CPUID function values.
+    // initial values retrieved from CPUID functions 0x00000000 and
+    // 0x80000000. Good for caching values from the CPUID instruction that
+    // are not variable, like the encoded vendor string and the maximum
+    // supported CPUID function values.
     //-----------------------------------------------------------------------------
     explicit    Cpuid( FnSet fnSet )
     {
@@ -540,7 +540,7 @@ private:
     //-----------------------------------------------------------------------------
     // Name: Cpuid::UncheckedCall_
     // Desc: Calls the CPUID instruction without checking for CPUID function
-    //       support.
+    // support.
     //-----------------------------------------------------------------------------
     void        UncheckedCall_( FnSet fnSet, DWORD fn )
     {
@@ -577,8 +577,8 @@ private:
 //---------------------------------------------------------------------------------
 // Name: CpuidImpl
 // Desc: Provides the CPUID instruction implementation for the ICpuTopology
-//       interface.  This is a ConcreteImplementor class in the traditional Bridge
-//       Pattern.
+// interface. This is a ConcreteImplementor class in the traditional Bridge
+// Pattern.
 //---------------------------------------------------------------------------------
 class CpuidImpl : public ICpuTopology
 {
@@ -587,13 +587,13 @@ public:
     // the CPUID instruction
     enum CpuidFnMasks
     {
-        HTT                     = 0x10000000,   // Fn0000_0001  EDX[28]
-        LogicalProcessorCount   = 0x00FF0000,   // Fn0000_0001  EBX[23:16]
-        ApicId                  = 0xFF000000,   // Fn0000_0001  EBX[31:24]
-        NC_Intel                = 0xFC000000,   // Fn0000_0004  EAX[31:26]
-        NC_Amd                  = 0x000000FF,   // Fn8000_0008  ECX[7:0]
-        CmpLegacy_Amd           = 0x00000002,   // Fn8000_0001  ECX[1]
-        ApicIdCoreIdSize_Amd    = 0x0000F000    // Fn8000_0008  ECX[15:12]
+        HTT                     = 0x10000000,   // Fn0000_0001 EDX[28]
+        LogicalProcessorCount   = 0x00FF0000,   // Fn0000_0001 EBX[23:16]
+        ApicId                  = 0xFF000000,   // Fn0000_0001 EBX[31:24]
+        NC_Intel                = 0xFC000000,   // Fn0000_0004 EAX[31:26]
+        NC_Amd                  = 0x000000FF,   // Fn8000_0008 ECX[7:0]
+        CmpLegacy_Amd           = 0x00000002,   // Fn8000_0001 ECX[1]
+        ApicIdCoreIdSize_Amd    = 0x0000F000    // Fn8000_0008 ECX[15:12]
     };
 
     enum
@@ -604,7 +604,7 @@ public:
     //-----------------------------------------------------------------------------
     // Name: CpuidImpl::CpuidImpl
     // Desc: Initializes internal structures/data with information retrieved from
-    //       calling the CPUID instruction.
+    // calling the CPUID instruction.
     //-----------------------------------------------------------------------------
                             CpuidImpl() : m_nItems( 0 )
                             {
@@ -622,7 +622,7 @@ public:
                                     // Determine the total number of logical processors per package.
                                     nLogProcsPerPkg = ( cpu.Ebx() & LogicalProcessorCount ) >> 16;
 
-                                    // Determine the total number of cores per package.  This info
+                                    // Determine the total number of cores per package. This info
                                     // is extracted differently depending on the cpu vendor.
                                     if( Cpuid::IsVendor( GenuineIntel ) )
                                     {
@@ -637,10 +637,10 @@ public:
                                         if( cpu.Call( Cpuid::Ext, 8 ) )
                                         {
                                             // AMD reports the msb width of the CORE_ID bit field of the APIC ID
-                                            // in ApicIdCoreIdSize_Amd.  The maximum value represented by the msb
+                                            // in ApicIdCoreIdSize_Amd. The maximum value represented by the msb
                                             // width is the theoretical number of cores the processor can support
                                             // and not the actual number of current cores, which is how the msb width
-                                            // of the CORE_ID bit field has been traditionally determined.  If the
+                                            // of the CORE_ID bit field has been traditionally determined. If the
                                             // ApicIdCoreIdSize_Amd value is zero, then you use the traditional method
                                             // to determine the CORE_ID msb width.
                                             DWORD msbWidth = cpu.Ecx() & ApicIdCoreIdSize_Amd;
@@ -736,8 +736,8 @@ public:
     //-----------------------------------------------------------------------------
     // Name: CpuidImpl::NumberOfProcessCores
     // Desc: Gets the number of processor cores available to the current process.
-    //       The total accounts for cores that may have been masked out by process
-    //       affinity.
+    // The total accounts for cores that may have been masked out by process
+    // affinity.
     //-----------------------------------------------------------------------------
     virtual DWORD       NumberOfProcessCores() const
     {
@@ -775,8 +775,8 @@ public:
     //-----------------------------------------------------------------------------
     // Name: CpuidImpl::CoreAffinityMask
     // Desc: Gets an affinity mask that corresponds to a specific processor core.
-    //       coreIdx must be less than the total number of processor cores
-    //       recognized by the operating system (NumberOfSystemCores()).
+    // coreIdx must be less than the total number of processor cores
+    // recognized by the operating system (NumberOfSystemCores).
     //-----------------------------------------------------------------------------
     virtual DWORD_PTR   CoreAffinityMask( DWORD coreIdx ) const
     {
@@ -807,11 +807,11 @@ public:
     //-----------------------------------------------------------------------------
     // Name: CpuidImpl::IsSupported
     // Desc: Indicates if a CpuidImpl object is supported on this platform.
-    //       Support is only granted on Intel and AMD platforms where the current
-    //       calling process has security rights to query process affinity and
-    //       change it if the process and system affinity differ.  CpuidImpl is
-    //       also not supported if thread affinity cannot be set on systems with
-    //       more than 1 logical processor.
+    // Support is only granted on Intel and AMD platforms where the current
+    // calling process has security rights to query process affinity and
+    // change it if the process and system affinity differ. CpuidImpl is
+    // also not supported if thread affinity cannot be set on systems with
+    // more than 1 logical processor.
     //-----------------------------------------------------------------------------
     static BOOL             IsSupported()
     {
@@ -829,7 +829,7 @@ public:
             {
                 if( dwProcessAffinity != dwSystemAffinity )
                 {
-                    // The process and system affinities differ.  Attempt to set
+                    // The process and system affinities differ. Attempt to set
                     // the process affinity to the system affinity.
                     bSupported = SetProcessAffinityMask( hProcess, dwSystemAffinity );
                     if( bSupported )
@@ -864,10 +864,10 @@ private:
     //-----------------------------------------------------------------------------
     // Name: CpuidImpl::AddUniquePkgCoreId_
     // Desc: Adds the package/core id extracted from the APIC ID at m_apicIds[idx]
-    //       in the if the package/core id is unique to the pkgCoreIds array.
-    //       nPkgCore is an in/out parm that will reflect the total number of items
-    //       in pkgCoreIds array.  It will be incremented if a unique package/core
-    //       id is found and added.
+    // in the if the package/core id is unique to the pkgCoreIds array.
+    // nPkgCore is an in/out parm that will reflect the total number of items
+    // in pkgCoreIds array. It will be incremented if a unique package/core
+    // id is found and added.
     //-----------------------------------------------------------------------------
     void                    AddUniquePkgCoreId_( DWORD idx, BYTE* pkgCoreIds, DWORD& nPkgCoreIds ) const
     {
@@ -906,7 +906,7 @@ const char CpuidImpl::AuthenticAMD[] = "AuthenticAMD";
 //-------------------------------------------------------------------------------------
 // Name: CpuTopology::CpuTopology
 // Desc: Initializes this object with the appropriately supported cpu topology
-//       implementation object.
+// implementation object.
 //-------------------------------------------------------------------------------------
 CpuTopology::CpuTopology( BOOL bForceCpuid ) : m_pImpl( NULL )
 {
@@ -924,7 +924,7 @@ CpuTopology::~CpuTopology()
 //-------------------------------------------------------------------------------------
 // Name: CpuTopology::NumberOfProcessCores
 // Desc: Gets the total number of physical processor cores available to the current
-//       process.
+// process.
 //-------------------------------------------------------------------------------------
 DWORD CpuTopology::NumberOfProcessCores() const
 {
@@ -951,9 +951,9 @@ DWORD_PTR CpuTopology::CoreAffinityMask( DWORD coreIdx ) const
 
 //-------------------------------------------------------------------------------------
 // Name: CpuTopology::IsDefaultImpl
-// Desc: Returns TRUE if m_pImpl is a DefaultImpl object, FALSE if not.  Used to
-//       indicate whether or not the prescribed methods (CPUID or
-//       GetLogicalProcessorInformation) are supported on the system.
+// Desc: Returns TRUE if m_pImpl is a DefaultImpl object, FALSE if not. Used to
+// indicate whether or not the prescribed methods (CPUID or
+// GetLogicalProcessorInformation) are supported on the system.
 //-------------------------------------------------------------------------------------
 BOOL CpuTopology::IsDefaultImpl() const
 {
@@ -962,9 +962,9 @@ BOOL CpuTopology::IsDefaultImpl() const
 
 //-------------------------------------------------------------------------------------
 // Name: CpuTopology::ForceCpuid
-// Desc: Constructs a cpu topology object.  If bForce is FALSE, then a GlpiImpl object
-//       is first attempted, then CpuidImpl, then finally DefaultImpl.  If bForce is
-//       TRUE, then GlpiImpl is never attempted.
+// Desc: Constructs a cpu topology object. If bForce is FALSE, then a GlpiImpl object
+// is first attempted, then CpuidImpl, then finally DefaultImpl. If bForce is
+// TRUE, then GlpiImpl is never attempted.
 //-------------------------------------------------------------------------------------
 void CpuTopology::ForceCpuid( BOOL bForce )
 {

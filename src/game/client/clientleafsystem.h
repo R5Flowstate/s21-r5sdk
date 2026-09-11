@@ -2,15 +2,11 @@
 //
 // Purpose: Prevent fatal error when visible object limit is reached.
 //
-// CClientLeafSystem uses a fixed-size bitfield allocator for visible object
-// handles (128 chunks x 64 bits = 8192 max). When all handles are exhausted,
-// the engine raises a fatal error and crashes.
-//
-// This module:
-// 1. Patches the allocator's fatal error path to return gracefully
-// 2. Reserves the last handle (8191) as an overflow handle
-// 3. Overflow entities share handle 8191 (minor visual glitches, no crash)
-// 4. Adds budget warnings when approaching the limit
+// CClientLeafSystem allocates visible object handles from a fixed bitfield
+// (128 chunks x 64 bits = 8192); exhaustion raises a fatal error. This module
+// patches that path to fail gracefully, reserves handle 8191 as an overflow
+// handle shared by entities past the cap (minor visual glitches, no crash),
+// and adds budget warnings approaching the limit.
 //
 //=============================================================================//
 
@@ -60,15 +56,5 @@ int  ClientLeafSystem_GetVisibleObjectBudget();
 int  ClientLeafSystem_GetVisibleObjectMax();
 bool ClientLeafSystem_IsOverflowing();
 
-///////////////////////////////////////////////////////////////////////////////
-class VClientLeafSystem : public IDetour
-{
-	virtual void GetAdr(void) const;
-	virtual void GetFun(void) const;
-	virtual void GetVar(void) const;
-	virtual void GetCon(void) const { }
-	virtual void Detour(const bool bAttach) const;
-};
-///////////////////////////////////////////////////////////////////////////////
 
 #endif // GAME_CLIENTLEAFSYSTEM_H

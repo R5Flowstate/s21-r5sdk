@@ -1,6 +1,6 @@
 #pragma once
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose
 //-----------------------------------------------------------------------------
 enum class GameMode_t
 {
@@ -26,25 +26,25 @@ public:
 
 public:
 	float m_nUnkTime;
-	float realTime; // Absolute time (per frame still - Use Plat_FloatTime() for a high precision real time.
+	float realTime; // Absolute time (per frame still - Use Plat_FloatTime for a high precision real time.
 	int frameCount; // Absolute frame counter - continues to increase even if game is paused - never resets.
 	float absoluteFrameTime; // Non-paused frametime.
 
 	// Current time 
 	//
 	// On the client, this (along with tickcount) takes a different meaning based on what
-	// piece of code you're in:
+	// piece of code you're in
 	// 
-	//   - While receiving network packets (like in PreDataUpdate/PostDataUpdate and proxies),
-	//     this is set to the SERVER TICKCOUNT for that packet. There is no interval between
-	//     the server ticks.
-	//     [server_current_Tick * tick_interval]
+	// - While receiving network packets (like in PreDataUpdate/PostDataUpdate and proxies),
+	// this is set to the SERVER TICKCOUNT for that packet. There is no interval between
+	// the server ticks.
+	// [server_current_Tick * tick_interval]
 	//
-	//   - While rendering, this is the exact client clock 
-	//     [client_current_tick * tick_interval + interpolation_amount]
+	// - While rendering, this is the exact client clock 
+	// [client_current_tick * tick_interval + interpolation_amount]
 	//
-	//   - During prediction, this is based on the client's current tick:
-	//     [client_current_tick * tick_interval]
+	// - During prediction, this is based on the client's current tick
+	// [client_current_tick * tick_interval]
 	float curTime;
 
 	// These seem to be mainly used in c:\depot\r5launch\src\engine\client\clientstate.cpp.
@@ -70,7 +70,7 @@ private:
 	bool			m_bClient;
 	// 100 (i.e., tickcount is rounded down to this base and then the "delta" from this base is networked
 	int m_nTimestampNetworkingBase;
-	// 32 (entindex() % nTimestampRandomizeWindow ) is subtracted from gpGlobals->tickcount to set the networking basis, prevents
+	// 32 (entindex % nTimestampRandomizeWindow ) is subtracted from gpGlobals->tickcount to set the networking basis, prevents
 	// all of the entities from forcing a new PackedEntity on the same tick (i.e., prevents them from getting lockstepped on this)
 	int m_nTimestampRandomizeWindow;
 };

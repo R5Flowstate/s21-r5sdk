@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2007, Valve Corporation, All rights reserved. ============//
+//========= Copyright ï¿½ 1996-2007, Valve Corporation, All rights reserved. ============//
 //
 //	LZSS Codec. Designed for fast cheap game-time encoding/decoding. Compression results are
 //	not as aggressive as other algorithms, but gets 2:1 on most arbitrary uncompressed data.
@@ -11,10 +11,13 @@
 #include "tier1/utlbuffer.h"
 #include "mathlib/swap.h"
 
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+
 #define LZSS_LOOKSHIFT		4
 #define LZSS_LOOKAHEAD		( 1 << LZSS_LOOKSHIFT )
 
-// memdbgon must be the last include file in a .cpp file!!!
+// memdbgon must be the last include file in a.cpp file!!!
 #include "tier0/memdbgon.h"
 
 //-----------------------------------------------------------------------------
@@ -227,7 +230,7 @@ unsigned char* CLZSS::Compress( unsigned char *pInput, int inputLength, unsigned
 }
 
 /*
-// BUG BUG:  This code is flaky, don't use until it's debugged!!!
+// BUG BUG: This code is flaky, don't use until it's debugged!!!
 unsigned int CLZSS::Uncompress( unsigned char *pInput, CUtlBuffer &buf )
 {
 	int cmdByte = 0;
@@ -240,11 +243,11 @@ unsigned int CLZSS::Uncompress( unsigned char *pInput, CUtlBuffer &buf )
 		return 0;
 	}
 
-	unsigned char *pBase = ( unsigned char * )buf.Base();
+	unsigned char *pBase = ( unsigned char * )buf.Base;
 
 	pInput += sizeof( lzss_header_t );
 
-	while ( !buf.IsValid() )
+	while ( !buf.IsValid )
 	{
 		if ( !getCmdByte ) 
 		{
@@ -261,10 +264,10 @@ unsigned int CLZSS::Uncompress( unsigned char *pInput, CUtlBuffer &buf )
 			{
 				break;
 			}
-			unsigned int pos = buf.TellPut();
+			unsigned int pos = buf.TellPut;
 			unsigned char *pSource = ( pBase + pos ) - position - 1;
 
-			// BUGBUG:
+			// BUGBUG
 			// This is failing!!!
 			// buf.WriteBytes( pSource, count );
 			// So have to iterate them manually
@@ -280,22 +283,27 @@ unsigned int CLZSS::Uncompress( unsigned char *pInput, CUtlBuffer &buf )
 		cmdByte = cmdByte >> 1;
 	}
 
-	if ( buf.TellPut() != (int)actualSize )
+	if ( buf.TellPut != (int)actualSize )
 	{
 		// unexpected failure
 		Assert( 0 );
 		return 0;
 	}
 
-	return buf.TellPut();
+	return buf.TellPut;
 }
 */
 
-unsigned int CLZSS::SafeUncompress( unsigned char *pInput, unsigned char *pOutput, unsigned int unBufSize )
+unsigned int CLZSS::SafeUncompress( unsigned char *pInput, unsigned char *pOutput, unsigned int unBufSize, unsigned int unInputSize )
 {
 	unsigned int totalBytes = 0;
 	int cmdByte = 0;
 	int getCmdByte = 0;
+
+	if ( !pInput || !pOutput || unInputSize < sizeof( lzss_header_t ) )
+		return 0;
+
+	unsigned char *const pInputEnd = pInput + unInputSize;
 
 	unsigned int actualSize = GetActualSize( pInput );
 	if ( !actualSize )
@@ -315,12 +323,16 @@ unsigned int CLZSS::SafeUncompress( unsigned char *pInput, unsigned char *pOutpu
 	{
 		if ( !getCmdByte ) 
 		{
+			if ( pInput >= pInputEnd )
+				return 0;
 			cmdByte = *pInput++;
 		}
 		getCmdByte = ( getCmdByte + 1 ) & 0x07;
 
 		if ( cmdByte & 0x01 )
 		{
+			if ( pInput + 2 > pInputEnd )
+				return 0;
 			int position = *pInput++ << LZSS_LOOKSHIFT;
 			position |= ( *pInput >> LZSS_LOOKSHIFT );
 			int count = ( *pInput++ & 0x0F ) + 1;
@@ -345,6 +357,8 @@ unsigned int CLZSS::SafeUncompress( unsigned char *pInput, unsigned char *pOutpu
 		} 
 		else 
 		{
+			if ( pInput >= pInputEnd )
+				return 0;
 			if ( totalBytes + 1 > unBufSize )
 				return 0;
 
@@ -362,6 +376,30 @@ unsigned int CLZSS::SafeUncompress( unsigned char *pInput, unsigned char *pOutpu
 	}
 
 	return totalBytes;
+}
+
+unsigned int LZSS_BoundInputBytes( const unsigned char *pInput, unsigned int unBufSize )
+{
+	if ( !pInput || !unBufSize )
+		return 0;
+
+	MEMORY_BASIC_INFORMATION mbi;
+	memset( &mbi, 0, sizeof( mbi ) );
+	if ( VirtualQuery( pInput, &mbi, sizeof( mbi ) ) == 0 || mbi.State != MEM_COMMIT )
+		return 0;
+
+	const unsigned char *const pBase = static_cast<const unsigned char *>( mbi.BaseAddress );
+	const unsigned char *const pRegionEnd = pBase + mbi.RegionSize;
+	if ( pInput < pBase || pInput >= pRegionEnd )
+		return 0;
+
+	const size_t nRegion = static_cast<size_t>( pRegionEnd - pInput );
+	const unsigned int nProto = sizeof( lzss_header_t ) + unBufSize + ( unBufSize / 8 ) + 16;
+	if ( nRegion == 0 )
+		return 0;
+	if ( nRegion < static_cast<size_t>( nProto ) )
+		return static_cast<unsigned int>( nRegion );
+	return nProto;
 }
 
 //-----------------------------------------------------------------------------

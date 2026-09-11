@@ -1,9 +1,9 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
-// $Workfile:     $
-// $Date:         $
+// $Workfile: $
+// $Date: $
 //
 //-----------------------------------------------------------------------------
 // $NoKeywords: $
@@ -121,7 +121,7 @@ inline const char* CCommand::GetCommandString(void) const
 
 //-----------------------------------------------------------------------------
 // Purpose: returns argument from index as string
-// Input  : nIndex - 
+// Input: nIndex - 
 //-----------------------------------------------------------------------------
 inline const char* CCommand::Arg(int nIndex) const
 {
@@ -137,7 +137,7 @@ inline const char* CCommand::Arg(int nIndex) const
 
 //-----------------------------------------------------------------------------
 // Purpose: gets at arguments
-// Input  : nInput - 
+// Input: nInput - 
 //-----------------------------------------------------------------------------
 inline const char* CCommand::operator[](int nIndex) const
 {

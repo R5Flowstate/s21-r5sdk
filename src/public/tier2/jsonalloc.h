@@ -12,7 +12,7 @@
 class JSONAllocator
 {
 public:
-    static const bool kNeedFree;    //!< Whether this allocator needs to call Free().
+    static const bool kNeedFree;    //!< Whether this allocator needs to call Free.
 
     // Allocate a memory block.
     // \param size of the memory block in bytes.

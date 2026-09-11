@@ -1,6 +1,6 @@
 //========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -16,7 +16,7 @@
 #include <math.h>
 #include <float.h>
 
-// For rand(). We really need a library!
+// For rand. We really need a library!
 #include <stdlib.h>
 
 #include "tier0/dbg.h"
@@ -40,7 +40,7 @@ FORCEINLINE float fpmax(float a, float b)
 class Vector32
 {
 public:
-	// Construction/destruction:
+	// Construction/destruction
 	Vector32(void); 
 	Vector32(vec_t X, vec_t Y, vec_t Z);
 
@@ -101,7 +101,7 @@ inline Vector32::operator Vector3D()
 class Normal32
 {
 public:
-	// Construction/destruction:
+	// Construction/destruction
 	Normal32(void); 
 	Normal32(vec_t X, vec_t Y, vec_t Z);
 
@@ -150,7 +150,7 @@ inline Normal32::operator Vector3D ()
 class Quaternion64
 {
 public:
-	// Construction/destruction:
+	// Construction/destruction
 	Quaternion64(void); 
 	Quaternion64(vec_t X, vec_t Y, vec_t Z);
 
@@ -198,7 +198,7 @@ inline Quaternion64& Quaternion64::operator=(const Quaternion &vOther)
 class Quaternion48
 {
 public:
-	// Construction/destruction:
+	// Construction/destruction
 	Quaternion48(void); 
 	Quaternion48(vec_t X, vec_t Y, vec_t Z);
 
@@ -206,7 +206,7 @@ public:
 	// Quaternion& operator=(const Quaternion48 &vOther);
 	Quaternion48& operator=(const Quaternion &vOther);
 	operator Quaternion ();
-//private:
+//private
 	unsigned short x:16;
 	unsigned short y:16;
 	unsigned short z:15;
@@ -245,7 +245,7 @@ inline Quaternion48& Quaternion48::operator=(const Quaternion &vOther)
 class Quaternion32
 {
 public:
-	// Construction/destruction:
+	// Construction/destruction
 	Quaternion32(void); 
 	Quaternion32(vec_t X, vec_t Y, vec_t Z);
 
@@ -298,14 +298,14 @@ const float maxfloat16bits = 65504.0f;
 class float16
 {
 public:
-	//float16() {}
+	//float16 {}
 	//float16( float f ) { m_storage.rawWord = ConvertFloatTo16bits(f); }
 
 	void Init() { m_storage.rawWord = 0; }
 //	float16& operator=(const float16 &other) { m_storage.rawWord = other.m_storage.rawWord; return *this; }
 //	float16& operator=(const float &other) { m_storage.rawWord = ConvertFloatTo16bits(other); return *this; }
-//	operator unsigned short () { return m_storage.rawWord; }
-//	operator float () { return Convert16bitFloatTo32bits( m_storage.rawWord ); }
+//	operator unsigned short { return m_storage.rawWord; }
+//	operator float { return Convert16bitFloatTo32bits( m_storage.rawWord ); }
 	unsigned short GetBits() const 
 	{ 
 		return m_storage.rawWord; 
@@ -331,8 +331,8 @@ public:
 	bool operator==(const float16 other) const { return m_storage.rawWord == other.m_storage.rawWord; }
 	bool operator!=(const float16 other) const { return m_storage.rawWord != other.m_storage.rawWord; }
 	
-//	bool operator< (const float other) const	   { return GetFloat() < other; }
-//	bool operator> (const float other) const	   { return GetFloat() > other; }
+//	bool operator< (const float other) const { return GetFloat < other; }
+//	bool operator> (const float other) const { return GetFloat > other; }
 
 protected:
 	union float32bits
@@ -395,27 +395,15 @@ protected:
 		}
 		else if ( (inFloat.bits.biased_exponent==0xff) && (inFloat.bits.mantissa==0) ) 
 		{ 
-#if 0
-			// infinity
-			output.bits.mantissa = 0;
-			output.bits.biased_exponent = 31;
-#else
 			// infinity maps to maxfloat
 			output.bits.mantissa = 0x3ff;
 			output.bits.biased_exponent = 0x1e;
-#endif
 		}
 		else if ( (inFloat.bits.biased_exponent==0xff) && (inFloat.bits.mantissa!=0) ) 
 		{ 
-#if 0
-			// NaN
-			output.bits.mantissa = 1;
-			output.bits.biased_exponent = 31;
-#else
 			// NaN maps to zero
 			output.bits.mantissa = 0;
 			output.bits.biased_exponent = 0;
-#endif
 		}
 		else 
 		{ 
@@ -441,15 +429,9 @@ protected:
 			}
 			else if (new_exp>15) 
 			{ 
-#if 0
-				// map this value to infinity
-				output.bits.mantissa = 0;
-				output.bits.biased_exponent = 31;
-#else
-				// to big. . . maps to maxfloat
+				// to big... maps to maxfloat
 				output.bits.mantissa = 0x3ff;
 				output.bits.biased_exponent = 0x1e;
-#endif
 			}
 			else 
 			{
@@ -508,7 +490,7 @@ public:
 
 	float16& operator=(const float16 &other) { m_storage.rawWord = ((float16_with_assign &)other).m_storage.rawWord; return *this; }
 	float16& operator=(const float &other) { m_storage.rawWord = ConvertFloatTo16bits(other); return *this; }
-//	operator unsigned short () const { return m_storage.rawWord; }
+//	operator unsigned short const { return m_storage.rawWord; }
 	operator float () const { return Convert16bitFloatTo32bits( m_storage.rawWord ); }
 };
 
@@ -519,7 +501,7 @@ public:
 class Vector48
 {
 public:
-	// Construction/destruction:
+	// Construction/destruction
 	Vector48(void) {}
 	Vector48(vec_t X, vec_t Y, vec_t Z) { x.SetFloat( X ); y.SetFloat( Y ); z.SetFloat( Z ); }
 
@@ -563,7 +545,7 @@ inline Vector48::operator Vector3D ()
 class Vector2d32
 {
 public:
-	// Construction/destruction:
+	// Construction/destruction
 	Vector2d32(void) {}
 	Vector2d32(vec_t X, vec_t Y) { x.SetFloat( X ); y.SetFloat( Y ); }
 

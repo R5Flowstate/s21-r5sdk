@@ -1,6 +1,6 @@
 //========= Copyright Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose
 //
 //===========================================================================//
 
@@ -47,7 +47,7 @@ inline int FirstBitInWord( unsigned int elem, int offset )
 	if ( !elem )
 		return -1;
 #if defined( _X360 )
-	// this implements CountTrailingZeros() / BitScanForward()
+	// this implements CountTrailingZeros / BitScanForward
 	unsigned int mask = elem-1;
 	unsigned int comp = ~elem;
 	elem = mask & comp;
@@ -216,7 +216,7 @@ inline int CalcNumIntsForBits( int numBits )	{ return (numBits + (BITS_PER_INT-1
 // template CBitVecT
 //
 // Defines the operations relevant to any bit array. Simply requires a base
-// class that implements GetNumBits(), Base(), GetNumDWords() & ValidateOperand()
+// class that implements GetNumBits, Base, GetNumDWords & ValidateOperand
 //
 // CVarBitVec and CBitVec<int> are the actual classes generally used
 // by clients
@@ -496,8 +496,8 @@ inline CVarBitVecBase<BITCOUNTTYPE> &CVarBitVecBase<BITCOUNTTYPE>::operator=( co
 
 //-----------------------------------------------------------------------------
 // Purpose: Destructor
-// Input  :
-// Output :
+// Input 
+// Output 
 //-----------------------------------------------------------------------------
 
 template <typename BITCOUNTTYPE>
@@ -697,9 +697,9 @@ inline uint32 CBitVecT<BASE_OPS>::Get( uint32 offset, uint32 mask )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose:
-// Input  :
-// Output :
+// Purpose
+// Input 
+// Output 
 //-----------------------------------------------------------------------------
 template <class BASE_OPS>
 inline void CBitVecT<BASE_OPS>::And(const CBitVecT &addStr, CBitVecT *out) const
@@ -718,9 +718,9 @@ inline void CBitVecT<BASE_OPS>::And(const CBitVecT &addStr, CBitVecT *out) const
 }
 
 //-----------------------------------------------------------------------------
-// Purpose:
-// Input  :
-// Output :
+// Purpose
+// Input 
+// Output 
 //-----------------------------------------------------------------------------
 template <class BASE_OPS>
 inline void CBitVecT<BASE_OPS>::Or(const CBitVecT &orStr, CBitVecT *out) const
@@ -739,9 +739,9 @@ inline void CBitVecT<BASE_OPS>::Or(const CBitVecT &orStr, CBitVecT *out) const
 }
 
 //-----------------------------------------------------------------------------
-// Purpose:
-// Input  :
-// Output :
+// Purpose
+// Input 
+// Output 
 //-----------------------------------------------------------------------------
 template <class BASE_OPS>
 inline void CBitVecT<BASE_OPS>::Xor(const CBitVecT &xorStr, CBitVecT *out) const
@@ -757,9 +757,9 @@ inline void CBitVecT<BASE_OPS>::Xor(const CBitVecT &xorStr, CBitVecT *out) const
 }
 
 //-----------------------------------------------------------------------------
-// Purpose:
-// Input  :
-// Output :
+// Purpose
+// Input 
+// Output 
 //-----------------------------------------------------------------------------
 template <class BASE_OPS>
 inline void CBitVecT<BASE_OPS>::Not(CBitVecT *out) const
@@ -777,8 +777,8 @@ inline void CBitVecT<BASE_OPS>::Not(CBitVecT *out) const
 
 //-----------------------------------------------------------------------------
 // Purpose: Copy a bit string
-// Input  :
-// Output :
+// Input 
+// Output 
 //-----------------------------------------------------------------------------
 template <class BASE_OPS>
 inline void CBitVecT<BASE_OPS>::CopyTo(CBitVecT *out) const
@@ -793,8 +793,8 @@ inline void CBitVecT<BASE_OPS>::CopyTo(CBitVecT *out) const
 
 //-----------------------------------------------------------------------------
 // Purpose: Are all bits zero?
-// Input  :
-// Output :
+// Input 
+// Output 
 //-----------------------------------------------------------------------------
 template <class BASE_OPS>
 inline bool CBitVecT<BASE_OPS>::IsAllClear(void) const
@@ -816,8 +816,8 @@ inline bool CBitVecT<BASE_OPS>::IsAllClear(void) const
 
 //-----------------------------------------------------------------------------
 // Purpose: Are all bits set?
-// Input  :
-// Output :
+// Input 
+// Output 
 //-----------------------------------------------------------------------------
 template <class BASE_OPS>
 inline bool CBitVecT<BASE_OPS>::IsAllSet(void) const
@@ -839,8 +839,8 @@ inline bool CBitVecT<BASE_OPS>::IsAllSet(void) const
 
 //-----------------------------------------------------------------------------
 // Purpose: Sets all bits
-// Input  :
-// Output :
+// Input 
+// Output 
 //-----------------------------------------------------------------------------
 template <class BASE_OPS>
 inline void CBitVecT<BASE_OPS>::SetAll(void)		
@@ -851,8 +851,8 @@ inline void CBitVecT<BASE_OPS>::SetAll(void)
 
 //-----------------------------------------------------------------------------
 // Purpose: Clears all bits
-// Input  :
-// Output :
+// Input 
+// Output 
 //-----------------------------------------------------------------------------
 template <class BASE_OPS>
 inline void CBitVecT<BASE_OPS>::ClearAll(void)		
@@ -1300,7 +1300,7 @@ inline void CBitVecT< CFixedBitVecBase<32> >::Set( int bitNum, bool bNewVal )
 
 //-----------------------------------------------------------------------------
 // Purpose: Resizes the bit string to a new number of bits
-// Input  : resizeNumBits - 
+// Input: resizeNumBits - 
 //-----------------------------------------------------------------------------
 template <typename BITCOUNTTYPE>
 inline void CVarBitVecBase<BITCOUNTTYPE>::Resize( int resizeNumBits, bool bClearAll )
@@ -1345,7 +1345,7 @@ inline void CVarBitVecBase<BITCOUNTTYPE>::Resize( int resizeNumBits, bool bClear
 
 //-----------------------------------------------------------------------------
 // Purpose: Allocate the storage for the ints
-// Input  : numInts - 
+// Input: numInts - 
 //-----------------------------------------------------------------------------
 template <typename BITCOUNTTYPE>
 inline void CVarBitVecBase<BITCOUNTTYPE>::AllocInts( int numInts )
@@ -1367,7 +1367,7 @@ inline void CVarBitVecBase<BITCOUNTTYPE>::AllocInts( int numInts )
 
 //-----------------------------------------------------------------------------
 // Purpose: Reallocate the storage for the ints
-// Input  : numInts - 
+// Input: numInts - 
 //-----------------------------------------------------------------------------
 template <typename BITCOUNTTYPE>
 inline void CVarBitVecBase<BITCOUNTTYPE>::ReallocInts( int numInts )

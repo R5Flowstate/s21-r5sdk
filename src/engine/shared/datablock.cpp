@@ -6,7 +6,7 @@
 #include "datablock.h"
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose
 //-----------------------------------------------------------------------------
 NetDataBlockSender::~NetDataBlockSender()
 {
@@ -84,9 +84,17 @@ void NetDataBlockSender::StartBlockSender(const int transferSize, const bool isM
 //-----------------------------------------------------------------------------
 void NetDataBlockReceiver::StartBlockReceiver(const int transferSize, const double startTime)
 {
+	int size = transferSize;
+	if (size < 1)
+		size = 0;
+	else if (size > MAX_DATABLOCK_TRANSFER_SIZE)
+		size = MAX_DATABLOCK_TRANSFER_SIZE;
+
 	m_bStartedRecv = true;
-	m_nTransferSize = transferSize;
-	m_nTotalBlocks = transferSize / MAX_DATABLOCK_FRAGMENT_SIZE + (transferSize % MAX_DATABLOCK_FRAGMENT_SIZE != 0);
+	m_nTransferSize = size;
+	m_nTotalBlocks = size / MAX_DATABLOCK_FRAGMENT_SIZE + (size % MAX_DATABLOCK_FRAGMENT_SIZE != 0);
+	if (m_nTotalBlocks > MAX_DATABLOCK_FRAGMENTS)
+		m_nTotalBlocks = MAX_DATABLOCK_FRAGMENTS;
 	m_nBlockAckTick = 0;
 	m_flStartTime = startTime;
 

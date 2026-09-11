@@ -1,9 +1,9 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
-// $Workfile:     $
-// $Date:         $
+// $Workfile: $
+// $Date: $
 // $NoKeywords: $
 //===========================================================================//
 #if !defined( IENGINE_H )
@@ -15,7 +15,7 @@
 //#include "tier1/interface.h"
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose
 //-----------------------------------------------------------------------------
 abstract_class IEngine
 {
@@ -54,8 +54,8 @@ public:
 
 	virtual int GetPlaylistCount(void) = 0;
 
-	virtual const char* sub_1401FE2B0(int a2) = 0; // Playlists KeyValues stuff.
-	virtual bool sub_1401FE3B0(__int64 a2) = 0; // Playlists KeyValues stuff.
+	virtual const char* GetPlaylistKeyValues(int a2) = 0; // Playlist KeyValues lookup.
+	virtual bool ApplyPlaylistKeyValues(__int64 a2) = 0; // Playlist KeyValues apply.
 };
 
 #endif // IENGINE_H

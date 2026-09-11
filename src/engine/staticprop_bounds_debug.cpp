@@ -1,3 +1,8 @@
+//=============================================================================//
+//
+// Purpose: StaticPropBoundsCheck crash guard and debug logging
+//
+//=============================================================================//
 //=============================================================================
 // staticprop_bounds_debug.cpp - Debug hook for static prop bounds check crash
 //=============================================================================
@@ -7,19 +12,19 @@
 #include "engine/staticprop_bounds_debug.h"
 
 // BSP version global for debugging
-inline int* g_pBspVersion = nullptr;  // dword_7FF736C9C6C4
+inline int* g_pBspVersion = nullptr;
 
 //-----------------------------------------------------------------------------
 // Purpose: Hook for StaticPropBoundsCheck to catch the crash and log debug info
 // 
-// This function is called during visibility traversal with:
-//   - staticPropIndex: The index into static prop arrays (already adjusted by threshold)
-//   - position: Camera/query position (3 floats)
-//   - radiusSq: Squared radius for distance check
+// This function is called during visibility traversal with
+// - staticPropIndex: The index into static prop arrays (already adjusted by threshold)
+// - position: Camera/query position (3 floats)
+// - radiusSq: Squared radius for distance check
 //
-// The crash happens when:
-//   - g_pStaticPropData or g_pStaticPropBounds is NULL
-//   - staticPropIndex is out of bounds
+// The crash happens when
+// - g_pStaticPropData or g_pStaticPropBounds is NULL
+// - staticPropIndex is out of bounds
 //-----------------------------------------------------------------------------
 bool StaticPropBoundsCheck_Hook(unsigned int staticPropIndex, float* position, float radiusSq)
 {

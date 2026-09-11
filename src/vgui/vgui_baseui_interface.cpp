@@ -14,23 +14,20 @@
 #include <vguimatsurface/MatSystemSurface.h>
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose
 //-----------------------------------------------------------------------------
 int CEngineVGui::VPaint(CEngineVGui* const thisptr, const PaintMode_t mode)
 {
 	const int result = CEngineVGui__Paint(thisptr, mode);
 
+	if (!r_drawvgui || !r_drawvgui->GetBool())
+		return result;
+
 	if (mode == PaintMode_t::PAINT_UIPANELS)
-	{
-		if (r_drawvgui->GetBool())
-			g_TextOverlay.UpdateMiniConsole();
-	}
+		g_TextOverlay.UpdateMiniConsole();
 
 	if (mode == PaintMode_t::PAINT_INGAMEPANELS)
-	{
-		if (r_drawvgui->GetBool())
-			g_TextOverlay.UpdateInGamePanels();
-	}
+		g_TextOverlay.UpdateInGamePanels();
 
 	return result;
 }
@@ -38,7 +35,8 @@ int CEngineVGui::VPaint(CEngineVGui* const thisptr, const PaintMode_t mode)
 ///////////////////////////////////////////////////////////////////////////////
 void VEngineVGui::Detour(const bool bAttach) const
 {
-	DetourSetup(&CEngineVGui__Paint, &CEngineVGui::VPaint, bAttach);
+	if (CEngineVGui__Paint)
+		DetourSetup(&CEngineVGui__Paint, &CEngineVGui::VPaint, bAttach);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -1,7 +1,7 @@
 //========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
 //
-// Purpose:	This file sets all of our debugging flags.  It should be 
-//			called before all other header files.
+// Purpose:	This file sets all of our debugging flags. It should be 
+// called before all other header files.
 //
 // $NoKeywords: $
 //=============================================================================//
@@ -13,15 +13,15 @@
 #endif
 
 
-// Here are all the flags we support:
-// DBGFLAG_MEMORY:			Enables our memory debugging system, which overrides malloc & free
-// DBGFLAG_MEMORY_NEWDEL:	Enables new / delete tracking for memory debug system.  Requires DBGFLAG_MEMORY to be enabled.
-// DBGFLAG_VALIDATE:		Enables our recursive validation system for checking integrity and memory leaks
-// DBGFLAG_ASSERT:			Turns Assert on or off (when off, it isn't compiled at all)
-// DBGFLAG_ASSERTFATAL:		Turns AssertFatal on or off (when off, it isn't compiled at all)
-// DBGFLAG_ASSERTDLG:		Turns assert dialogs on or off and debug breaks on or off when not under the debugger.
-//								(Dialogs will always be on when process is being debugged.)
-// DBGFLAG_STRINGS:			Turns on hardcore string validation (slow but safe)
+// Here are all the flags we support
+// DBGFLAG_MEMORY: Enables our memory debugging system, which overrides malloc & free
+// DBGFLAG_MEMORY_NEWDEL:	Enables new / delete tracking for memory debug system. Requires DBGFLAG_MEMORY to be enabled.
+// DBGFLAG_VALIDATE: Enables our recursive validation system for checking integrity and memory leaks
+// DBGFLAG_ASSERT: Turns Assert on or off (when off, it isn't compiled at all)
+// DBGFLAG_ASSERTFATAL: Turns AssertFatal on or off (when off, it isn't compiled at all)
+// DBGFLAG_ASSERTDLG: Turns assert dialogs on or off and debug breaks on or off when not under the debugger.
+// (Dialogs will always be on when process is being debugged.)
+// DBGFLAG_STRINGS: Turns on hardcore string validation (slow but safe)
 
 #undef DBGFLAG_MEMORY
 #undef DBGFLAG_MEMORY_NEWDEL

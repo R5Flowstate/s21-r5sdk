@@ -5,12 +5,10 @@ class CEngineClient : public IVEngineClient
 {
 public:
 	void SetRestrictServerCommands(bool bRestrict);
-	bool GetRestrictServerCommands() const;
 	void SetRestrictClientCommands(bool bRestrict);
-	bool GetRestrictClientCommands() const;
 	int GetLocalPlayer(); // Local player index.
 
-	// Hook statics:
+	// Hook statics
 	static void _ClientCmd(CEngineClient* thisptr, const char* const szCmdString);
 };
 

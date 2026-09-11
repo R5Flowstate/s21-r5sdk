@@ -1,4 +1,4 @@
-﻿#ifndef TIER0_MEMALLOC_H
+#ifndef TIER0_MEMALLOC_H
 #define TIER0_MEMALLOC_H
 
 #if defined(MSVC) && ( defined(_DEBUG) || defined(USE_MEM_DEBUG) )
@@ -8,7 +8,7 @@
 //#include <typeinfo.h>
 
 // MEM_DEBUG_CLASSNAME is opt-in.
-// Note: typeid().name() is not threadsafe, so if the project needs to access it in multiple threads
+// Note: typeid.name is not threadsafe, so if the project needs to access it in multiple threads
 // simultaneously, it'll need a mutex.
 
 #define MEM_ALLOC_CREDIT_(tag)	((void)0) // Stubbed for now.

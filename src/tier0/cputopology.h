@@ -14,8 +14,8 @@ class ICpuTopology;
 //---------------------------------------------------------------------------------
 // Name: CpuToplogy
 // Desc: This class constructs a supported cpu topology implementation object on
-//       initialization and forwards calls to it.  This is the Abstraction class
-//       in the traditional Bridge Pattern.
+// initialization and forwards calls to it. This is the Abstraction class
+// in the traditional Bridge Pattern.
 //---------------------------------------------------------------------------------
 class CpuTopology
 {

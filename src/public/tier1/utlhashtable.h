@@ -1,52 +1,52 @@
-﻿//========= Copyright © 2011, Valve Corporation, All rights reserved. ============//
+//========= Copyright © 2011, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: a fast growable hashtable with stored hashes, L2-friendly behavior.
 // Useful as a string dictionary or a low-overhead set/map for small POD types.
 //
-// Usage notes:
-// - handles are NOT STABLE across element removal! use RemoveAndAdvance()
-//   if you are removing elements while iterating through the hashtable.
-//   Use CUtlStableHashtable if you need stable handles (less efficient).
-// - handles are also NOT STABLE across element insertion.  The handle
-//   resulting from the insertion of an element may not retreive the
-//   same (or any!) element after further insertions.  Again, use
-//   CUtlStableHashtable if you need stable handles
-// - Insert() first searches for an existing match and returns it if found
+// Usage notes
+// - handles are NOT STABLE across element removal! use RemoveAndAdvance
+// if you are removing elements while iterating through the hashtable.
+// Use CUtlStableHashtable if you need stable handles (less efficient).
+// - handles are also NOT STABLE across element insertion. The handle
+// resulting from the insertion of an element may not retreive the
+// same (or any!) element after further insertions. Again, use
+// CUtlStableHashtable if you need stable handles
+// - Insert first searches for an existing match and returns it if found
 // - a value type of "empty_t" can be used to eliminate value storage and
-//   switch Element() to return const Key references instead of values
-// - an extra user flag bit is accessible via Get/SetUserFlag()
-// - hash function pointer / functor is exposed via GetHashRef()
-// - comparison function pointer / functor is exposed via GetEqualRef()
-// - if your value type cannot be copy-constructed, use key-only Insert()
-//   to default-initialize the value and then manipulate it afterwards.
+// switch Element to return const Key references instead of values
+// - an extra user flag bit is accessible via Get/SetUserFlag
+// - hash function pointer / functor is exposed via GetHashRef
+// - comparison function pointer / functor is exposed via GetEqualRef
+// - if your value type cannot be copy-constructed, use key-only Insert
+// to default-initialize the value and then manipulate it afterwards.
 // - The reason that UtlHashtable permutes itself and invalidates
-//   iterators is to make it faster in the case where you are not
-//   tracking iterators. If you use it as a set or a map ("is this
-//   value a member?") as opposed to a long-term container, then you
-//   probably don't need stable iterators. Hashtable tries to place
-//   newly inserted data in the primary hash slot, making an
-//   assumption that if you inserted it recently, you're more likely
-//   to access it than if you inserted something a long time
-//   ago. It's effectively trying to minimize cache misses for hot
-//   data if you add and remove a lot.
-//   If you don't care too much about cache misses, UtlStableHashtable
-//   is what you're looking for
+// iterators is to make it faster in the case where you are not
+// tracking iterators. If you use it as a set or a map ("is this
+// value a member?") as opposed to a long-term container, then you
+// probably don't need stable iterators. Hashtable tries to place
+// newly inserted data in the primary hash slot, making an
+// assumption that if you inserted it recently, you're more likely
+// to access it than if you inserted something a long time
+// ago. It's effectively trying to minimize cache misses for hot
+// data if you add and remove a lot.
+// If you don't care too much about cache misses, UtlStableHashtable
+// is what you're looking for
 //
-// Implementation notes:
-// - overall hash table load is kept between .25 and .75
+// Implementation notes
+// - overall hash table load is kept between.25 and.75
 // - items which would map to the same ideal slot are chained together
 // - chained items are stored sequentially in adjacent free spaces
 // - "root" entries are prioritized over chained entries; if a
-//   slot is not occupied by an item in its root position, the table
-//   is guaranteed to contain no keys which would hash to that slot.
+// slot is not occupied by an item in its root position, the table
+// is guaranteed to contain no keys which would hash to that slot.
 // - new items go at the head of the chain (ie, in their root slot)
-//   and evict / "bump" any chained entries which occupy that slot
+// and evict / "bump" any chained entries which occupy that slot
 // - chain-following skips over unused holes and continues examining
-//   table entries until a chain entry with FLAG_LAST is encountered
+// table entries until a chain entry with FLAG_LAST is encountered
 //
-// CUtlHashtable< uint32 >       setOfIntegers;
-// CUtlHashtable< const char* >  setOfStringPointers;
-// CUtlHashtable< int, CUtlVector<blah_t> >  mapFromIntsToArrays;
+// CUtlHashtable< uint32 > setOfIntegers;
+// CUtlHashtable< const char* > setOfStringPointers;
+// CUtlHashtable< int, CUtlVector<blah_t> > mapFromIntsToArrays;
 //
 // $NoKeywords: $
 //
@@ -163,7 +163,7 @@ protected:
 	template <typename KeyParamT> handle_t DoLookup( KeyParamT x, unsigned int h, handle_t *pPreviousInChain ) const;
 
 	// Remove single element by key + hash. Returns the index of the new hole
-	// that was created. Returns InvalidHandle() if element was not found. 
+	// that was created. Returns InvalidHandle if element was not found. 
 	template <typename KeyParamT> int DoRemove( KeyParamT x, unsigned int h );
 
 	// Friend CUtlStableHashtable so that it can call our Do* functions directly
@@ -204,10 +204,10 @@ public:
 	// Returns the number of unique keys in the table
 	int Count() const { return m_nUsed; }
 
-	// Key lookup, returns InvalidHandle() if not found
+	// Key lookup, returns InvalidHandle if not found
 	handle_t Find( KeyArg_t k ) const { return DoLookup<KeyArg_t>( k, m_hash(k), NULL ); }
 	handle_t Find( KeyArg_t k, unsigned int hash) const { Assert( hash == m_hash(k) ); return DoLookup<KeyArg_t>( k, hash, NULL ); }
-	// Alternate-type key lookup, returns InvalidHandle() if not found
+	// Alternate-type key lookup, returns InvalidHandle if not found
 	handle_t Find( KeyAlt_t k ) const { return DoLookup<KeyAlt_t>( k, m_hash(k), NULL ); }
 	handle_t Find( KeyAlt_t k, unsigned int hash) const { Assert( hash == m_hash(k) ); return DoLookup<KeyAlt_t>( k, hash, NULL ); }
 
@@ -276,11 +276,11 @@ public:
 
 	// Swap memory and contents with another identical hashtable
 	// (NOTE: if using function pointers or functors with state,
-	//  it is up to the caller to ensure that they are compatible!)
+	// it is up to the caller to ensure that they are compatible!)
 	void Swap( CUtlHashtable &other ) { m_table.Swap(other.m_table); ::V_swap(m_nUsed, other.m_nUsed); }
 
     // GetMemoryUsage returns all memory held by this class
-    // and its held classes.  It does not include sizeof(*this).
+    // and its held classes. It does not include sizeof(*this).
     size_t GetMemoryUsage() const
     {
         return m_table.AllocSize();
@@ -437,7 +437,7 @@ int CUtlHashtable<KeyT, ValueT, KeyHashT, KeyIsEqualT, AltKeyT>::DoInsertUnconst
 {
 	if ( allowGrow && !m_bSizeLocked )
 	{
-		// Keep the load factor between .25 and .75
+		// Keep the load factor between.25 and.75
 		int newSize = m_nUsed + 1;
 		if ( ( newSize*4 < m_table.Count() && m_table.Count() > m_nMinSize*2 ) || newSize*4 > m_table.Count()*3 )
 		{
@@ -498,7 +498,7 @@ UtlHashHandle_t CUtlHashtable<KeyT, ValueT, KeyHashT, KeyIsEqualT, AltKeyT>::DoL
 		// Only examine this slot if it is valid and belongs to our hash chain
 		if ( table[idx].IdealIndex( slotmask ) == chainid )
 		{
-			// Test the full-width hash to avoid unnecessary calls to m_eq()
+			// Test the full-width hash to avoid unnecessary calls to m_eq
 			if ( ((table[idx].flags_and_hash ^ h) & MASK_HASH) == 0 && m_eq( table[idx]->m_key, x ) )
 			{
 				// Found match!
@@ -691,7 +691,7 @@ void CUtlHashtable<KeyT, ValueT, KeyHashT, KeyIsEqualT, AltKeyT>::RemoveByHandle
 {
 	AssertDbg( IsValidHandle( idx ) );
 
-	// Copied from RemoveAndAdvance(): TODO optimize, implement DoRemoveAt that does not need to re-evaluate equality in DoLookup
+	// Copied from RemoveAndAdvance: TODO optimize, implement DoRemoveAt that does not need to re-evaluate equality in DoLookup
 	DoRemove< KeyArg_t >( m_table[idx]->m_key, m_table[idx].flags_and_hash & MASK_HASH );
 }
 
@@ -860,7 +860,7 @@ public:
 		return ExtendInvalidHandle(next);
 	}
 
-	void Compact( bool bMinimal ) { m_table.Compact( bMinimal ); /*m_data.Compact();*/ }
+	void Compact( bool bMinimal ) { m_table.Compact( bMinimal ); /*m_data.Compact;*/ }
 
 	void Swap( CUtlStableHashtable &other )
 	{
@@ -874,7 +874,7 @@ public:
 
 
 protected:
-	// Perform extension of 0xFFFF to 0xFFFFFFFF if necessary. Note: ( a < CONSTANT ) ? 0 : -1 is usually branchless
+	// Perform extension of 0xFFFF to 0xFFFFFFFF if necessary. Note: ( a < CONSTANT ) ? 0: -1 is usually branchless
 	static UtlHashHandle_t ExtendInvalidHandle( uint32 x ) { return x; }
 	static UtlHashHandle_t ExtendInvalidHandle( uint16 x ) { uint32 a = x; return a | ( ( a < 0xFFFFu ) ? 0 : -1 ); }
 

@@ -1,6 +1,6 @@
-﻿//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //=============================================================================//
@@ -29,21 +29,25 @@ class CMoveHelperServer : public IMoveHelper
 IMoveHelper* MoveHelperServer();
 extern CMoveHelperServer* s_MoveHelperServer;
 
+// Host pointer at this+8; ProcessImpacts derefs it with no null check.
+inline void (*CMoveHelperServer__ProcessImpacts)(IMoveHelper* thisp);
+
 ///////////////////////////////////////////////////////////////////////////////
 class VMoveHelperServer : public IDetour
 {
 	virtual void GetAdr(void) const
 	{
+		LogFunAdr("CMoveHelperServer::ProcessImpacts", CMoveHelperServer__ProcessImpacts);
 		LogVarAdr("s_MoveHelperServer", s_MoveHelperServer);
 	}
-	virtual void GetFun(void) const { }
+	virtual void GetFun(void) const;
 	virtual void GetVar(void) const
 	{
 		const CMemory pFunc = Module_FindPattern(g_GameDll, "E8 ?? ?? ?? ?? 85 C0 0F 84 ?? ?? ?? ?? 48 8B 47 10").FollowNearCallSelf();
 		s_MoveHelperServer = pFunc.FindPattern("48 8D 0D").ResolveRelativeAddressSelf(0x3, 0x7).RCast<CMoveHelperServer*>();
 	}
 	virtual void GetCon(void) const { }
-	virtual void Detour(const bool bAttach) const { }
+	virtual void Detour(const bool bAttach) const;
 };
 ///////////////////////////////////////////////////////////////////////////////
 

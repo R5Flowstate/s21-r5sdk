@@ -8,7 +8,7 @@
 
 //-----------------------------------------------------------------------------
 // Purpose: constructor
-// Input  : *szModuleName - 
+// Input: *szModuleName - 
 //-----------------------------------------------------------------------------
 CModule::CModule(const char* szModuleName)
 {
@@ -17,7 +17,7 @@ CModule::CModule(const char* szModuleName)
 
 //-----------------------------------------------------------------------------
 // Purpose: constructor
-// Input  : *nModuleBase - 
+// Input: *nModuleBase - 
 //-----------------------------------------------------------------------------
 CModule::CModule(const QWORD nModuleBase)
 {
@@ -26,7 +26,7 @@ CModule::CModule(const QWORD nModuleBase)
 
 //-----------------------------------------------------------------------------
 // Purpose: initializes class from module name
-// Input  : *szModuleName - 
+// Input: *szModuleName - 
 //-----------------------------------------------------------------------------
 void CModule::InitFromName(const char* szModuleName)
 {
@@ -46,7 +46,7 @@ void CModule::InitFromName(const char* szModuleName)
 
 //-----------------------------------------------------------------------------
 // Purpose: initializes class from module base
-// Input  : *nModuleBase - 
+// Input: *nModuleBase - 
 //-----------------------------------------------------------------------------
 void CModule::InitFromBase(const QWORD nModuleBase)
 {
@@ -97,12 +97,12 @@ void CModule::LoadSections()
 
 //-----------------------------------------------------------------------------
 // Purpose: find array of bytes in process memory using SIMD instructions
-// Input  : *pPattern      - 
-//          *szMask        - 
-//          nPatternLen    - 
-//          *moduleSection - 
-//          nOccurrence    - 
-// Output : CMemory
+// Input: *pPattern - 
+// *szMask - 
+// nPatternLen - 
+// *moduleSection - 
+// nOccurrence - 
+// Output: CMemory
 //-----------------------------------------------------------------------------
 CMemory CModule::FindPatternSIMD(const uint8_t* pPattern, const char* pMask, const size_t nPatternLen,
 								 const ModuleSections_t* moduleSection, const size_t nOccurrence) const
@@ -183,9 +183,9 @@ CMemory CModule::FindPatternSIMD(const uint8_t* pPattern, const char* pMask, con
 
 //-----------------------------------------------------------------------------
 // Purpose: find a string pattern in process memory using SIMD instructions
-// Input  : *szPattern     - 
-//          *moduleSection - 
-// Output : CMemory
+// Input: *szPattern - 
+// *moduleSection - 
+// Output: CMemory
 //-----------------------------------------------------------------------------
 CMemory CModule::FindPatternSIMD_Impl(const uint8_t* szPattern, const char* szMask,
 	const size_t patternLen, const ModuleSections_t* moduleSection) const
@@ -204,9 +204,9 @@ CMemory CModule::FindPatternSIMD_Impl(const uint8_t* szPattern, const char* szMa
 
 //-----------------------------------------------------------------------------
 // Purpose: find address of reference to string constant in executable memory
-// Input  : *szString       - 
-//          bNullTerminator - 
-// Output : CMemory
+// Input: *szString - 
+// bNullTerminator - 
+// Output: CMemory
 //-----------------------------------------------------------------------------
 CMemory CModule::FindString(const char* szString, const ptrdiff_t nOccurrence,
 	bool bNullTerminator) const
@@ -224,13 +224,13 @@ CMemory CModule::FindString(const char* szString, const ptrdiff_t nOccurrence,
 		return CMemory(nRVA + GetModuleBase());
 	}
 
-	// Get Address for the string in the .rdata section.
+	// Get Address for the string in the.rdata section.
 	const CMemory stringAddress = FindStringReadOnly(szString, bNullTerminator);
 
 	if (!stringAddress)
 		return nullptr;
 
-	// Get the start of the .text section.
+	// Get the start of the.text section.
 	uint8_t* pTextStart = reinterpret_cast<uint8_t*>(executableCode.m_pSectionBase);
 	uint8_t* pLatestOccurrence = nullptr;
 	ptrdiff_t dOccurrencesFound = 0;
@@ -276,9 +276,9 @@ CMemory CModule::FindString(const char* szString, const ptrdiff_t nOccurrence,
 
 //-----------------------------------------------------------------------------
 // Purpose: find address of input string constant in read only memory
-// Input  : *szString       - 
-//          bNullTerminator - 
-// Output : CMemory
+// Input: *szString - 
+// bNullTerminator - 
+// Output: CMemory
 //-----------------------------------------------------------------------------
 CMemory CModule::FindStringReadOnly(const char* szString, bool bNullTerminator) const
 {
@@ -299,7 +299,7 @@ CMemory CModule::FindStringReadOnly(const char* szString, bool bNullTerminator) 
 	const vector<uint8_t> vBytes = StringToBytes(szString, bNullTerminator);
 	const pair<size_t, const uint8_t*> bytesInfo = std::make_pair<size_t, const uint8_t*>(vBytes.size(), vBytes.data()); // Get the size and data of our bytes.
 
-	// Get start of .rdata section.
+	// Get start of.rdata section.
 	const uint8_t* pBase = reinterpret_cast<uint8_t*>(readOnlyData.m_pSectionBase);
 
 	for (size_t i = 0ull; i < readOnlyData.m_nSectionSize - bytesInfo.first; i++)
@@ -332,8 +332,8 @@ CMemory CModule::FindStringReadOnly(const char* szString, bool bNullTerminator) 
 
 //-----------------------------------------------------------------------------
 // Purpose: find 'free' page in r/w/x sections
-// Input  : nSize - 
-// Output : CMemory
+// Input: nSize - 
+// Output: CMemory
 //-----------------------------------------------------------------------------
 CMemory CModule::FindFreeDataPage(const size_t nSize) const
 {
@@ -395,9 +395,9 @@ CMemory CModule::FindFreeDataPage(const size_t nSize) const
 
 //-----------------------------------------------------------------------------
 // Purpose: get address of a virtual method table by rtti type descriptor name.
-// Input  : *szTableName - 
-//          nRefIndex    - 
-// Output : address of virtual method table, null if not found.
+// Input: *szTableName - 
+// nRefIndex - 
+// Output: address of virtual method table, null if not found.
 //-----------------------------------------------------------------------------
 CMemory CModule::GetVirtualMethodTable(const char* szTableName, const size_t nRefIndex)
 {

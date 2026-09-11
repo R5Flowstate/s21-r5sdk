@@ -57,13 +57,8 @@ namespace rapidjson { typedef ::std::size_t SizeType; }
 #include "thirdparty/imgui/misc/imgui_utility.h"
 #include "thirdparty/imgui/misc/cpp/imgui_stdlib.h"
 #include "thirdparty/imgui/backends/imgui_impl_dx11.h"
+#include "thirdparty/imgui/backends/imgui_impl_dx12.h"
 #include "thirdparty/imgui/backends/imgui_impl_win32.h"
-
-#include "thirdparty/nvapi/pclstats.h"
-#include "thirdparty/nvapi/nvapi.h"
-#include "thirdparty/nvapi/nvapi_lite_common.h"
-
-#include "thirdparty/fidelityfx/ffx_antilag2_dx11.h"
 #endif // !DEDICATED && !PLUGINSDK
 
 

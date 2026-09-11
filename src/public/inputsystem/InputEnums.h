@@ -1,6 +1,6 @@
 //===========================================================================//
 //
-// Purpose: 
+// Purpose
 //
 //===========================================================================//
 #ifndef INPUTENUMS_H
@@ -63,7 +63,7 @@ enum InputEventType_t
 	IE_ControllerUnplugged,	// m_nData contains the controller ID
 	IE_Close,
 	IE_WindowSizeChanged,	// m_nData contains width, m_nData2 contains height, m_nData3 = 0 if not minimized, 1 if minimized
-	IE_PS_CameraUnplugged,  // m_nData contains code for type of disconnect.  
+	IE_PS_CameraUnplugged,  // m_nData contains code for type of disconnect. 
 	IE_PS_Move_OutOfView,   // m_nData contains bool (0, 1) for whether the move is now out of view (1) or in view (0)
 
 	IE_FirstUIEvent = 200,

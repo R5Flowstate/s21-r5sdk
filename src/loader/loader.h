@@ -1,9 +1,11 @@
 #ifndef LOADER_H
 #define LOADER_H
 
-__declspec(dllexport) void DummyExport()
+//-----------------------------------------------------------------------------
+// PE import glue: undecorated extern "C" DummyExport so the exe maps loader.dll first.
+//-----------------------------------------------------------------------------
+extern "C" __declspec(dllexport) void DummyExport()
 {
-	// Required for detours.
 }
 
 #endif // LOADER_H

@@ -4,14 +4,45 @@
 //
 //===========================================================================//
 #include "tier0/memaddr.h"
+#include "tier0/dbg.h"
+#include "tier0/module.h"
+#include "tier0/memvalidate.h"
+#include "tier0/tier0_iface.h"
+#include <intrin.h>
+#pragma intrinsic(_ReturnAddress)
+
+//-----------------------------------------------------------------------------
+// Invalid fluent-chain step accounting (rate-limited Warning, total for boot ledger)
+//-----------------------------------------------------------------------------
+static int s_nInvalidChainCount = 0;
+static constexpr int s_nInvalidChainWarnLimit = 16;
+
+void CMemory_ReportInvalidChain(void)
+{
+	const int nCount = ++s_nInvalidChainCount;
+	if (nCount <= s_nInvalidChainWarnLimit)
+	{
+		Warning(eDLL_T::COMMON,
+			"[CMEMORY] chain step on invalid address (caller %p) -- pattern likely unmatched; result will be null\n",
+			_ReturnAddress());
+	}
+}
+
+int CMemory_GetInvalidChainCount(void)
+{
+	return s_nInvalidChainCount;
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: check array of opcodes starting from current address
-// Input  : &vOpcodeArray - 
-// Output : true if equal, false otherwise
+// Input: &vOpcodeArray - 
+// Output: true if equal, false otherwise
 //-----------------------------------------------------------------------------
 bool CMemory::CheckOpCodes(const vector<uint8_t>& vOpcodeArray) const
 {
+	if (!IsValid())
+		return false;
+
 	uintptr_t ref = ptr;
 
 	// Loop forward in the ptr class member.
@@ -29,10 +60,13 @@ bool CMemory::CheckOpCodes(const vector<uint8_t>& vOpcodeArray) const
 
 //-----------------------------------------------------------------------------
 // Purpose: patch array of opcodes starting from current address
-// Input  : &vOpcodeArray - 
+// Input: &vOpcodeArray - 
 //-----------------------------------------------------------------------------
 void CMemory::Patch(const vector<uint8_t>& vOpcodeArray) const
 {
+	if (!IsValid() || vOpcodeArray.empty())
+		return;
+
 	DWORD oldProt = NULL;
 
 	SIZE_T dwSize = vOpcodeArray.size();
@@ -49,10 +83,13 @@ void CMemory::Patch(const vector<uint8_t>& vOpcodeArray) const
 
 //-----------------------------------------------------------------------------
 // Purpose: patch string constant at current address
-// Input  : *szString - 
+// Input: *szString - 
 //-----------------------------------------------------------------------------
 void CMemory::PatchString(const char* szString) const
 {
+	if (!IsValid() || !szString)
+		return;
+
 	DWORD oldProt = NULL;
 	SIZE_T dwSize =  strlen(szString);
 
@@ -68,14 +105,20 @@ void CMemory::PatchString(const char* szString) const
 
 //-----------------------------------------------------------------------------
 // Purpose: find array of bytes in process memory
-// Input  : *szPattern - 
-//			searchDirect - 
-//			opCodesToScan - 
-//			occurrence - 
-// Output : CMemory
+// Input: *szPattern - 
+// searchDirect - 
+// opCodesToScan - 
+// occurrence - 
+// Output: CMemory
 //-----------------------------------------------------------------------------
 CMemory CMemory::FindPattern(const char* szPattern, const Direction searchDirect, const int opCodesToScan, const ptrdiff_t occurrence) const
 {
+	if (!IsValid())
+	{
+		CMemory_ReportInvalidChain();
+		return CMemory();
+	}
+
 	uint8_t* pScanBytes = reinterpret_cast<uint8_t*>(ptr); // Get the base of the module.
 
 	const vector<uint16_t> PatternBytes = PatternToBytes(szPattern); // Convert our pattern to a byte array.
@@ -121,14 +164,21 @@ CMemory CMemory::FindPattern(const char* szPattern, const Direction searchDirect
 
 //-----------------------------------------------------------------------------
 // Purpose: find array of bytes in process memory starting from current address
-// Input  : *szPattern - 
-//			searchDirect - 
-//			opCodesToScan - 
-//			occurrence - 
-// Output : CMemory
+// Input: *szPattern - 
+// searchDirect - 
+// opCodesToScan - 
+// occurrence - 
+// Output: CMemory
 //-----------------------------------------------------------------------------
 CMemory CMemory::FindPatternSelf(const char* szPattern, const Direction searchDirect, const int opCodesToScan, const ptrdiff_t occurrence)
 {
+	if (!IsValid())
+	{
+		CMemory_ReportInvalidChain();
+		ptr = 0;
+		return *this;
+	}
+
 	uint8_t* pScanBytes = reinterpret_cast<uint8_t*>(ptr); // Get the base of the module.
 
 	const vector<uint16_t> PatternBytes = PatternToBytes(szPattern); // Convert our pattern to a byte array.
@@ -172,9 +222,9 @@ CMemory CMemory::FindPatternSelf(const char* szPattern, const Direction searchDi
 //-----------------------------------------------------------------------------
 // Purpose: resolve all 'call' references to ptr 
 // (This is very slow only use for mass patching.)
-// Input  : sectionBase - 
-//			sectionSize - 
-// Output : vector<CMemory>
+// Input: sectionBase - 
+// sectionSize - 
+// Output: vector<CMemory>
 //-----------------------------------------------------------------------------
 vector<CMemory> CMemory::FindAllCallReferences(const uintptr_t sectionBase, const size_t sectionSize)
 {
@@ -198,35 +248,72 @@ vector<CMemory> CMemory::FindAllCallReferences(const uintptr_t sectionBase, cons
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: ResolveRelativeAddress wrapper
-// Input  : opcodeOffset - 
-//			nextInstructionOffset - 
-// Output : CMemory
+// Purpose: follow a 5-byte E8/E9 rel32; fail-closed if opcode or target is bad
+// Input: opcodeOffset - 
+// nextInstructionOffset - 
+// Output: CMemory
 //-----------------------------------------------------------------------------
 CMemory CMemory::FollowNearCall(const ptrdiff_t opcodeOffset, const ptrdiff_t nextInstructionOffset) const
 {
-	return ResolveRelativeAddress(opcodeOffset, nextInstructionOffset);
+	if (!IsValid())
+	{
+		CMemory_ReportInvalidChain();
+		return CMemory();
+	}
+
+	// E8 call and E9 jmp are both 5-byte rel32.
+	const uint8_t nOp = *reinterpret_cast<uint8_t*>(ptr + opcodeOffset - 1);
+	if (nOp != 0xE8 && nOp != 0xE9)
+	{
+		Warning(eDLL_T::COMMON,
+			"[CMEMORY] FollowNearCall expected E8/E9, got %02X (caller %p)\n",
+			nOp, _ReturnAddress());
+		CMemory_ReportInvalidChain();
+		return CMemory();
+	}
+
+	const CMemory result = ResolveRelativeAddress(opcodeOffset, nextInstructionOffset);
+	if (!result.IsValid())
+		return CMemory();
+
+	if (!Mem_InModule(g_GameDll, result, 1))
+	{
+		Warning(eDLL_T::COMMON,
+			"[CMEMORY] FollowNearCall target %p outside game module (caller %p)\n",
+			result.RCast<void*>(), _ReturnAddress());
+		CMemory_ReportInvalidChain();
+		return CMemory();
+	}
+
+	return result;
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: ResolveRelativeAddressSelf wrapper
-// Input  : opcodeOffset - 
-//			nextInstructionOffset - 
-// Output : CMemory
+// Purpose: FollowNearCall, mutating this
+// Input: opcodeOffset - 
+// nextInstructionOffset - 
+// Output: CMemory
 //-----------------------------------------------------------------------------
 CMemory CMemory::FollowNearCallSelf(const ptrdiff_t opcodeOffset, const ptrdiff_t nextInstructionOffset)
 {
-	return ResolveRelativeAddressSelf(opcodeOffset, nextInstructionOffset);
+	*this = FollowNearCall(opcodeOffset, nextInstructionOffset);
+	return *this;
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: resolves the relative pointer to offset
-// Input  : registerOffset - 
-//			nextInstructionOffset - 
-// Output : CMemory
+// Input: registerOffset - 
+// nextInstructionOffset - 
+// Output: CMemory
 //-----------------------------------------------------------------------------
 CMemory CMemory::ResolveRelativeAddress(const ptrdiff_t registerOffset, const ptrdiff_t nextInstructionOffset) const
 {
+	if (!IsValid())
+	{
+		CMemory_ReportInvalidChain();
+		return CMemory();
+	}
+
 	// Skip register.
 	const uintptr_t skipRegister = ptr + registerOffset;
 
@@ -237,17 +324,30 @@ CMemory CMemory::ResolveRelativeAddress(const ptrdiff_t registerOffset, const pt
 	const uintptr_t nextInstruction = ptr + nextInstructionOffset;
 
 	// Get function location via adding relative Address to next instruction.
-	return CMemory(nextInstruction + relativeAddress);
+	const CMemory result(nextInstruction + relativeAddress);
+	if (!result.IsValid())
+	{
+		CMemory_ReportInvalidChain();
+		return CMemory();
+	}
+	return result;
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: resolves the relative pointer to offset from current address
-// Input  : registerOffset - 
-//			nextInstructionOffset - 
-// Output : CMemory
+// Input: registerOffset - 
+// nextInstructionOffset - 
+// Output: CMemory
 //-----------------------------------------------------------------------------
 CMemory CMemory::ResolveRelativeAddressSelf(const ptrdiff_t registerOffset, const ptrdiff_t nextInstructionOffset)
 {
+	if (!IsValid())
+	{
+		CMemory_ReportInvalidChain();
+		ptr = 0;
+		return *this;
+	}
+
 	// Skip register.
 	const uintptr_t skipRegister = ptr + registerOffset;
 
@@ -259,16 +359,21 @@ CMemory CMemory::ResolveRelativeAddressSelf(const ptrdiff_t registerOffset, cons
 
 	// Get function location via adding relative Address to next instruction.
 	ptr = nextInstruction + relativeAddress;
+	if (!IsValid())
+	{
+		CMemory_ReportInvalidChain();
+		ptr = 0;
+	}
 	return *this;
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: patch virtual method to point to a user set function
-// Input  : virtualTable      - 
-//          *pHookMethod      - 
-//          methodIndex       - 
-//          **pOriginalMethod - 
-// Output : void** via pOriginalMethod
+// Input: virtualTable - 
+// *pHookMethod - 
+// methodIndex - 
+// **pOriginalMethod - 
+// Output: void** via pOriginalMethod
 //-----------------------------------------------------------------------------
 void CMemory::HookVirtualMethod(const uintptr_t virtualTable, const void* pHookMethod, const ptrdiff_t methodIndex, void** ppOriginalMethod)
 {
@@ -295,10 +400,10 @@ void CMemory::HookVirtualMethod(const uintptr_t virtualTable, const void* pHookM
 
 //-----------------------------------------------------------------------------
 // Purpose: patch iat entry to point to a user set function
-// Input  : pImportedMethod - 
-//          pHookMethod - 
-//          ppOriginalMethod -
-// Output : void** via ppOriginalMethod
+// Input: pImportedMethod - 
+// pHookMethod - 
+// ppOriginalMethod -
+// Output: void** via ppOriginalMethod
 //-----------------------------------------------------------------------------
 void CMemory::HookImportedFunction(const uintptr_t pImportedMethod, const void* pHookMethod, void** ppOriginalMethod)
 {

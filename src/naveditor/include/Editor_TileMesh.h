@@ -63,7 +63,7 @@ public:
 	void buildAllTiles();
 	void removeAllTiles();
 
-	void buildAllHulls();
+	void buildAllHulls(const char* hullFilter = nullptr, const float cellSizeOverride = -1.0f, const bool force = false);
 private:
 	// Explicitly disabled copy constructor and copy assignment operator.
 	Editor_TileMesh(const Editor_TileMesh&);

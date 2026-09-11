@@ -1,22 +1,21 @@
 //=====================================================================================//
 //
-// Purpose:
+// Purpose
 //
 // $NoKeywords: $
 //=====================================================================================//
 #include "core/stdafx.h"
 
-#ifndef DEDICATED
 
 #include "engine/gl_rmain.h"
 #include "materialsystem/cmaterialsystem.h"
 
 //-----------------------------------------------------------------------------
 // Purpose: compute the scene coordinates of a point in 3D
-// Input  : &w2sMatrix -
-//          &point -
-//          *pClip -
-// Output : false if the position if off-screen
+// Input: &w2sMatrix -
+// &point -
+// *pClip -
+// Output: false if the position if off-screen
 //-----------------------------------------------------------------------------
 bool ClipTransform(const VMatrix& w2sMatrix, const Vector3D& point, Vector2D* const pClip)
 {
@@ -42,11 +41,11 @@ bool ClipTransform(const VMatrix& w2sMatrix, const Vector3D& point, Vector2D* co
 
 //-----------------------------------------------------------------------------
 // Purpose: translate point to screen position
-// Input  : &view -
-//          &w2sMatrix -
-//          &point -
-//          *pClip -
-// Output : false if the position if off-screen
+// Input: &view -
+// &w2sMatrix -
+// &point -
+// *pClip -
+// Output: false if the position if off-screen
 //-----------------------------------------------------------------------------
 bool ScreenTransform(const CViewSetup& view, const VMatrix& w2sMatrix, const Vector3D& point, Vector2D* const pClip)
 {
@@ -63,11 +62,11 @@ bool ScreenTransform(const CViewSetup& view, const VMatrix& w2sMatrix, const Vec
 
 //-----------------------------------------------------------------------------
 // Purpose: Given an xy screen pos (0-1), return the screen position 
-// Input  : view - 
-//          posX - 
-//          posY - 
-//          *pScreen - 
-// Output : false if the position if off-screen
+// Input: view - 
+// posX - 
+// posY - 
+// *pScreen - 
+// Output: false if the position if off-screen
 //-----------------------------------------------------------------------------
 bool ScreenPosition(const CViewSetup& view, const float posX, const float posY, Vector2D* const pScreen)
 {
@@ -82,14 +81,13 @@ bool ScreenPosition(const CViewSetup& view, const float posX, const float posY, 
 
 //-----------------------------------------------------------------------------
 // Purpose: Given an xy screen pos (0-1), return the screen position 
-// Input  : view - 
-//          &pos - 
-//          *pScreen - 
-// Output : false if the position if off-screen
+// Input: view - 
+// &pos - 
+// *pScreen - 
+// Output: false if the position if off-screen
 //-----------------------------------------------------------------------------
 bool ScreenPosition(const CViewSetup& view, const Vector2D& pos, Vector2D* const pScreen)
 {
 	return ScreenPosition(view, pos.x, pos.y, pScreen);
 }
 
-#endif

@@ -52,6 +52,14 @@ public:
 	inline const CModule::ModuleSections_t& GetSectionByName(const char* szSectionName) const
 	{ return m_ModuleSections.at(szSectionName); }
 
+	// Returns nullptr when the section is absent. Non-throwing; prefer this over
+	// GetSectionByName, whose map::at throws.
+	inline const CModule::ModuleSections_t* FindSectionByName(const char* const szSectionName) const
+	{
+		const ModuleSectionsMap_t::const_iterator it = m_ModuleSections.find(szSectionName);
+		return it == m_ModuleSections.end() ? nullptr : &it->second;
+	}
+
 	inline const ModuleSectionsMap_t& GetSections() const { return m_ModuleSections; }
 	inline QWORD         GetModuleBase(void) const { return m_pModuleBase; }
 	inline DWORD         GetModuleSize(void) const { return m_nModuleSize; }

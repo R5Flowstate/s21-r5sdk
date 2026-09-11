@@ -9,7 +9,12 @@ public:
 
 	inline void AppendVertex(const Vector3D& vec, const Color color)
 	{
-		*m_vertexBuffer = { vec, color };
+		m_vertexBuffer->pos = vec;
+		m_vertexBuffer->col = color;
+#if defined(CLIENT_DLL)
+		m_vertexBuffer->pad[0] = 0;
+		m_vertexBuffer->pad[1] = 0;
+#endif // CLIENT_DLL
 		m_vertexBuffer++;
 
 #ifdef _DEBUG
@@ -25,6 +30,9 @@ private:
 	{
 		Vector3D pos;
 		Color col;
+#if defined(CLIENT_DLL)
+		uint32_t pad[2]; // S21 dynamic vertex stride is 24 bytes.
+#endif // CLIENT_DLL
 	};
 
 	MeshVertex_s* m_vertexBuffer;

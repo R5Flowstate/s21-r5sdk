@@ -1,8 +1,9 @@
+// Dual-wrapping this header freezes the dedi half in shared PCH and hides client decls.
 #ifndef GLOBAL_H
 #define GLOBAL_H
 
 //-------------------------------------------------------------------------
-// ENGINE                                                                 |
+// ENGINE |
 extern ConVar* single_frame_shutdown_for_reload;
 extern ConVar* old_gather_props;
 
@@ -47,7 +48,7 @@ extern ConVar* stream_overlay_mode;
 extern ConVar* gpu_driven_tex_stream;
 #endif // !DEDICATED
 //-------------------------------------------------------------------------
-// SHARED                                                                 |
+// SHARED |
 //extern ConVar* eula_version;
 //extern ConVar* eula_version_accepted;
 
@@ -56,13 +57,14 @@ extern ConVar* language_cvar;
 extern ConVar* voice_noxplat;
 
 extern ConVar* platform_user_id;
+void PlatformUserId_SetFromPlatform(const char* value);
 
 #ifndef DEDICATED
 extern ConVar* name_cvar;
 #endif // !DEDICATED
 
 //-------------------------------------------------------------------------
-// SERVER                                                                 |
+// SERVER |
 #ifndef CLIENT_DLL
 extern ConVar* ai_script_nodes_draw;
 extern ConVar* navmesh_move_along_surface_asserts;
@@ -102,7 +104,7 @@ extern ConVar* sv_visualizetraces;
 extern ConVar* sv_visualizetraces_duration;
 extern ConVar* bhit_enable;
 //-------------------------------------------------------------------------
-// CLIENT                                                                 |
+// CLIENT |
 #ifndef DEDICATED
 extern ConVar* cl_threaded_bone_setup;
 
@@ -118,19 +120,15 @@ extern ConVar* gamepad_custom_enabled;
 extern ConVar* gamepad_custom_assist_on;
 extern ConVar* gamepad_look_curve;
 
-extern ConVar* particle_overlay;
-extern ConVar* particle_overlay_old;
-extern ConVar* particle_overlay_list_tally;
-
 extern ConVar* hudchat_visibility;
 extern ConVar* hudchat_new_message_fade_duration;
 extern ConVar* hudchat_new_message_shown_duration;
 #endif // !DEDICATED
 //-------------------------------------------------------------------------
-// FILESYSTEM                                                             |
+// FILESYSTEM |
 extern ConVar* fs_showAllReads;
 //-------------------------------------------------------------------------
-// NETCHANNEL                                                             |
+// NETCHANNEL |
 extern ConVar* net_usesocketsforloopback;
 
 extern ConVar* net_data_block_enabled;
@@ -145,16 +143,17 @@ extern ConVar ssl_verify_peer;
 extern ConVar curl_timeout;
 extern ConVar curl_debug;
 //-------------------------------------------------------------------------
-// RUI                                                                    |
+// RUI |
 #ifndef DEDICATED
 extern ConVar* rui_defaultDebugFontFace;
 #endif // !DEDICATED
 //-------------------------------------------------------------------------
-// MILES                                                                  |
+// MILES |
 #ifndef DEDICATED
 extern ConVar* miles_language;
 #endif
 
+void Bridge_ApplyLaunchConVarTokens(void);
 void ConVar_InitShipped(void);
 void ConVar_PurgeShipped(void);
 void ConVar_PurgeHostNames(void);

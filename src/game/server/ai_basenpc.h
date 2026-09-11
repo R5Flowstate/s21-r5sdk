@@ -49,8 +49,6 @@ public:
 	CAI_BaseNPC** AccessAIs();
 	int				NumAIs();
 
-	void AddAI(CAI_BaseNPC* pAI);
-	void RemoveAI(CAI_BaseNPC* pAI);
 
 	bool FindAI(CAI_BaseNPC* pAI) { return (m_AIs.Find(pAI) != m_AIs.InvalidIndex()); }
 
@@ -73,7 +71,7 @@ extern CAI_Manager* g_AI_Manager;
 
 //=============================================================================
 // Purpose: Some bridges a little more complicated to allow behavior to see 
-//			what base class would do or control order in which it's done
+// what base class would do or control order in which it's done
 //=============================================================================
 
 abstract_class IAI_BehaviorBridge
@@ -85,11 +83,11 @@ public:
 	// Non-standard bridge methods
 	virtual void 		 BehaviorBridge_GatherConditions() {}
 	// TODO: confirm if this interface is correct for R5!
-	//virtual int 		 BehaviorBridge_SelectSchedule() { return 0; }
-	//virtual int 		 BehaviorBridge_TranslateSchedule(int scheduleType) { return 0; }
-	//virtual float		 BehaviorBridge_GetJumpGravity() const { return 0; }
-	//virtual bool		 BehaviorBridge_IsJumpLegal(const Vector3D & startPos, const Vector3D& apex, const Vector3D& endPos, float maxUp, float maxDown, float maxDist) const { return 0; }
-	//virtual bool		 BehaviorBridge_MovementCost(int moveType, const Vector3D& vecStart, const Vector3D& vecEnd, float* pCost) { return 0; }
+	//virtual int BehaviorBridge_SelectSchedule { return 0; }
+	//virtual int BehaviorBridge_TranslateSchedule(int scheduleType) { return 0; }
+	//virtual float BehaviorBridge_GetJumpGravity const { return 0; }
+	//virtual bool BehaviorBridge_IsJumpLegal(const Vector3D & startPos, const Vector3D& apex, const Vector3D& endPos, float maxUp, float maxDown, float maxDist) const { return 0; }
+	//virtual bool BehaviorBridge_MovementCost(int moveType, const Vector3D& vecStart, const Vector3D& vecEnd, float* pCost) { return 0; }
 };
 
 //=============================================================================
@@ -116,7 +114,7 @@ struct AIScheduleState_t
 	bool                 bScheduleWasInterrupted;
 	bool                 bStopRunTasks;
 
-	//DECLARE_SIMPLE_DATADESC();
+	//DECLARE_SIMPLE_DATADESC;
 };
 
 class COneThreadRandomStream : public IUniformRandomStream

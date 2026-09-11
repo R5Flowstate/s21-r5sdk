@@ -1,3 +1,12 @@
+#if defined(CLIENT_DLL)
+//=============================================================================//
+//
+// Purpose: Memory allocation. S21 does not export CreateGlobalMemAlloc; use CRT.
+//
+//=============================================================================//
+#include "memstd.h"
+
+#else // !CLIENT_DLL
 //=============================================================================//
 // 
 // Purpose: Memory allocation override functions
@@ -218,7 +227,7 @@ extern "C"
 
         MemAllocSingleton()->Free(pAlloc);
     }
-    // aligned ----------------------------------------------------------------
+    // aligned --------------------------------
     ALLOC_CALL void* __cdecl _aligned_malloc(size_t const nSize, size_t const nAlign)
     {
         return _aligned_malloc_base(nSize, nAlign);
@@ -237,7 +246,7 @@ extern "C"
     {
         _aligned_free_base(pBlock);
     }
-    // aligned offset base ----------------------------------------------------
+    // aligned offset base --------------------------
     ALLOC_CALL void* __cdecl _aligned_offset_malloc_base(
         size_t const nSize, size_t const nAlign, size_t const nOffset)
     {
@@ -256,7 +265,7 @@ extern "C"
         Assert(IsPC() || 0);
         return NULL;
     }
-    // aligned offset ---------------------------------------------------------
+    // aligned offset -----------------------------
     ALLOC_CALL void* __cdecl _aligned_offset_malloc(
         size_t const nSize, size_t const nAlign, size_t const nOffset)
     {
@@ -468,3 +477,4 @@ extern "C"
     }
 #endif // _DEBUG || USE_MEM_DEBUG
 } // end extern "C"
+#endif // CLIENT_DLL

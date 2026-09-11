@@ -69,10 +69,23 @@ void Pak_OpenAssociatedStreamingFiles(PakLoadedInfo_s* const loadedInfo, PakLoad
 
         const int fileNumber = FS_OpenAsyncFile(streamingFilePath, loadedInfo->logChannel, nullptr);
 
-        // make sure we successfully loaded mandatory streaming files, as we
-        // would otherwise error in the game itself
+        // Mandatory stream packs: real missing streams still fatal. HD
+        // (.opt.starpak) may be absent on slim client packs -- warn and keep
+        // going with FS_ASYNC_FILE_INVALID so the rest of the set can load.
         if (set == STREAMING_SET_MANDATORY && fileNumber == FS_ASYNC_FILE_INVALID)
-            Error(eDLL_T::RTECH, EXIT_FAILURE, "Error opening streaming file '%s'\n", streamingFilePath);
+        {
+            if (V_stristr(streamingFilePath, ".opt.starpak"))
+            {
+                Warning(eDLL_T::RTECH,
+                    "[PAK-STREAM] optional HD stream missing (ignored): '%s'\n",
+                    streamingFilePath);
+            }
+            else
+            {
+                Error(eDLL_T::RTECH, EXIT_FAILURE,
+                    "Error opening streaming file '%s'\n", streamingFilePath);
+            }
+        }
 
         streamInfo.streamFileNumber[numStreamFiles++] = fileNumber;
     }

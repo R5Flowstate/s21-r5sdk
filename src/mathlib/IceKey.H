@@ -1,6 +1,6 @@
 // Purpose: Header file for the C++ ICE encryption class.
-//			Taken from public domain code, as written by Matthew Kwan - July 1996
-//			http://www.darkside.com.au/ice/
+// Taken from public domain code, as written by Matthew Kwan - July 1996
+// http://www.darkside.com.au/ice/
 
 #ifndef _IceKey_H
 #define _IceKey_H
@@ -18,13 +18,13 @@ although it is not yet certain whether it is as secure as its key size.
 For levels n greater than zero, a 16n-round cipher is used, taking 8n-byte keys. 
 Although not as fast as level 0, these are very very secure. 
 
-Before an IceKey can be used to encrypt data, its key schedule must be set with the set() member function. 
+Before an IceKey can be used to encrypt data, its key schedule must be set with the set member function. 
 The length of the key required is determined by the level, as described above. 
 
-The member functions encrypt() and decrypt() encrypt and decrypt respectively data 
+The member functions encrypt and decrypt encrypt and decrypt respectively data 
 in blocks of eight characters, using the specified key. 
 
-Two functions keySize() and blockSize() are provided 
+Two functions keySize and blockSize are provided 
 which return the key and block size respectively, measured in bytes. 
 The key size is determined by the level, while the block size is always 8. 
 

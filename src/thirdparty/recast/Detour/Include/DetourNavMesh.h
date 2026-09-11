@@ -430,7 +430,7 @@ struct dtCell
 #if DT_NAVMESH_SET_VERSION >= 9
 	unsigned char data[27]; // TODO: reverse this, always appears 0.
 #else
-	unsigned char data[52]; // TODO: reverse this, always appears 0.
+	unsigned char data[52]; // Verified zero on disk in shipped meshes; runtime scratch.
 #endif
 };
 
@@ -573,7 +573,7 @@ struct dtMeshHeader
 
 	unsigned int userId;	///< The user defined id of the tile.
 	int polyCount;			///< The number of polygons in the tile.
-	int polyMapCount;
+	int polyMapCount;		///< Words per polygon in #dtMeshTile::polyMap, == ceil(polyCount/32). 0 disables the map.
 	int vertCount;			///< The number of vertices in the tile.
 	int maxLinkCount;		///< The number of allocated links.
 
@@ -625,7 +625,14 @@ public:
 	unsigned int linksFreeList;			///Index to the next free link.
 	dtMeshHeader* header;				///The tile header.
 	dtPoly* polys;						///The tile polygons. [Size: dtMeshHeader::polyCount]
-	unsigned int* polyMap;				///TODO: needs to be reversed.
+	/// Per-polygon bitmask of the polygons sharing its connected component within
+	/// this tile. Row stride is dtMeshHeader::polyMapCount words (ceil(polyCount/32)),
+	/// low word first; bit i of row p means "polygon i is reachable from polygon p
+	/// without leaving the tile". Every polygon is set in its own row, and the rows
+	/// form a partition equal to the adjacency in dtPoly::neis with external links
+	/// ignored -- so this is a precomputed flood fill, not extra topology.
+	/// [Size: dtMeshHeader::polyMapCount * dtMeshHeader::polyCount]
+	unsigned int* polyMap;
 	rdVec3D* verts;						///The tile vertices. [Size: dtMeshHeader::vertCount]
 	dtLink* links;						///The tile links. [Size: dtMeshHeader::maxLinkCount]
 	dtPolyDetail* detailMeshes;			///The tile's detail sub-meshes. [Size: dtMeshHeader::detailMeshCount]

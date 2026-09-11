@@ -12,7 +12,7 @@
 #include "ai_npcstate.h"
 
 //###########################################################
-//  >> HintNodeData
+// >> HintNodeData
 //
 // This is a chunk of data that's passed to a hint node entity
 // when it's created from a CNodeEnt.
@@ -47,7 +47,7 @@ struct HintNodeData
 
 	int                nWCNodeID; // Node ID assigned by worldcraft (not same as engine!)
 
-	//DECLARE_SIMPLE_DATADESC();
+	//DECLARE_SIMPLE_DATADESC;
 };
 
 //-----------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // $Header: $
 // $NoKeywords: $
@@ -12,7 +12,7 @@
 #include "tier1/strtools.h"
 #include "tier1/characterset.h"
 
-// memdbgon must be the last include file in a .cpp file!!!
+// memdbgon must be the last include file in a.cpp file!!!
 #include "tier0/memdbgon.h"
 
 
@@ -196,7 +196,7 @@ char CUtlCharConversion::FindConversion(const char* pString, ssize_t* pLength)
 CUtlBuffer::CUtlBuffer(ssize_t growSize, ssize_t initSize, int nFlags) :
 	m_Error(0)
 {
-	//MEM_ALLOC_CREDIT();
+	//MEM_ALLOC_CREDIT;
 	m_Memory.Init(growSize, initSize);
 	m_Get = 0;
 	m_Put = 0;
@@ -442,7 +442,7 @@ void* CUtlBuffer::DetachMemory()
 //-----------------------------------------------------------------------------
 void CUtlBuffer::EnsureCapacity(ssize_t num)
 {
-	//MEM_ALLOC_CREDIT();
+	//MEM_ALLOC_CREDIT;
 	// Add one extra for the null termination
 	num += 1;
 	if (m_Memory.IsExternallyAllocated())
@@ -759,7 +759,7 @@ void CUtlBuffer::GetString(char* pString, ssize_t nMaxChars)
 	// Read the terminating NULL in binary formats
 	if (!IsText())
 	{
-		//VerifyEquals(GetChar(), 0);
+		//VerifyEquals(GetChar, 0);
 	}
 }
 
@@ -769,7 +769,7 @@ void CUtlBuffer::GetString(char* pString, ssize_t nMaxChars)
 //-----------------------------------------------------------------------------
 void CUtlBuffer::GetLine(char* pLine, ssize_t nMaxChars)
 {
-	//Assert( IsText() && !ContainsCRLF() );
+	//Assert( IsText && !ContainsCRLF );
 
 	if (!IsValid())
 	{
@@ -1267,7 +1267,7 @@ bool CUtlBuffer::GetToken(const char* pToken)
 
 //-----------------------------------------------------------------------------
 // (For text buffers only)
-// Parse a token from the buffer:
+// Parse a token from the buffer
 // Grab all text that lies between a starting delimiter + ending delimiter
 // (skipping whitespace that leads + trails both delimiters).
 // Note the delimiter checks are case-insensitive.
@@ -1355,7 +1355,8 @@ parseFailed:
 //-----------------------------------------------------------------------------
 ssize_t CUtlBuffer::ParseToken(characterset_t* pBreaks, char* pTokenBuf, ssize_t nMaxLen, bool bParseComments)
 {
-	Assert(nMaxLen > 0);
+	if (nMaxLen <= 0)
+		return -1;
 	pTokenBuf[0] = 0;
 
 	// skip whitespace + comments
@@ -1409,6 +1410,8 @@ ssize_t CUtlBuffer::ParseToken(characterset_t* pBreaks, char* pTokenBuf, ssize_t
 	// parse single characters
 	if (IN_CHARACTERSET(*pBreaks, c))
 	{
+		if (nMaxLen < 2)
+			return -1;
 		pTokenBuf[0] = c;
 		pTokenBuf[1] = 0;
 		return 1;
@@ -1615,7 +1618,7 @@ bool CUtlBuffer::OnGetOverflow(ssize_t nSize)
 //-----------------------------------------------------------------------------
 bool CUtlBuffer::PutOverflow(ssize_t nSize)
 {
-	//MEM_ALLOC_CREDIT();
+	//MEM_ALLOC_CREDIT;
 
 	if (m_Memory.IsExternallyAllocated())
 	{
@@ -1706,7 +1709,7 @@ bool CUtlBuffer::IsBigEndian(void)
 
 //-----------------------------------------------------------------------------
 // null terminate the buffer
-// NOTE: Pass in nPut here even though it is just a copy of m_Put.  This is almost always called immediately 
+// NOTE: Pass in nPut here even though it is just a copy of m_Put. This is almost always called immediately 
 // after modifying m_Put and this lets it stay in a register and avoid LHS on PPC.
 //-----------------------------------------------------------------------------
 void CUtlBuffer::AddNullTermination(ssize_t nPut)

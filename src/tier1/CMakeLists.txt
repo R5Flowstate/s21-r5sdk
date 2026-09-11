@@ -1,5 +1,9 @@
 cmake_minimum_required( VERSION 3.16 )
-add_module( "lib" "tier1" "vpc" ${FOLDER_CONTEXT} TRUE TRUE )
+
+# Dual tier1: tier1 (server) + tier1_cl (client inject).
+# convar.h/cpp + cvar_iface.cpp gate on CLIENT_DLL for layout / resolve path.
+macro( add_tier1_lib LIB_NAME )
+add_module( "lib" ${LIB_NAME} "vpc" ${FOLDER_CONTEXT} TRUE TRUE )
 
 start_sources()
 
@@ -45,4 +49,14 @@ file( GLOB TIER1_PUBLIC_HEADERS
 end_sources()
 
 target_compile_definitions( ${PROJECT_NAME} PRIVATE "MEM_DEBUG_CLASSNAME" )
+if( ${LIB_NAME} STREQUAL "tier1_cl" )
+target_compile_definitions( ${PROJECT_NAME} PRIVATE
+    "CLIENT_DLL"
+    "GAMEDLL_S21"
+)
+endif()
 target_include_directories( ${PROJECT_NAME} PRIVATE "${ENGINE_SOURCE_DIR}/tier0/" )
+endmacro()
+
+add_tier1_lib( "tier1" )
+add_tier1_lib( "tier1_cl" )

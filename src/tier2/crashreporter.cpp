@@ -6,13 +6,14 @@
 #include "tier0/crashhandler.h"
 #include "tier0/cpu.h"
 #include "tier0/commandline.h"
+#include "tier1/cvar.h"
 #include "tier2/curlutils.h"
 #include "tier2/crashreporter.h"
 
 static ConVar backtrace_enabled("backtrace_enabled", "1", FCVAR_RELEASE, "Whether to report fatal errors to the collection server");
 static ConVar backtrace_hostname("backtrace_hostname", "submit.backtrace.io", FCVAR_RELEASE, "Holds the error collection server hostname");
-static ConVar backtrace_universe("backtrace_universe", "r5reloaded", FCVAR_RELEASE, "Holds the error collection server hosted instance");
-static ConVar backtrace_token("backtrace_token", "f178fd48d89c8fec7f8b6404ae6dae591c330fd3e2599cab888788033944ec98", FCVAR_RELEASE, "Holds the error collection server submission token");
+static ConVar backtrace_universe("backtrace_universe", "sl-6556232ce754460e9d00aa5add149582", FCVAR_RELEASE, "Holds the error collection server hosted instance");
+static ConVar backtrace_token("backtrace_token", "196e7fb990dd91e3c6bc088a42c2f0cea36a1c9dc7118abdfc6f78f99ec1511c", FCVAR_RELEASE, "Holds the error collection server submission token");
 
 static inline bool CrashReporter_ShowMessageBox()
 {
@@ -27,26 +28,40 @@ static inline bool CrashReporter_ShowMessageBox()
 	return false;
 }
 
+#ifdef CLIENT_DLL
+static bool CrashReporter_ClientEulaAccepted()
+{
+	if (!g_pCVar)
+		return false;
+
+	ConVar* const pCur = g_pCVar->FindVar("eula_version");
+	ConVar* const pAcc = g_pCVar->FindVar("eula_version_accepted");
+	if (!pCur || !pAcc)
+		return false;
+
+	const int nAcc = pAcc->GetInt();
+	return nAcc > 0 && nAcc >= pCur->GetInt();
+}
+#endif // CLIENT_DLL
+
 static inline bool CrashReporter_ShouldSubmitReport()
 {
-	return false;
+	if (ConVar_IsRegistered())
+	{
+		if (!backtrace_enabled.GetBool())
+			return false;
+#ifndef CLIENT_DLL
+		return true;
+#else
+		return CrashReporter_ClientEulaAccepted();
+#endif
+	}
 
-	//if (!ConVar_IsRegistered())
-	//{
-		// Can't check if the user accepted the EULA or not, show a prompt instead.
-	//	if (!CrashReporter_ShowMessageBox())
-	//		return false;
-	//}
-	//else
-	//{
-	//	if (!backtrace_enabled.GetBool())
-	//		return false;
-
-	//	if (!IsEULAUpToDate())
-	//		return false;
-	//}
-
-	//return true;
+#ifndef CLIENT_DLL
+	return true;
+#else
+	return CrashReporter_ShowMessageBox();
+#endif
 }
 
 static inline string CrashReporter_FormatAttributes(const CCrashHandler* const handler)
@@ -54,7 +69,7 @@ static inline string CrashReporter_FormatAttributes(const CCrashHandler* const h
 	const CPUInformation& pi = GetCPUInformation();
 	const CrashHardWareInfo_s& hi = handler->GetHardwareInfo();
 
-	const char* const format = "uuid=%s&" "build_id=%lld&"
+	const char* const format = "uuid=%s&" "build_id=%lld&" "role=%s&"
 		"cpu_model=%s&" "cpu_speed=%lf GHz&" "gpu_model=%s&" "gpu_flags=%lu&"
 		"ram_phys_total=%.2lf MiB&" "ram_phys_avail=%.2lf MiB&"
 		"ram_virt_total=%.2lf MiB&" "ram_virt_avail=%.2lf MiB&"
@@ -64,6 +79,11 @@ static inline string CrashReporter_FormatAttributes(const CCrashHandler* const h
 	const MEMORYSTATUSEX& ms = hi.memoryStatus;
 
 	return Format(format, g_LogSessionUUID.c_str(), g_SDKDll.GetNTHeaders()->FileHeader.TimeDateStamp,
+#ifdef CLIENT_DLL
+		"client",
+#else
+		"server",
+#endif
 		pi.m_szProcessorBrand, (f64)(pi.m_Speed / 1000000000.0), dd.DeviceString, dd.StateFlags,
 		(f64)(ms.ullTotalPhys    / (1024.0*1024.0)), (f64)(ms.ullAvailPhys    / (1024.0*1024.0)),
 		(f64)(ms.ullTotalVirtual / (1024.0*1024.0)), (f64)(ms.ullAvailVirtual / (1024.0*1024.0)),

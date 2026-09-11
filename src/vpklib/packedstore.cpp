@@ -1,4 +1,4 @@
-﻿//=============================================================================//
+//=============================================================================//
 //
 // Purpose: Valve Pak utility class.
 //
@@ -7,7 +7,7 @@
 //
 // Note: VPK's are created in pairs of a directory file and pack file(s).
 // - <locale><target>_<level>.bsp.pak000_dir.vpk --> directory file.
-// - <target>_<level>.bsp.pak000_<patch>.vpk ------> pack file.
+// - <target>_<level>.bsp.pak000_<patch>.vpk ----> pack file.
 // 
 // The directory file contains the entire directory tree of the VPK. The
 // filesystem essentially mounts this as additional paths to search through.
@@ -37,7 +37,7 @@ extern CFileSystem_Stdio* FileSystem();
 
 //-----------------------------------------------------------------------------
 // Purpose: gets the LZHAM compression level
-// output : lzham_compress_level
+// output: lzham_compress_level
 //-----------------------------------------------------------------------------
 static lzham_compress_level DetermineCompressionLevel(const char* compressionLevel)
 {
@@ -87,9 +87,9 @@ void CPackedStoreBuilder::InitLzDecoder(void)
 
 //-----------------------------------------------------------------------------
 // Purpose: gets the level name from the directory file name
-// Input  : &dirFileName - 
-//          &dirBaseName - <- level name as string (e.g. "englishclient_mp_rr_box")
-// Output : true on success, false otherwise
+// Input: &dirFileName - 
+// &dirBaseName - <- level name as string (e.g. "englishclient_mp_rr_box")
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool PackedStore_GetDirBaseName(const CUtlString& dirFileName, CUtlString& dirBaseName)
 {
@@ -107,10 +107,10 @@ bool PackedStore_GetDirBaseName(const CUtlString& dirFileName, CUtlString& dirBa
 
 //-----------------------------------------------------------------------------
 // Purpose: gets the parts of the directory file name
-// Input  : &dirFileName  - 
-//          nCaptureGroup - <- (1 = locale + target, 2 = level)
-//          &dirBaseName  - <- part of directory file name as string
-// Output : true on success, false otherwise
+// Input: &dirFileName - 
+// nCaptureGroup - <- (1 = locale + target, 2 = level)
+// &dirBaseName - <- part of directory file name as string
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool PackedStore_GetDirNameParts(const CUtlString& dirFileName, const int nCaptureGroup, CUtlString& dirNameParts)
 {
@@ -130,10 +130,10 @@ bool PackedStore_GetDirNameParts(const CUtlString& dirFileName, const int nCaptu
 
 //-----------------------------------------------------------------------------
 // Purpose: formats the file entry path
-// Input  : &filePath - 
-//          &fileName - 
-//          &fileExt  - 
-// Output : formatted entry path
+// Input: &filePath - 
+// &fileName - 
+// &fileExt - 
+// Output: formatted entry path
 //-----------------------------------------------------------------------------
 static CUtlString FormatEntryPath(const CUtlString& filePath,
 	const CUtlString& fileName, const CUtlString& fileExt)
@@ -150,11 +150,25 @@ static CUtlString FormatEntryPath(const CUtlString& filePath,
 	return result;
 }
 
+static bool PackedStore_IsSafeEntryPath(const char* pPath)
+{
+	if (!pPath || !pPath[0])
+		return false;
+
+	if (!V_IsValidPath(pPath))
+		return false;
+
+	if (Q_strstr(pPath, ":") || Q_strstr(pPath, "\\") || Q_strstr(pPath, "//"))
+		return false;
+
+	return true;
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: determines whether the file should be pruned from the build list
-// Input  : &filePath   - 
-//          &ignoreList - 
-// Output : true if it should be pruned, false otherwise
+// Input: &filePath - 
+// &ignoreList - 
+// Output: true if it should be pruned, false otherwise
 //-----------------------------------------------------------------------------
 static bool ShouldPrune(const CUtlString& filePath, CUtlVector<CUtlString>& ignoreList)
 {
@@ -203,9 +217,9 @@ static bool ShouldPrune(const CUtlString& filePath, CUtlVector<CUtlString>& igno
 
 //-----------------------------------------------------------------------------
 // Purpose: gets the manifest file associated with the VPK name (must be freed after wards)
-// Input  : &workspacePath - 
-//          &manifestFile  - 
-// Output : KeyValues (build manifest pointer)
+// Input: &workspacePath - 
+// &manifestFile - 
+// Output: KeyValues (build manifest pointer)
 //-----------------------------------------------------------------------------
 static KeyValues* GetManifest(const CUtlString& workspacePath, const CUtlString& manifestFile)
 {
@@ -224,9 +238,9 @@ static KeyValues* GetManifest(const CUtlString& workspacePath, const CUtlString&
 
 //-----------------------------------------------------------------------------
 // Purpose: gets the contents from the global ignore list (.vpkignore)
-// Input  : &ignoreList    - 
-//			&workspacePath - 
-// Output : a string vector of ignored directories/files and extensions
+// Input: &ignoreList - 
+// &workspacePath - 
+// Output: a string vector of ignored directories/files and extensions
 //-----------------------------------------------------------------------------
 static bool GetIgnoreList(CUtlVector<CUtlString>& ignoreList, const CUtlString& workspacePath)
 {
@@ -269,20 +283,30 @@ static bool GetIgnoreList(CUtlVector<CUtlString>& ignoreList, const CUtlString& 
 
 //-----------------------------------------------------------------------------
 // Purpose: obtains and returns the entry block to the vector
-// Input  : &entryBlocks   - 
-//          hDirectoryFile - 
-// output : vector<VPKEntryBlock_t>
+// Input: &entryBlocks - 
+// hDirectoryFile - 
+// output: vector<VPKEntryBlock_t>
 //-----------------------------------------------------------------------------
-static void GetEntryBlocks(CUtlVector<VPKEntryBlock_t>& entryBlocks, FileHandle_t hDirectoryFile)
+static void GetEntryBlocks(CUtlVector<VPKEntryBlock_t>& entryBlocks, FileHandle_t hDirectoryFile, uint32_t nDirectorySize)
 {
 	CUtlString fileName, filePath, fileExtension;
+	const ptrdiff_t nDirStart = FileSystem()->Tell(hDirectoryFile);
 
 	while (!(fileExtension = FileSystem()->ReadString(hDirectoryFile)).IsEmpty())
 	{
+		if (nDirectorySize && (FileSystem()->Tell(hDirectoryFile) - nDirStart) > static_cast<ptrdiff_t>(nDirectorySize))
+			return;
+
 		while (!(filePath = FileSystem()->ReadString(hDirectoryFile)).IsEmpty())
 		{
+			if (nDirectorySize && (FileSystem()->Tell(hDirectoryFile) - nDirStart) > static_cast<ptrdiff_t>(nDirectorySize))
+				return;
+
 			while (!(fileName = FileSystem()->ReadString(hDirectoryFile)).IsEmpty())
 			{
+				if (nDirectorySize && (FileSystem()->Tell(hDirectoryFile) - nDirStart) > static_cast<ptrdiff_t>(nDirectorySize))
+					return;
+
 				filePath.AppendSlash();
 				const CUtlString svFilePath = FormatEntryPath(filePath, fileName, fileExtension);
 
@@ -294,10 +318,10 @@ static void GetEntryBlocks(CUtlVector<VPKEntryBlock_t>& entryBlocks, FileHandle_
 
 //-----------------------------------------------------------------------------
 // Purpose: scans the input directory and returns the values to the vector if path exists in manifest
-// Input  : &entryValues   - 
-//          *workspacePath - 
-//          *dirFileName   - 
-// Output : true on success, false otherwise
+// Input: &entryValues - 
+// *workspacePath - 
+// *dirFileName - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 static bool GetEntryValues(CUtlVector<VPKKeyValues_t>& entryValues, 
 	const CUtlString& workspacePath, const CUtlString& dirFileName)
@@ -361,9 +385,9 @@ static bool GetEntryValues(CUtlVector<VPKKeyValues_t>& entryValues,
 
 //-----------------------------------------------------------------------------
 // Purpose: builds the VPK manifest file
-// Input  : &entryBlocks   - 
-//          &workspacePath - 
-//          &manifestName  - 
+// Input: &entryBlocks - 
+// &workspacePath - 
+// &manifestName - 
 //-----------------------------------------------------------------------------
 static void BuildManifest(const CUtlVector<VPKEntryBlock_t>& entryBlocks, const CUtlString& workspacePath, const CUtlString& manifestName)
 {
@@ -401,8 +425,8 @@ static void BuildManifest(const CUtlVector<VPKEntryBlock_t>& entryBlocks, const 
 
 //-----------------------------------------------------------------------------
 // Purpose: validates extraction result with precomputed CRC32 hash
-// Input  : &assetPath - 
-//        : nFileCRC   - 
+// Input: &assetPath - 
+//: nFileCRC - 
 //-----------------------------------------------------------------------------
 static void ValidateCRC32PostDecomp(const CUtlString& assetPath, const uint32_t nFileCRC)
 {
@@ -430,10 +454,10 @@ static void ValidateCRC32PostDecomp(const CUtlString& assetPath, const uint32_t 
 
 //-----------------------------------------------------------------------------
 // Purpose: attempts to deduplicate a chunk of data by comparing it to existing chunks
-// Input  : *pEntryBuffer - 
-//          &descriptor   - 
-//          chunkIndex    - 
-// Output : true if the chunk was deduplicated, false otherwise
+// Input: *pEntryBuffer - 
+// &descriptor - 
+// chunkIndex - 
+// Output: true if the chunk was deduplicated, false otherwise
 //-----------------------------------------------------------------------------
 bool CPackedStoreBuilder::Deduplicate(const uint8_t* pEntryBuffer, VPKChunkDescriptor_t& descriptor, const size_t chunkIndex)
 {
@@ -455,9 +479,9 @@ bool CPackedStoreBuilder::Deduplicate(const uint8_t* pEntryBuffer, VPKChunkDescr
 
 //-----------------------------------------------------------------------------
 // Purpose: packs all files from workspace path into VPK file
-// Input  : &vpkPair       - 
-//          *workspaceName - 
-//          *buildPath     - 
+// Input: &vpkPair - 
+// *workspaceName - 
+// *buildPath - 
 //-----------------------------------------------------------------------------
 void CPackedStoreBuilder::PackStore(const VPKPair_t& vpkPair, const char* workspaceName, const char* buildPath)
 {
@@ -591,8 +615,8 @@ void CPackedStoreBuilder::PackStore(const VPKPair_t& vpkPair, const char* worksp
 
 //-----------------------------------------------------------------------------
 // Purpose: rebuilds manifest and extracts all files from specified VPK file
-// Input  : &vpkDirectory  - 
-//          &workspaceName - 
+// Input: &vpkDirectory - 
+// &workspaceName - 
 //-----------------------------------------------------------------------------
 void CPackedStoreBuilder::UnpackStore(const VPKDir_t& vpkDir, const char* workspaceName)
 {
@@ -646,6 +670,13 @@ void CPackedStoreBuilder::UnpackStore(const VPKDir_t& vpkDir, const char* worksp
 
 			const char* pEntryPath = entryBlock.m_EntryPath.Get();
 
+			if (!PackedStore_IsSafeEntryPath(pEntryPath))
+			{
+				Warning(eDLL_T::FS, "Skipping unpack entry with unsafe path ('%s')\n",
+					pEntryPath ? pEntryPath : "");
+				continue;
+			}
+
 			CUtlString filePath;
 			filePath.Format("%s%s", workspacePath.Get(), pEntryPath);
 
@@ -665,23 +696,37 @@ void CPackedStoreBuilder::UnpackStore(const VPKDir_t& vpkDir, const char* worksp
 			{
 				const VPKChunkDescriptor_t& fragment = entryBlock.m_Fragments[k];
 
+				if (fragment.m_nCompressedSize > VPK_ENTRY_MAX_LEN ||
+					fragment.m_nUncompressedSize > VPK_ENTRY_MAX_LEN)
+				{
+					Error(eDLL_T::FS, NO_ERROR, "Chunk #%i within entry #%i in block #%hu exceeds max size (comp=%llu uncomp=%llu)\n",
+						k, j, packFileIndex,
+						static_cast<unsigned long long>(fragment.m_nCompressedSize),
+						static_cast<unsigned long long>(fragment.m_nUncompressedSize));
+					break;
+				}
+
+				const ssize_t nCompSize = static_cast<ssize_t>(fragment.m_nCompressedSize);
+
 				FileSystem()->Seek(hPackFile, fragment.m_nPackFileOffset, FileSystemSeek_t::FILESYSTEM_SEEK_HEAD);
-				FileSystem()->Read(pSourceBuffer.get(), fragment.m_nCompressedSize, hPackFile);
+				const ssize_t nGot = FileSystem()->Read(pSourceBuffer.get(), nCompSize, hPackFile);
+				if (nGot != nCompSize)
+				{
+					Error(eDLL_T::FS, NO_ERROR, "Chunk #%i within entry #%i in block #%hu short read (%zd/%zd)\n",
+						k, j, packFileIndex, nGot, nCompSize);
+					break;
+				}
 
 				if (fragment.m_nCompressedSize == fragment.m_nUncompressedSize) // Data is not compressed.
 				{
-					FileSystem()->Write(pSourceBuffer.get(), fragment.m_nUncompressedSize, hAsset);
+					FileSystem()->Write(pSourceBuffer.get(), nGot, hAsset);
 					continue;
 				}
 
 				size_t nDstLen = VPK_ENTRY_MAX_LEN;
-				assert(fragment.m_nCompressedSize <= nDstLen);
-
-				if (fragment.m_nCompressedSize > nDstLen)
-					break; // Corrupt or invalid chunk descriptor.
 
 				lzham_decompress_status_t lzDecompStatus = lzham_decompress_memory(&m_Decoder, pDestBuffer.get(),
-					&nDstLen, pSourceBuffer.get(), fragment.m_nCompressedSize, nullptr);
+					&nDstLen, pSourceBuffer.get(), static_cast<size_t>(nCompSize), nullptr);
 
 				if (lzDecompStatus != lzham_decompress_status_t::LZHAM_DECOMP_STATUS_SUCCESS)
 				{
@@ -703,12 +748,12 @@ void CPackedStoreBuilder::UnpackStore(const VPKDir_t& vpkDir, const char* worksp
 
 //-----------------------------------------------------------------------------
 // Purpose: 'VPKKeyValues_t' memory constructor
-// Input  : &entryPath      - 
-//          iPreloadSize    - 
-//          nLoadFlags      - 
-//          nTextureFlags   - 
-//          bUseCompression - 
-//          bDeduplicate    - 
+// Input: &entryPath - 
+// iPreloadSize - 
+// nLoadFlags - 
+// nTextureFlags - 
+// bUseCompression - 
+// bDeduplicate - 
 //-----------------------------------------------------------------------------
 VPKKeyValues_t::VPKKeyValues_t(const CUtlString& entryPath, uint16_t iPreloadSize,
 	uint32_t nLoadFlags, uint16_t nTextureFlags, bool bUseCompression, bool bDeduplicate)
@@ -723,8 +768,8 @@ VPKKeyValues_t::VPKKeyValues_t(const CUtlString& entryPath, uint16_t iPreloadSiz
 
 //-----------------------------------------------------------------------------
 // Purpose: 'VPKEntryBlock_t' file constructor
-// Input  : hDirFile    - 
-//          *pEntryPath - 
+// Input: hDirFile - 
+// *pEntryPath - 
 //-----------------------------------------------------------------------------
 VPKEntryBlock_t::VPKEntryBlock_t(FileHandle_t hDirFile, const char* pEntryPath)
 {
@@ -738,26 +783,39 @@ VPKEntryBlock_t::VPKEntryBlock_t(FileHandle_t hDirFile, const char* pEntryPath)
 	FileSystem()->Read(&m_iPackFileIndex, sizeof(uint16_t), hDirFile); //
 
 	uint16_t nMarker = 0;
-	do // Loop through all chunks in the entry and add to list.
+	for (;;)
 	{
+		if (m_Fragments.Count() >= VPK_FRAGMENT_MAX)
+		{
+			Error(eDLL_T::FS, NO_ERROR, "Entry '%s' exceeds max fragment count\n", pEntryPath);
+			break;
+		}
+
 		VPKChunkDescriptor_t entry(hDirFile);
 		m_Fragments.AddToTail(entry);
 
-		FileSystem()->Read(&nMarker, sizeof(nMarker), hDirFile);
+		const ssize_t nGot = FileSystem()->Read(&nMarker, sizeof(nMarker), hDirFile);
+		if (nGot != static_cast<ssize_t>(sizeof(nMarker)))
+		{
+			Error(eDLL_T::FS, NO_ERROR, "Entry '%s' fragment list unterminated\n", pEntryPath);
+			break;
+		}
 
-	} while (nMarker != static_cast<uint16_t>(PACKFILEINDEX_END));
+		if (nMarker == static_cast<uint16_t>(PACKFILEINDEX_END))
+			break;
+	}
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: 'VPKEntryBlock_t' memory constructor
-// Input  : *pData         - 
-//          nLen           - 
-//          nOffset        - 
-//          iPreloadSize   - 
-//          iPackFileIndex - 
-//          nLoadFlags     - 
-//          nTextureFlags  - 
-//          &pEntryPath    - 
+// Input: *pData - 
+// nLen - 
+// nOffset - 
+// iPreloadSize - 
+// iPackFileIndex - 
+// nLoadFlags - 
+// nTextureFlags - 
+// &pEntryPath - 
 //-----------------------------------------------------------------------------
 VPKEntryBlock_t::VPKEntryBlock_t(const uint8_t* pData, size_t nLen, int64_t nOffset, uint16_t iPreloadSize,
 	uint16_t iPackFileIndex, uint32_t nLoadFlags, uint16_t nTextureFlags, const char* pEntryPath)
@@ -784,10 +842,16 @@ VPKEntryBlock_t::VPKEntryBlock_t(const uint8_t* pData, size_t nLen, int64_t nOff
 
 //-----------------------------------------------------------------------------
 // Purpose: 'VPKChunkDescriptor_t' file constructor
-// Input  : hDirFile - 
+// Input: hDirFile - 
 //-----------------------------------------------------------------------------
 VPKChunkDescriptor_t::VPKChunkDescriptor_t(FileHandle_t hDirFile)
 {
+	m_nLoadFlags = 0;
+	m_nTextureFlags = 0;
+	m_nPackFileOffset = 0;
+	m_nCompressedSize = 0;
+	m_nUncompressedSize = 0;
+
 	FileSystem()->Read(&m_nLoadFlags, sizeof(uint32_t), hDirFile);        //
 	FileSystem()->Read(&m_nTextureFlags, sizeof(uint16_t), hDirFile);     //
 	FileSystem()->Read(&m_nPackFileOffset, sizeof(uint64_t), hDirFile);   //
@@ -797,11 +861,11 @@ VPKChunkDescriptor_t::VPKChunkDescriptor_t(FileHandle_t hDirFile)
 
 //-----------------------------------------------------------------------------
 // Purpose: 'VPKChunkDescriptor_t' memory constructor
-// Input  : nLoadFlags        - 
-//          nTextureFlags     - 
-//          nArchiveOffset    - 
-//          nCompressedSize   - 
-//          nUncompressedSize - 
+// Input: nLoadFlags - 
+// nTextureFlags - 
+// nArchiveOffset - 
+// nCompressedSize - 
+// nUncompressedSize - 
 //-----------------------------------------------------------------------------
 VPKChunkDescriptor_t::VPKChunkDescriptor_t(uint32_t nLoadFlags, uint16_t nTextureFlags,
 	uint64_t nPackFileOffset, uint64_t nCompressedSize, uint64_t nUncompressedSize)
@@ -816,11 +880,11 @@ VPKChunkDescriptor_t::VPKChunkDescriptor_t(uint32_t nLoadFlags, uint16_t nTextur
 
 //-----------------------------------------------------------------------------
 // Purpose: builds a valid file name for the VPK
-// Input  : *pLocale - 
-//          *pTarget - 
-//          *pLevel  - 
-//          nPatch   - 
-// Output : a vpk file pair (block and directory file names)
+// Input: *pLocale - 
+// *pTarget - 
+// *pLevel - 
+// nPatch - 
+// Output: a vpk file pair (block and directory file names)
 //-----------------------------------------------------------------------------
 VPKPair_t::VPKPair_t(const char* pLocale, const char* pTarget, const char* pLevel, int nPatch)
 {
@@ -846,7 +910,7 @@ VPKPair_t::VPKPair_t(const char* pLocale, const char* pTarget, const char* pLeve
 
 //-----------------------------------------------------------------------------
 // Purpose: 'VPKDir_t' file constructor
-// Input  : &dirFilePath - 
+// Input: &dirFilePath - 
 //-----------------------------------------------------------------------------
 VPKDir_t::VPKDir_t(const CUtlString& dirFilePath)
 {
@@ -855,9 +919,9 @@ VPKDir_t::VPKDir_t(const CUtlString& dirFilePath)
 
 //-----------------------------------------------------------------------------
 // Purpose: 'VPKDir_t' file constructor with sanitation
-// Input  : &dirFilePath  - 
-//          bSanitizeName - retrieve the directory file name from block name
-// Output : VPKDir_t
+// Input: &dirFilePath - 
+// bSanitizeName - retrieve the directory file name from block name
+// Output: VPKDir_t
 //-----------------------------------------------------------------------------
 VPKDir_t::VPKDir_t(const CUtlString& dirFilePath, bool bSanitizeName)
 {
@@ -893,7 +957,7 @@ VPKDir_t::VPKDir_t(const CUtlString& dirFilePath, bool bSanitizeName)
 		}
 	}
 
-	// NOTE: if we already have a locale, we call Init() anyways as that is the
+	// NOTE: if we already have a locale, we call Init anyways as that is the
 	// directory tree file the user wants, despite requesting for sanitization
 	bool found = false;
 
@@ -946,7 +1010,7 @@ VPKDir_t::VPKDir_t(const CUtlString& dirFilePath, bool bSanitizeName)
 
 //-----------------------------------------------------------------------------
 // Purpose: 'VPKDir_t' file constructor
-// Input  : &dirFilePath - 
+// Input: &dirFilePath - 
 //-----------------------------------------------------------------------------
 void VPKDir_t::Init(const CUtlString& dirFilePath)
 {
@@ -979,7 +1043,7 @@ void VPKDir_t::Init(const CUtlString& dirFilePath)
 	FileSystem()->Read(&m_Header.m_nDirectorySize, sizeof(uint32_t), hDirFile); //
 	FileSystem()->Read(&m_Header.m_nSignatureSize, sizeof(uint32_t), hDirFile); //
 
-	GetEntryBlocks(m_EntryBlocks, hDirFile);
+	GetEntryBlocks(m_EntryBlocks, hDirFile, m_Header.m_nDirectorySize);
 	m_DirFilePath = dirFilePath; // Set path to vpk directory file.
 
 	// Obtain every referenced pack file from the directory tree.
@@ -995,8 +1059,8 @@ void VPKDir_t::Init(const CUtlString& dirFilePath)
 
 //-----------------------------------------------------------------------------
 // Purpose: formats pack file path for specified patch
-// Input  : iPackFileIndex - (patch)
-// output : string
+// Input: iPackFileIndex - (patch)
+// output: string
 //-----------------------------------------------------------------------------
 CUtlString VPKDir_t::GetPackFileNameForIndex(uint16_t iPackFileIndex) const
 {
@@ -1011,8 +1075,8 @@ CUtlString VPKDir_t::GetPackFileNameForIndex(uint16_t iPackFileIndex) const
 
 //-----------------------------------------------------------------------------
 // Purpose: strips locale prefix from file path
-// Input  : &directoryPath - 
-// Output : directory filename without locale prefix
+// Input: &directoryPath - 
+// Output: directory filename without locale prefix
 //-----------------------------------------------------------------------------
 CUtlString VPKDir_t::StripLocalePrefix(const CUtlString& directoryPath) const
 {
@@ -1028,7 +1092,7 @@ CUtlString VPKDir_t::StripLocalePrefix(const CUtlString& directoryPath) const
 
 //-----------------------------------------------------------------------------
 // Purpose: writes the vpk directory header
-// Input  : hDirectoryFile - 
+// Input: hDirectoryFile - 
 //-----------------------------------------------------------------------------
 void VPKDir_t::WriteHeader(FileHandle_t hDirectoryFile)
 {
@@ -1053,7 +1117,7 @@ void VPKDir_t::WriteHeader(FileHandle_t hDirectoryFile)
 
 //-----------------------------------------------------------------------------
 // Purpose: builds the vpk directory tree
-// Input  : &entryBlocks - 
+// Input: &entryBlocks - 
 //-----------------------------------------------------------------------------
 void VPKDir_t::CTreeBuilder::BuildTree(const CUtlVector<VPKEntryBlock_t>& entryBlocks)
 {
@@ -1071,25 +1135,25 @@ void VPKDir_t::CTreeBuilder::BuildTree(const CUtlVector<VPKEntryBlock_t>& entryB
 		}
 
 		/**********************************************************************
-		* The code below creates a directory tree structure as follows:
+		* The code below creates a directory tree structure as follows
 		* 
 		*  Extension0
 		* |
 		* |___ Path0
 		* |   |
-		* |   |___ File0
-		* |   |___ File1
-		* |   |___ File2
+		* | |___ File0
+		* | |___ File1
+		* | |___ File2
 		* |
 		* |___ Path1
 		*     |
-		*     |___ File0
-		*     |___ File1
-		*     |___ File2
+		*  |___ File0
+		*  |___ File1
+		*  |___ File2
 		* ...
 		* 
 		* A tree scope cannot contain duplicate elements,
-		* which ultimately means that:
+		* which ultimately means that
 		* 
 		* - An extension is only written once to the tree.
 		* - A file path is only written once per extension tree.
@@ -1105,8 +1169,8 @@ void VPKDir_t::CTreeBuilder::BuildTree(const CUtlVector<VPKEntryBlock_t>& entryB
 
 //-----------------------------------------------------------------------------
 // Purpose: writes the vpk directory tree
-// Input  : hDirectoryFile - 
-// Output : number of descriptors written
+// Input: hDirectoryFile - 
+// Output: number of descriptors written
 //-----------------------------------------------------------------------------
 int VPKDir_t::CTreeBuilder::WriteTree(FileHandle_t hDirectoryFile) const
 {
@@ -1160,8 +1224,8 @@ int VPKDir_t::CTreeBuilder::WriteTree(FileHandle_t hDirectoryFile) const
 
 //-----------------------------------------------------------------------------
 // Purpose: builds the vpk directory file
-// Input  : &svDirectoryPath - 
-//          &vEntryBlocks    - 
+// Input: &svDirectoryPath - 
+// &vEntryBlocks - 
 //-----------------------------------------------------------------------------
 void VPKDir_t::BuildDirectoryFile(const CUtlString& directoryPath, const CUtlVector<VPKEntryBlock_t>& entryBlocks)
 {

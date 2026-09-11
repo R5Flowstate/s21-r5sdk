@@ -1,5 +1,9 @@
+//=============================================================================//
+//
+// Purpose: In-game developer menu UI
+//
+//=============================================================================//
 #include "core/stdafx.h"
-#ifndef DEDICATED
 #include "tier1/cvar.h"
 #include "engine/cmd.h"
 #include "windows/id3dx.h"
@@ -31,8 +35,19 @@ void CDevMenu::Shutdown()
 
 void CDevMenu::RunFrame()
 {
-	if (!ui_devmenu_enable.GetBool())
+	const bool enabled = ui_devmenu_enable.GetBool();
+
+	if (!enabled)
+	{
+		// Cvar off but m_activated left true keeps IsSurfaceActive latched
+		// (invisible modal: free multi-mon cursor + blocked game input).
+		if (m_activated)
+		{
+			SetActive(false);
+			ResetInput();
+		}
 		return;
+	}
 
 	if (!m_initialized)
 	{
@@ -40,13 +55,21 @@ void CDevMenu::RunFrame()
 		m_initialized = true;
 	}
 
-	// Render the Dev window
+	// Rising-edge open: bind/cvar just enabled, or bind called SetActive.
+	// Do not re-force true every frame -- that fights the window X (p_open).
+	if (!m_activated)
+		SetActive(true);
+
 	DrawSurface();
+
+	// User closed via X: keep cvar in sync so we do not re-activate above.
+	if (!m_activated && ui_devmenu_enable.GetBool())
+		ui_devmenu_enable.SetValue(false);
 }
 
 bool CDevMenu::DrawSurface()
 {
-	if (!ui_devmenu_enable.GetBool())
+	if (!ui_devmenu_enable.GetBool() || !m_activated)
 		return false;
 
 	int stylePushed = 0;
@@ -54,7 +77,9 @@ bool CDevMenu::DrawSurface()
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 10.0f)); stylePushed++;
 
 	ImGui::SetNextWindowSize(ImVec2(700, 520), ImGuiCond_FirstUseEver);
-	if (!ImGui::Begin("Developer Menu", nullptr, ImGuiWindowFlags_NoCollapse))
+	// p_open + close_callback so the window X clears m_activated and
+	// re-enables game input / reclip (same pattern as console/browser).
+	if (!ImGui::Begin("Developer Menu", &m_activated, ImGuiWindowFlags_NoCollapse, &ResetInput))
 	{
 		ImGui::End();
 		ImGui::PopStyleVar(stylePushed);
@@ -70,7 +95,10 @@ bool CDevMenu::DrawSurface()
 		{
 			ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, 18.0f); stylePushed++;
 			ImGui::BeginChild("##DevCmdsChild", ImVec2(0, 0), true, ImGuiWindowFlags_AlwaysUseWindowPadding);
-			DrawMenuRecursive(m_vecRootCommands);
+			if (m_vecRootCommands.empty())
+				ImGui::TextDisabled("No commands. Add one with: dev_menu_add \"path/name\" \"command\"");
+			else
+				DrawMenuRecursive(m_vecRootCommands);
 			ImGui::EndChild();
 			ImGui::PopStyleVar(); stylePushed--;
 			ImGui::EndTabItem();
@@ -259,7 +287,4 @@ void CDevMenu::ClearPresetCommands(void)
 }
 
 CDevMenu g_DevMenu;
-
-#endif // !DEDICATED
-
 

@@ -4,16 +4,16 @@
 #include <vector>
 #pragma once
 
-/// @param[in] nb_elements : size of your for loop
-/// @param[in] functor(start, end) :
+/// @param[in] nb_elements: size of your for loop
+/// @param[in] functor(start, end) 
 /// your function processing a sub chunk of the for loop.
 /// "start" is the first index to process (included) until the index "end"
 /// (excluded)
 /// @code
-///     for(int i = start; i < end; ++i)
-///         computation(i);
+/// for(int i = start; i < end; ++i)
+/// computation(i);
 /// @endcode
-/// @param use_threads : enable / disable threads.
+/// @param use_threads: enable / disable threads.
 ///
 ///
 static

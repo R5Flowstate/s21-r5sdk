@@ -67,7 +67,7 @@ int V_vscprintf(const char *format, va_list params)
 //-----------------------------------------------------------------------------
 CUtlBinaryBlock::CUtlBinaryBlock( ssize_t growSize, ssize_t initSize )
 {
-	//MEM_ALLOC_CREDIT();
+	//MEM_ALLOC_CREDIT;
 	m_Memory.Init( growSize, initSize );
 
 	m_nActualLength = 0;
@@ -104,7 +104,7 @@ void CUtlBinaryBlock::Get( void *pValue, ssize_t nLen ) const
 
 void CUtlBinaryBlock::SetLength( ssize_t nLength )
 {
-	//MEM_ALLOC_CREDIT();
+	//MEM_ALLOC_CREDIT;
 	Assert( !m_Memory.IsReadOnly() );
 
 	m_nActualLength = nLength;
@@ -656,7 +656,7 @@ CUtlString CUtlString::StripExtension() const
 
 CUtlString CUtlString::StripFilename( bool bStripTrailingSlash ) const
 {
-	const char *pFilename = V_UnqualifiedFileName( Get() ); // NOTE: returns 'Get()' on failure, never NULL
+	const char *pFilename = V_UnqualifiedFileName( Get() ); // NOTE: returns 'Get' on failure, never NULL
 	ssize_t nCharsToCopy = pFilename - Get();
 	CUtlString result;
 	result.SetDirect( Get(), nCharsToCopy );
@@ -800,7 +800,7 @@ void CUtlString::Trim( const char *szTargets )
 
 //-----------------------------------------------------------------------------
 // Purpose: spill routine for making sure our buffer is big enough for an
-//			incoming string set/modify.
+// incoming string set/modify.
 //-----------------------------------------------------------------------------
 char *CUtlStringBuilder::InternalPrepareBuffer(size_t nChars, bool bCopyOld, size_t nMinCapacity)
 {
@@ -824,7 +824,7 @@ char *CUtlStringBuilder::InternalPrepareBuffer(size_t nChars, bool bCopyOld, siz
 		// Allocate 1.5 times what is requested, plus a small initial ramp
 		// value so we don't spend too much time re-allocating tiny buffers.
 		// A good allocator will prevent this anyways, but this makes it safer.
-		// We cap it at +1 million to not get crazy.  Code actually avoides
+		// We cap it at +1 million to not get crazy. Code actually avoides
 		// computing power of two numbers since allocations almost always
 		// have header/bookkeeping overhead. Don't do the dynamic sizing
 		// if the user asked for a specific capacity.
@@ -872,7 +872,7 @@ char *CUtlStringBuilder::InternalPrepareBuffer(size_t nChars, bool bCopyOld, siz
 				memcpy(pszString, pszOld, nLenOld); // null will be added at end of func.
 		}
 
-		// just in case the user grabs .Access() and scribbles over the terminator at
+		// just in case the user grabs.Access and scribbles over the terminator at
 		// 'length', make sure they don't run off the rails as long as they obey Capacity.
 		// We don't offer this protection for the 'on stack' string.
 		pszString[nNewSize] = '\0';
@@ -885,7 +885,7 @@ char *CUtlStringBuilder::InternalPrepareBuffer(size_t nChars, bool bCopyOld, siz
 	else
 	{
 		// Rare case. Only happens if someone did a SetPtr with a length
-		// less than MAX_STACK_STRLEN, or maybe a .Replace() shrunk the
+		// less than MAX_STACK_STRLEN, or maybe a.Replace shrunk the
 		// length down.
 		pszString = m_data.Stack.m_szString;
 		m_data.Stack.SetBytesLeft(MAX_STACK_STRLEN - (uint8)nChars);
@@ -907,7 +907,7 @@ char *CUtlStringBuilder::InternalPrepareBuffer(size_t nChars, bool bCopyOld, siz
 
 //-----------------------------------------------------------------------------
 // Purpose: replace all occurrences of one string with another
-//			replacement string may be NULL or "" to remove target string
+// replacement string may be NULL or "" to remove target string
 //-----------------------------------------------------------------------------
 size_t CUtlStringBuilder::Replace(const char *pstrTarget, const char *pstrReplacement)
 {
@@ -917,7 +917,7 @@ size_t CUtlStringBuilder::Replace(const char *pstrTarget, const char *pstrReplac
 
 //-----------------------------------------------------------------------------
 // Purpose: replace all occurrences of one string with another
-//			replacement string may be NULL or "" to remove target string
+// replacement string may be NULL or "" to remove target string
 //-----------------------------------------------------------------------------
 size_t CUtlStringBuilder::ReplaceFastCaseless(const char *pstrTarget, const char *pstrReplacement)
 {
@@ -927,7 +927,7 @@ size_t CUtlStringBuilder::ReplaceFastCaseless(const char *pstrTarget, const char
 
 //-----------------------------------------------------------------------------
 // Purpose: replace all occurrences of one string with another
-//			replacement string may be NULL or "" to remove target string
+// replacement string may be NULL or "" to remove target string
 //-----------------------------------------------------------------------------
 size_t CUtlStringBuilder::ReplaceInternal(const char *pstrTarget, const char *pstrReplacement, const char *pfnCompare(const char*, const char*))
 {
@@ -971,8 +971,8 @@ size_t CUtlStringBuilder::ReplaceInternal(const char *pstrTarget, const char *ps
 			else if (nNewLength > nOldLength)
 			{
 				// New string will be bigger than the old, but don't re-alloc unless
-				// it is also larger than capacity.  If it fits in capacity, we will
-				// be adjusting the string 'in place'.  The replacement string is larger
+				// it is also larger than capacity. If it fits in capacity, we will
+				// be adjusting the string 'in place'. The replacement string is larger
 				// than the target string, so if we copied front to back we would screw up
 				// the existing data in the 'in place' case.
 				char *pstrNew;
@@ -1060,7 +1060,7 @@ size_t CUtlStringBuilder::ReplaceInternal(const char *pstrTarget, const char *ps
 
 //-----------------------------------------------------------------------------
 // Purpose: Indicates if the target string exists in this instance.
-//			The index is negative if the target string is not found, otherwise it is the index in the string.
+// The index is negative if the target string is not found, otherwise it is the index in the string.
 //-----------------------------------------------------------------------------
 ptrdiff_t CUtlStringBuilder::IndexOf(const char *pstrTarget) const
 {
@@ -1069,8 +1069,8 @@ ptrdiff_t CUtlStringBuilder::IndexOf(const char *pstrTarget) const
 
 
 //-----------------------------------------------------------------------------
-// Purpose: 
-//			remove whitespace -- anything that is isspace() -- from the string
+// Purpose
+// remove whitespace -- anything that is isspace -- from the string
 //-----------------------------------------------------------------------------
 size_t CUtlStringBuilder::RemoveWhitespace()
 {
@@ -1093,9 +1093,9 @@ size_t CUtlStringBuilder::RemoveWhitespace()
 
 //-----------------------------------------------------------------------------
 // Purpose:	Allows setting the size to anything under the current
-//			capacity.  Typically should not be used unless there was a specific
-//			reason to scribble on the string. Will not touch the string contents,
-//			but will append a NULL. Returns true if the length was changed.
+// capacity. Typically should not be used unless there was a specific
+// reason to scribble on the string. Will not touch the string contents,
+// but will append a NULL. Returns true if the length was changed.
 //-----------------------------------------------------------------------------
 bool CUtlStringBuilder::SetLength(size_t nLen)
 {
@@ -1123,8 +1123,8 @@ char *CUtlStringBuilder::TakeOwnership(size_t *pnLen, size_t *pnCapacity)
 
 
 //-----------------------------------------------------------------------------
-// Purpose: 
-//			trim whitespace from front and back of string
+// Purpose
+// trim whitespace from front and back of string
 //-----------------------------------------------------------------------------
 size_t CUtlStringBuilder::TrimWhitespace()
 {
@@ -1185,7 +1185,7 @@ void CUtlStringBuilder::Data::SetPtr(char *pchString, size_t nLength)
 
 //-----------------------------------------------------------------------------
 // Purpose:	Enable the error state, moving the string to the heap if
-//			it isn't there.
+// it isn't there.
 //-----------------------------------------------------------------------------
 void CUtlStringBuilder::Data::SetError(bool bEnableAssert)
 {
@@ -1219,9 +1219,9 @@ void CUtlStringBuilder::Data::ClearError()
 
 //-----------------------------------------------------------------------------
 // Purpose:	If the string is on the stack, move it to the heap.
-//			create a null heap string if memory can't be allocated.
-//			Callers of this /need/ the string to be in the heap state
-//			when done.
+// create a null heap string if memory can't be allocated.
+// Callers of this /need/ the string to be in the heap state
+// when done.
 //-----------------------------------------------------------------------------
 bool CUtlStringBuilder::Data::MoveToHeap()
 {

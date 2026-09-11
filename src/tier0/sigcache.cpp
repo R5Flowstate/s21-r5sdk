@@ -21,7 +21,7 @@
 
 //-----------------------------------------------------------------------------
 // Purpose: whether or not to disable the caching of signatures
-// Input  : bDisabled - (true = disabled)
+// Input: bDisabled - (true = disabled)
 //-----------------------------------------------------------------------------
 void CSigCache::SetDisabled(const bool bDisabled)
 {
@@ -43,9 +43,9 @@ void CSigCache::InvalidateMap()
 
 //-----------------------------------------------------------------------------
 // Purpose: creates a map of a pattern and relative virtual address
-// Input  : *pPattern   - (key)
-//          nPatternLen - 
-//          nRVA        - (value)
+// Input: *pPattern - (key)
+// nPatternLen - 
+// nRVA - (value)
 //-----------------------------------------------------------------------------
 void CSigCache::AddEntry(const void* pPattern, const size_t nPatternLen, const u64 nRVA)
 {
@@ -60,10 +60,10 @@ void CSigCache::AddEntry(const void* pPattern, const size_t nPatternLen, const u
 
 //-----------------------------------------------------------------------------
 // Purpose: finds a pattern key in the cache map and sets its value to nRVA
-// Input  : *pPattern   - (key)
-//          nPatternLen - 
-//          &nRVA       - (value)
-// Output : true if key is found, false otherwise
+// Input: *pPattern - (key)
+// nPatternLen - 
+// &nRVA - (value)
+// Output: true if key is found, false otherwise
 //-----------------------------------------------------------------------------
 bool CSigCache::FindEntry(const void* pPattern, const size_t nPatternLen, u64& nRVA)
 {
@@ -86,8 +86,8 @@ bool CSigCache::FindEntry(const void* pPattern, const size_t nPatternLen, u64& n
 
 //-----------------------------------------------------------------------------
 // Purpose: loads the cache map from the disk
-// Input  : *szCacheFile - 
-// Output : true on success, false otherwise
+// Input: *szCacheFile - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CSigCache::ReadCache(const char* const szCacheFile)
 {
@@ -133,8 +133,8 @@ bool CSigCache::ReadCache(const char* const szCacheFile)
 
 //-----------------------------------------------------------------------------
 // Purpose: writes the cache map to the disk
-// Input  : *szCacheFile - 
-// Output : true on success, false otherwise
+// Input: *szCacheFile - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CSigCache::WriteCache(const char* const szCacheFile) const
 {

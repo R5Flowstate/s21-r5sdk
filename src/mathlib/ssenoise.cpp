@@ -1,4 +1,4 @@
-﻿//========= Copyright © 1996-2006, Valve Corporation, All rights reserved. ============//
+//========= Copyright © 1996-2006, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Fast low quality noise suitable for real time use
 //
@@ -9,7 +9,7 @@
 #include "mathlib/ssemath.h"
 #include "mathlib/noisedata.h"
 
-// memdbgon must be the last include file in a .cpp file!!!
+// memdbgon must be the last include file in a.cpp file!!!
 #include "tier0/memdbgon.h"
 
 
@@ -43,8 +43,8 @@ fltx4 NoiseSIMD(const fltx4& x, const fltx4& y, const fltx4& z)
 	fltx4 lattice100 = Four_Zeros, lattice101 = Four_Zeros, lattice110 = Four_Zeros, lattice111 = Four_Zeros;
 
 	// FIXME: Converting the input vectors to int indices will cause load-hit-stores (48 bytes)
-	//        Converting the indexed noise values back to vectors will cause more (128 bytes)
-	//        The noise table could store vectors if we chunked it into 2x2x2 blocks.
+	// Converting the indexed noise values back to vectors will cause more (128 bytes)
+	// The noise table could store vectors if we chunked it into 2x2x2 blocks.
 	fltx4 xfrac = Four_Zeros, yfrac = Four_Zeros, zfrac = Four_Zeros;
 #define DOPASS(i)															\
     {	unsigned int xi = SubInt( x_idx, i );								\
@@ -122,8 +122,8 @@ FourVectors DNoiseSIMD(const fltx4& x, const fltx4& y, const fltx4& z)
 	fltx4 zlattice100 = Four_Zeros, zlattice101 = Four_Zeros, zlattice110 = Four_Zeros, zlattice111 = Four_Zeros;
 
 	// FIXME: Converting the input vectors to int indices will cause load-hit-stores (48 bytes)
-	//        Converting the indexed noise values back to vectors will cause more (128 bytes)
-	//        The noise table could store vectors if we chunked it into 2x2x2 blocks.
+	// Converting the indexed noise values back to vectors will cause more (128 bytes)
+	// The noise table could store vectors if we chunked it into 2x2x2 blocks.
 	fltx4 xfrac = Four_Zeros, yfrac = Four_Zeros, zfrac = Four_Zeros;
 #define DODPASS(i)															\
     {	unsigned int xi = SubInt( x_idx, i );								\

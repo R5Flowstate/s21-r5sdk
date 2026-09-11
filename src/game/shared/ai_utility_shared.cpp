@@ -59,7 +59,7 @@ static ConVar ai_script_nodes_draw_range("ai_script_nodes_draw_range", "1000", F
 static ConVar ai_script_nodes_draw_nearest("ai_script_nodes_draw_nearest", "1", FCVAR_DEVELOPMENTONLY, "Debug draw AIN script node links to nearest node (build order is used if null)");
 
 //------------------------------------------------------------------------------
-// Purpose:
+// Purpose
 //------------------------------------------------------------------------------
 CAI_Utility::CAI_Utility(void)
 {
@@ -120,8 +120,10 @@ void CAI_Utility::RunRenderFrame(void)
         }
     }
 
-    if (ai_script_nodes_draw->GetBool())
+#ifndef CLIENT_DLL
+    if (ai_script_nodes_draw && ai_script_nodes_draw->GetBool())
         DrawAIScriptNetwork(*g_pAINetwork, MainViewOrigin(), ai_script_nodes_draw_range.GetFloat(), true);
+#endif // !CLIENT_DLL
 }
 
 //------------------------------------------------------------------------------
@@ -178,10 +180,10 @@ static const fltx4 s_xSubMask = LoadAlignedSIMD(s_vSubMask);
 
 //------------------------------------------------------------------------------
 // Purpose: draw AI script network
-// Input  : *pNetwork       - 
-//          &vCameraPos     - 
-//          flCameraRange   - 
-//          bUseDepthBuffer - 
+// Input: *pNetwork - 
+// &vCameraPos - 
+// flCameraRange - 
+// bUseDepthBuffer - 
 //------------------------------------------------------------------------------
 void CAI_Utility::DrawAIScriptNetwork(
     const CAI_Network* pNetwork,
@@ -253,11 +255,9 @@ void CAI_Utility::DrawAIScriptNetwork(
 
 //------------------------------------------------------------------------------
 // Purpose: packs 4 node indices together
-// Input  : a - (set 1)
-//          b - 
-//          c - (set 2)
-//          d - 
-// Output : packed node set as i64x2
+// Input: a - (set 1)
+// c - (set 2)
+// Output: packed node set as i64x2
 //------------------------------------------------------------------------------
 shortx8 CAI_Utility::PackNodeLink(const i32 a, const i32 b, const i32 c, const i32 d)
 {
@@ -275,10 +275,10 @@ shortx8 CAI_Utility::PackNodeLink(const i32 a, const i32 b, const i32 c, const i
 
 //------------------------------------------------------------------------------
 // Purpose: checks if the NavMesh tile is within the camera radius
-// Input  : *pTile - 
-//          &vCamera - 
-//          flCameraRadius - 
-// Output : true if within radius, false otherwise
+// Input: *pTile - 
+// &vCamera - 
+// flCameraRadius - 
+// Output: true if within radius, false otherwise
 //------------------------------------------------------------------------------
 bool CAI_Utility::IsTileWithinRange(const dtMeshTile* pTile, const VPlane* vPlane, const Vector3D& vCamera, const float flCameraRadius) const
 {
@@ -309,9 +309,9 @@ bool CAI_Utility::IsTileWithinRange(const dtMeshTile* pTile, const VPlane* vPlan
 
 //------------------------------------------------------------------------------
 // Purpose: gets the nearest node index to position
-// Input  : *pAINetwork - 
-//          *vPos       - 
-// Output : node index ('NO_NODE' if no node has been found)
+// Input: *pAINetwork - 
+// *vPos - 
+// Output: node index ('NO_NODE' if no node has been found)
 //------------------------------------------------------------------------------
 int CAI_Utility::GetNearestNodeToPos(const CAI_Network* pAINetwork, const Vector3D* vPos)
 {

@@ -1,6 +1,6 @@
 //===== Copyright (c) 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose:
+// Purpose
 //
 // $NoKeywords: $
 //=============================================================================//
@@ -19,7 +19,7 @@
 
 //-----------------------------------------------------------------------------
 // Purpose: Allocates memory for strings, checking for duplicates first,
-//			reusing exising strings if duplicate found.
+// reusing exising strings if duplicate found.
 //-----------------------------------------------------------------------------
 
 enum StringPoolCase_t
@@ -53,10 +53,10 @@ protected:
 };
 
 //-----------------------------------------------------------------------------
-// Purpose: A reference counted string pool.  
+// Purpose: A reference counted string pool. 
 //
 // Elements are stored more efficiently than in the conventional string pool, 
-// quicker to look up, and storage is tracked via reference counts.  
+// quicker to look up, and storage is tracked via reference counts. 
 //
 // At some point this should replace CStringPool
 //-----------------------------------------------------------------------------
@@ -142,13 +142,13 @@ inline void CCountedStringPoolBase<T>::FreeAll()
 {
 	int i;
 
-	// Reset the hash table:
+	// Reset the hash table
 	for( i = 0; i < m_HashTable.Count(); i++ )
 	{
 		m_HashTable[i] = INVALID_ELEMENT;		
 	}
 
-	// Blow away the free list:
+	// Blow away the free list
 	m_FreeListStart = INVALID_ELEMENT;
 
 	for( i = 0; i < m_Elements.Count(); i++ )
@@ -162,7 +162,7 @@ inline void CCountedStringPoolBase<T>::FreeAll()
 		}
 	}
 
-	// Remove all but the invalid element:
+	// Remove all but the invalid element
 	m_Elements.RemoveAll();
 	m_Elements.AddToTail();
 	m_Elements[0].pString = NULL;
@@ -255,7 +255,7 @@ inline T CCountedStringPoolBase<T>::ReferenceStringHandle( const char* pIntrinsi
 
 	m_Elements[nCurrentBucket].nReferenceCount = 1;
 
-	// Insert at the beginning of the bucket:
+	// Insert at the beginning of the bucket
 	m_Elements[nCurrentBucket].nNextElement = m_HashTable[ nHashBucketIndex ];
 	m_HashTable[ nHashBucketIndex ] = nCurrentBucket;
 

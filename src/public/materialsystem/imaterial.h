@@ -91,7 +91,7 @@ public:
 	virtual const char*		GetNullString() const = 0;
 	virtual int64_t			ReturnZero() const = 0;
 
-	virtual void*			sub_1403B41A0(void* unk) = 0; // IDK
+	virtual void*			MaterialUnknown0(void* unk) = 0;
 
 	virtual int				GetMappingWidth() const = 0;
 	virtual int				GetMappingHeight() const = 0;

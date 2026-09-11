@@ -1,7 +1,7 @@
 //========= Copyright (c) 1996-2005, Valve Corporation, All rights reserved. ============//
 //
-// Purpose:	All of our code is completely Unicode.  Instead of char, you should
-//			use wchar, uint8, or char8, as explained below.
+// Purpose:	All of our code is completely Unicode. Instead of char, you should
+// use wchar, uint8, or char8, as explained below.
 //
 // $NoKeywords: $
 //=============================================================================//
@@ -32,7 +32,7 @@ typedef unsigned short wchar_t;
 typedef char char8;
 
 // uint8
-// uint8 is equivalent to byte (but is preferred over byte for clarity).  Use this
+// uint8 is equivalent to byte (but is preferred over byte for clarity). Use this
 // whenever you mean a byte (for example, one byte of a network packet).
 typedef unsigned char uint8;
 typedef unsigned char BYTE;
@@ -40,7 +40,7 @@ typedef unsigned char byte;
 
 // wchar
 // wchar is a single character of text (currently 16 bits, as all of our text is
-// Unicode).  Use this whenever you mean a piece of text (for example, in a string).
+// Unicode). Use this whenever you mean a piece of text (for example, in a string).
 typedef wchar_t wchar;
 //typedef char wchar;
 

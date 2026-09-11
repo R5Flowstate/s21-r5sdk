@@ -48,8 +48,10 @@ class VTSListBase : public IDetour
 	virtual void GetFun(void) const { }
 	virtual void GetVar(void) const
 	{
+#ifndef CLIENT_DLL
 		g_pAlignedMemAlloc = Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 48 89 74 24 ?? 48 89 7C 24 ?? 55 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? ?? ?? B8 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 2B E0 48 8B D9")
 			.Offset(0x130).FindPatternSelf("48 8D 15 ?? ?? ?? 01", CMemory::Direction::DOWN, 100).ResolveRelativeAddressSelf(0x3, 0x7).RCast<CAlignedMemAlloc*>();
+#endif // !CLIENT_DLL
 	}
 	virtual void GetCon(void) const { }
 	virtual void Detour(const bool bAttach) const { }

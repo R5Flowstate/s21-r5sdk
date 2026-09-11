@@ -1,6 +1,6 @@
-﻿//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -67,7 +67,7 @@ enum
 //=========================================================
 class CSound
 {
-	//DECLARE_SIMPLE_DATADESC();
+	//DECLARE_SIMPLE_DATADESC;
 public:
 	bool	DoesSoundExpire() const;
 	float	SoundExpirationTime() const;
@@ -83,7 +83,7 @@ public:
 	int		NextSound() const;
 	//void	Reset(void);
 	int		SoundChannel(void) const;
-	//bool	ValidateOwner() const;
+	//bool	ValidateOwner const;
 
 	EHANDLE  m_hOwner;             // sound's owner.
 	EHANDLE  m_hTarget;            // Sounds's target - an odd concept. For a gunfire sound, the target is the entity being fired at.

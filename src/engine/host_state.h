@@ -3,6 +3,15 @@
 
 extern ConVar hostdesc;
 extern ConVar sv_modsProfile;
+#ifndef CLIENT_DLL
+#include "tier1/utlstring.h"
+#include "tier1/utlvector.h"
+extern ConVar sv_requiredMods;
+extern ConVar sv_allowedMods;
+extern ConVar sv_modPolicy;
+void ModPolicy_GetEffectiveRequired(CUtlVector<CUtlString>& out);
+void ModPolicy_GetEffectiveAllowed(CUtlVector<CUtlString>& out);
+#endif // !CLIENT_DLL
 
 enum class HostStates_t : int
 {

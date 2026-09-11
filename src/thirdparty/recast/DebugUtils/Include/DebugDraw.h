@@ -200,29 +200,52 @@ void duAppendCylinder(struct duDebugDraw* dd, float minx, float miny, float minz
 
 class duDisplayList : public duDebugDraw
 {
+public:
+	struct Segment
+	{
+		duDebugDrawPrimitives prim;
+		float primSize;
+		int startIndex;
+		int count;
+		bool textured;
+	};
+
+private:
 	rdVec3D* m_pos;
 	unsigned int* m_color;
+	rdVec2D* m_uv;
 
 	int m_size;
 	int m_cap;
 
-	duDebugDrawPrimitives m_prim;
-	float m_primSize;
+	Segment m_curSeg;
+	std::vector<Segment> m_segments;
 
 	rdVec3D m_drawOffset;
 	bool m_depthMask;
-	
+	bool m_textured;
+
 	void resize(int cap);
-	
+
 public:
 	duDisplayList(int cap = 512);
 	~duDisplayList();
 	virtual void depthMask(bool state);
+	virtual void texture(bool state);
 	virtual void begin(const duDebugDrawPrimitives prim, const float size = 1.0f, const rdVec3D* offset = 0);
 	virtual void vertex(const float x, const float y, const float z, unsigned int color);
 	virtual void vertex(const rdVec3D* pos, unsigned int color);
+	virtual void vertex(const rdVec3D* pos, unsigned int color, const rdVec2D* uv);
+	virtual void vertex(const float x, const float y, const float z, unsigned int color, const float u, const float v);
 	virtual void end();
 	void clear();
+	bool empty() const { return m_size == 0; }
+	int size() const { return m_size; }
+	int segmentCount() const { return (int)m_segments.size(); }
+	const Segment& getSegment(int i) const { return m_segments[i]; }
+	const rdVec3D* getPositions() const { return m_pos; }
+	const unsigned int* getColors() const { return m_color; }
+	const rdVec2D* getUVs() const { return m_uv; }
 	void draw(struct duDebugDraw* dd);
 private:
 	// Explicitly disabled copy constructor and copy assignment operator.

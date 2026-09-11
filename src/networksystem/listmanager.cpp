@@ -1,3 +1,96 @@
+#if defined(CLIENT_DLL)
+//=============================================================================//
+//
+// Purpose: server list manager
+//
+//=============================================================================//
+
+#include "core/stdafx.h"
+#include "engine/client/bridge_connect_password.h"
+#include "engine/client/bridge_join_auth.h"
+#include "tier0/threadtools.h"
+#include "tier0/frametask.h"
+#include "tier0/dbg.h"
+#include "tier1/cvar.h"
+#include "tier1/convar.h"
+#include "engine/cmd.h"
+#include "engine/net.h"
+#include "engine/host_state.h"
+#include "engine/server/server.h"
+#include "engine/client/cl_rcon.h"
+#include "rtech/playlists/playlists.h"
+#include "spire.h"
+#include "listmanager.h"
+
+
+//-----------------------------------------------------------------------------
+// Purpose
+//-----------------------------------------------------------------------------
+CServerListManager::CServerListManager(void)
+{
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: get server list from spire
+//-----------------------------------------------------------------------------
+bool CServerListManager::RefreshServerList(string& outMessage, size_t& numServers)
+{
+	ClearServerList();
+
+	vector<NetGameServer_t> serverList;
+	const bool success = g_Spire.GetServerList(serverList, outMessage);
+
+	if (!success)
+		return false;
+
+	AUTO_LOCK(m_Mutex);
+	m_vServerList = std::move(serverList);
+
+	numServers = m_vServerList.size();
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: clears the server list
+//-----------------------------------------------------------------------------
+void CServerListManager::ClearServerList(void)
+{
+	AUTO_LOCK(m_Mutex);
+	m_vServerList.clear();
+}
+
+// Do not Cbuf the listing IP; a semicolon in that string is ACE.
+//-----------------------------------------------------------------------------
+// Purpose: connects to specified server
+//-----------------------------------------------------------------------------
+void CServerListManager::ConnectToServer(const string& svIp, const int nPort, const string& svNetKey, const string& svNetPassword) const
+{
+	// Call connect on this thread; the frame-queue hop is skipped in safe mode.
+	if (!svNetKey.empty())
+		NET_SetKey(svNetKey);
+
+	if (!svNetPassword.empty())
+		Bridge_SetConnectPassword(svNetPassword.c_str());
+
+	Bridge_ConnectToHost(svIp.c_str(), nPort);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: connects to specified server
+//-----------------------------------------------------------------------------
+void CServerListManager::ConnectToServer(const string& svServer, const string& svNetKey, const string& svNetPassword) const
+{
+	if (!svNetKey.empty())
+		NET_SetKey(svNetKey);
+
+	if (!svNetPassword.empty())
+		Bridge_SetConnectPassword(svNetPassword.c_str());
+
+	Bridge_ConnectToHost(svServer.c_str(), 0);
+}
+
+CServerListManager g_ServerListManager;
+#else // !CLIENT_DLL
 //=============================================================================//
 // 
 // Purpose: server list manager
@@ -15,28 +108,28 @@
 #include "engine/host_state.h"
 #include "engine/server/server.h"
 #include "rtech/playlists/playlists.h"
-#include "pylon.h"
+#include "spire.h"
 #include "listmanager.h"
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose
 //-----------------------------------------------------------------------------
 CServerListManager::CServerListManager(void)
 {
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: get server list from pylon
-// Input  : &outMessage - 
-//          &numServers - 
-// Output : true on success, false otherwise
+// Purpose: get server list from spire
+// Input: &outMessage - 
+// &numServers - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CServerListManager::RefreshServerList(string& outMessage, size_t& numServers)
 {
     ClearServerList();
 
     vector<NetGameServer_t> serverList;
-    const bool success = g_MasterServer.GetServerList(serverList, outMessage);
+    const bool success = g_Spire.GetServerList(serverList, outMessage);
 
     if (!success)
         return false;
@@ -59,9 +152,9 @@ void CServerListManager::ClearServerList(void)
 
 //-----------------------------------------------------------------------------
 // Purpose: connects to specified server
-// Input  : &svIp - 
-//          nPort - 
-//          &svNetKey - 
+// Input: &svIp - 
+// nPort - 
+// &svNetKey - 
 //-----------------------------------------------------------------------------
 void CServerListManager::ConnectToServer(const string& svIp, const int nPort, const string& svNetKey, const string& svNetPassword) const
 {
@@ -97,8 +190,8 @@ void CServerListManager::ConnectToServer(const string& svIp, const int nPort, co
 
 //-----------------------------------------------------------------------------
 // Purpose: connects to specified server
-// Input  : &svServer - 
-//          &svNetKey - 
+// Input: &svServer - 
+// &svNetKey - 
 //-----------------------------------------------------------------------------
 void CServerListManager::ConnectToServer(const string& svServer, const string& svNetKey, const string& svNetPassword) const
 {
@@ -133,3 +226,4 @@ void CServerListManager::ConnectToServer(const string& svServer, const string& s
 }
 
 CServerListManager g_ServerListManager;
+#endif // CLIENT_DLL

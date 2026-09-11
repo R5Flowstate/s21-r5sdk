@@ -21,6 +21,7 @@
 
 #include "Recast/Include/Recast.h"
 #include "NavEditor/Include/EditorInterfaces.h"
+#include "DebugUtils/Include/DebugDraw.h"
 #include "DebugUtils/Include/RecastDebugDraw.h"
 #include "DebugUtils/Include/DetourDebugDraw.h"
 
@@ -232,6 +233,12 @@ struct EditorToolState {
 	virtual void handleUpdate(const float dt) = 0;
 };
 
+struct TraverseLinkBuildContext
+{
+	class Editor* editor;
+	std::shared_mutex* polyMapMutex;
+};
+
 class Editor
 {
 protected:
@@ -288,6 +295,22 @@ protected:
 	std::map<TraverseLinkPolyPair, unsigned int> m_traverseLinkPolyMap;
 
 	EditorDebugDraw m_dd;
+
+	struct DisplayListCache
+	{
+		duDisplayList list;
+		unsigned int vboPos;
+		unsigned int vboColor;
+		unsigned int vboUV;
+		bool vboDirty;
+
+		DisplayListCache() : vboPos(0), vboColor(0), vboUV(0), vboDirty(true) {}
+	};
+
+	DisplayListCache m_inputMeshCache;
+	DisplayListCache m_navMeshCache;
+	bool m_inputMeshCacheDirty;
+	bool m_navMeshCacheDirty;
 	unsigned int m_navMeshDrawFlags;
 	duDrawTraverseLinkParams m_traverseLinkDrawParams;
 	rdVec3D m_recastDrawOffset;
@@ -340,9 +363,9 @@ public:
 	inline float getCellHeight() const { return m_cellHeight; }
 	
 	inline unsigned int getNavMeshDrawFlags() const { return m_navMeshDrawFlags; }
-	inline void setNavMeshDrawFlags(unsigned int flags) { m_navMeshDrawFlags = flags; }
+	inline void setNavMeshDrawFlags(unsigned int flags) { m_navMeshDrawFlags = flags; m_navMeshCacheDirty = true; }
 
-	inline void toggleNavMeshDrawFlag(unsigned int flag) { m_navMeshDrawFlags ^= flag; }
+	inline void toggleNavMeshDrawFlag(unsigned int flag) { m_navMeshDrawFlags ^= flag; m_navMeshCacheDirty = true; }
 
 	inline NavMeshType_e getSelectedNavMeshType() const { return m_selectedNavMeshType; }
 	inline NavMeshType_e getLoadedNavMeshType() const { return m_loadedNavMeshType; }
@@ -373,6 +396,11 @@ public:
 	void handleCommonSettings();
 
 	void updateTraverseLinkRenderParams();
+	void drawInputMeshCached(float maxSlope, float texScale);
+	void drawNavMeshCached(unsigned int flags);
+	void invalidateNavMeshCache() { m_navMeshCacheDirty = true; }
+
+	static void drawDisplayListFast(DisplayListCache& cache, duDebugDraw* dd);
 
 	void createTraverseLinkParams(dtTraverseLinkConnectParams& params);
 

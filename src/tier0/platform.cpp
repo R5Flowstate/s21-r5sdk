@@ -1,113 +1,138 @@
+#if defined(CLIENT_DLL)
 #include "tier0/platform_internal.h"
 #include "tier0/dbg.h"
-#include "tier1/strtools.h"
 
 //-----------------------------------------------------------------------------
-// Purpose: checks if the URL path contains a file extension that isn't a
-//          safe web-page extension. URLs with no extension are allowed.
-// Input  : *urlText -
-// Output : true if the URL should be blocked
-//-----------------------------------------------------------------------------
-static bool Plat_HasDisallowedExtension(const char* urlText)
-{
-	static const char* const s_AllowedExtensions[] =
-	{
-		".htm", ".html", ".php", ".asp", ".aspx", ".jsp", ".cgi",
-	};
-
-	// Skip past "scheme://host" to the path portion.
-	const char* pPath = V_strstr(urlText, "://");
-	if (pPath)
-		pPath = V_strstr(pPath + 3, "/");
-
-	if (!pPath)
-		return false; // No path (e.g. "https://google.com") — allow.
-
-	// Trim query string and fragment from the path.
-	size_t pathLen = V_strlen(pPath);
-	const char* pTrim = V_strnchr(pPath, '?', pathLen);
-	const char* pHash = V_strnchr(pPath, '#', pathLen);
-
-	if (pTrim && pHash)
-		pTrim = (pHash < pTrim) ? pHash : pTrim;
-	else if (pHash)
-		pTrim = pHash;
-
-	const char* pEnd = pTrim ? pTrim : pPath + pathLen;
-
-	// Find the last '.' after the last '/'.
-	const char* pDot = nullptr;
-	for (const char* p = pEnd - 1; p >= pPath; p--)
-	{
-		if (*p == '/')
-			break; // No dot in the final segment.
-		if (*p == '.')
-		{
-			pDot = p;
-			break;
-		}
-	}
-
-	if (!pDot)
-		return false; // No extension — allow.
-
-	// Block if the extension doesn't match an allowed web-page extension.
-	const size_t extLen = static_cast<size_t>(pEnd - pDot);
-
-	for (size_t i = 0; i < V_ARRAYSIZE(s_AllowedExtensions); i++)
-	{
-		if (extLen == V_strlen(s_AllowedExtensions[i]) &&
-			V_strnicmp(pDot, s_AllowedExtensions[i], extLen) == 0)
-			return false;
-	}
-
-	return true;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: sanitizes URL before passing to platform web browser launcher.
-//          blocks non-http(s) schemes to prevent RCE via file:// or other
-//          dangerous protocols. Even for valid URLs, we avoid the engine's
-//          ShellExecuteA fallback and open the default browser directly.
-// Input  : *urlText - 
-//          flags - 
+// Script/engine LaunchExternalWebBrowser ends in ShellExecuteA("open"). A
+// packed UI script or loc string can pass file:// (or any scheme) and run
+// a local .exe. We do not open URLs; never call the original.
 //-----------------------------------------------------------------------------
 static void _Plat_LaunchExternalWebBrowser(const char* urlText, unsigned int flags)
 {
-	if (!urlText || !*urlText)
-		return;
-		
-	if (V_strnicmp(urlText, "http://", 7) != 0 &&
-		V_strnicmp(urlText, "https://", 8) != 0)
-	{
-		Warning(eDLL_T::ENGINE,
-			"Blocked LaunchExternalWebBrowser call with disallowed scheme!\n"
-			" URL: '%.128s'\n"
-			" Only 'http://' and 'https://' URLs are permitted.\n",
-			urlText);
-		return;
-	}
-
-	if (Plat_HasDisallowedExtension(urlText))
-	{
-		Warning(eDLL_T::ENGINE,
-			"Blocked LaunchExternalWebBrowser call with disallowed file extension!\n"
-			" URL: '%.128s'\n",
-			urlText);
-		return;
-	}
-
-	// Pass through to the original; Origin/Steam overlays will handle it if
-	// available. If neither is active the engine falls back to ShellExecuteA,
-	// which is safe here because we've already validated the scheme above —
-	// ShellExecuteA with "open" on an http(s) URL just launches the default
-	// browser, and the browser's own security handles any server redirects.
-	v_Plat_LaunchExternalWebBrowser(urlText, flags);
+	(void)flags;
+	Warning(eDLL_T::ENGINE,
+		"[Plat] LaunchExternalWebBrowser noop url='%.128s'\n",
+		urlText ? urlText : "");
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: gets the process up time in seconds
-// Output : double
+// Output: double
+//-----------------------------------------------------------------------------
+static double Plat_FloatTime_Fallback()
+{
+	static LARGE_INTEGER s_Start = {};
+	static LARGE_INTEGER s_Freq = {};
+	static bool s_Init = false;
+	if (!s_Init)
+	{
+		QueryPerformanceFrequency(&s_Freq);
+		QueryPerformanceCounter(&s_Start);
+		s_Init = true;
+	}
+	LARGE_INTEGER now;
+	QueryPerformanceCounter(&now);
+	return (double)(now.QuadPart - s_Start.QuadPart) / (double)s_Freq.QuadPart;
+}
+
+double Plat_FloatTime()
+{
+	if (v_Plat_FloatTime)
+		return v_Plat_FloatTime();
+	return Plat_FloatTime_Fallback();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: gets the process up time in milliseconds
+// Output: uint64_t
+//-----------------------------------------------------------------------------
+uint64_t Plat_MSTime()
+{
+	if (v_Plat_MSTime)
+		return v_Plat_MSTime();
+	return (uint64_t)(Plat_FloatTime_Fallback() * 1000.0);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: reports time the calling thread spent blocked on something the game
+//          did not ask for, so a duration measurement can discount it.
+// Input: flSeconds -
+//-----------------------------------------------------------------------------
+static thread_local double s_flThreadStallTime = 0.0;
+
+void Plat_AccumulateStallTime(double flSeconds)
+{
+	if (flSeconds > 0.0)
+		s_flThreadStallTime += flSeconds;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: monotonic per-thread total of the above; diff two snapshots.
+// Output: double
+//-----------------------------------------------------------------------------
+double Plat_GetThreadStallTime()
+{
+	return s_flThreadStallTime;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: raw QPC seconds for measuring blocked intervals. Never routed through
+//          Plat_FloatTime -- the stall scope runs from the first boot log line,
+//          before the engine's clock pointer is resolved.
+// Output: double
+//-----------------------------------------------------------------------------
+double Plat_StallClockSeconds()
+{
+	static LARGE_INTEGER s_Freq = {};
+
+	if (!s_Freq.QuadPart)
+		QueryPerformanceFrequency(&s_Freq);
+
+	LARGE_INTEGER now;
+	QueryPerformanceCounter(&now);
+
+	return (double)now.QuadPart / (double)s_Freq.QuadPart;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: gets the process up time ( !! INTERNAL ONLY !! DO NOT USE !! ).
+// Output: const char*
+//-----------------------------------------------------------------------------
+const char* Plat_GetProcessUpTime()
+{
+	// Thread-local: the returned pointer outlives the call in EngineLoggerSink
+	// (it is still read after the log lock is dropped), so a shared buffer lets
+	// one thread rewrite another thread's timestamp mid-line.
+	static thread_local char szBuf[4096];
+	sprintf_s(szBuf, sizeof(szBuf), "[%.3f] ", Plat_FloatTime());
+
+	return szBuf;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: gets the process up time.
+// Input: *szBuf --
+// nSize --
+//-----------------------------------------------------------------------------
+void Plat_GetProcessUpTime(char* szBuf, size_t nSize)
+{
+	sprintf_s(szBuf, nSize, "[%.3f] ", Plat_FloatTime());
+}
+
+void VPlatform::Detour(const bool bAttach) const
+{
+	if (v_Plat_LaunchExternalWebBrowser)
+		DetourSetup(&v_Plat_LaunchExternalWebBrowser, &_Plat_LaunchExternalWebBrowser, bAttach);
+	else if (bAttach)
+		Warning(eDLL_T::ENGINE, "[Plat] LaunchExternalWebBrowser pattern unresolved -- ShellExecute path still live\n");
+}
+#else // !CLIENT_DLL
+#include "tier0/platform_internal.h"
+#include "tier0/dbg.h"
+
+//-----------------------------------------------------------------------------
+// Purpose: gets the process up time in seconds
+// Output: double
 //-----------------------------------------------------------------------------
 double Plat_FloatTime()
 {
@@ -116,7 +141,7 @@ double Plat_FloatTime()
 
 //-----------------------------------------------------------------------------
 // Purpose: gets the process up time in milliseconds
-// Output : uint64_t
+// Output: uint64_t
 //-----------------------------------------------------------------------------
 uint64_t Plat_MSTime()
 {
@@ -124,12 +149,56 @@ uint64_t Plat_MSTime()
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: reports time the calling thread spent blocked on something the game
+//          did not ask for, so a duration measurement can discount it.
+// Input: flSeconds -
+//-----------------------------------------------------------------------------
+static thread_local double s_flThreadStallTime = 0.0;
+
+void Plat_AccumulateStallTime(double flSeconds)
+{
+	if (flSeconds > 0.0)
+		s_flThreadStallTime += flSeconds;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: monotonic per-thread total of the above; diff two snapshots.
+// Output: double
+//-----------------------------------------------------------------------------
+double Plat_GetThreadStallTime()
+{
+	return s_flThreadStallTime;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: raw QPC seconds for measuring blocked intervals. Never routed through
+//          Plat_FloatTime -- the stall scope runs from the first boot log line,
+//          before the engine's clock pointer is resolved.
+// Output: double
+//-----------------------------------------------------------------------------
+double Plat_StallClockSeconds()
+{
+	static LARGE_INTEGER s_Freq = {};
+
+	if (!s_Freq.QuadPart)
+		QueryPerformanceFrequency(&s_Freq);
+
+	LARGE_INTEGER now;
+	QueryPerformanceCounter(&now);
+
+	return (double)now.QuadPart / (double)s_Freq.QuadPart;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: gets the process up time ( !! INTERNAL ONLY !! DO NOT USE !! ).
-// Output : const char*
+// Output: const char*
 //-----------------------------------------------------------------------------
 const char* Plat_GetProcessUpTime()
 {
-	static char szBuf[4096];
+	// Thread-local: the returned pointer outlives the call in EngineLoggerSink
+	// (it is still read after the log lock is dropped), so a shared buffer lets
+	// one thread rewrite another thread's timestamp mid-line.
+	static thread_local char szBuf[4096];
 	sprintf_s(szBuf, sizeof(szBuf), "[%.3f] ", v_Plat_FloatTime ? Plat_FloatTime() : 0.0);
 
 	return szBuf;
@@ -137,8 +206,8 @@ const char* Plat_GetProcessUpTime()
 
 //-----------------------------------------------------------------------------
 // Purpose: gets the process up time.
-// Input  : *szBuf - 
-//			nSize - 
+// Input: *szBuf - 
+// nSize - 
 //-----------------------------------------------------------------------------
 void Plat_GetProcessUpTime(char* szBuf, size_t nSize)
 {
@@ -147,5 +216,6 @@ void Plat_GetProcessUpTime(char* szBuf, size_t nSize)
 
 void VPlatform::Detour(const bool bAttach) const
 {
-	DetourSetup(&v_Plat_LaunchExternalWebBrowser, &_Plat_LaunchExternalWebBrowser, bAttach);
+	(void)bAttach;
 }
+#endif // CLIENT_DLL

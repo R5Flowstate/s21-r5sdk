@@ -1,9 +1,9 @@
 //========= Copyright (c) 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: A Class to create a window that you can type and edit text in.
-//          Window can hold single line or multiline text. 
-//          If it is single it can scroll horizontally in response to 
-//          key input and mouse selection.
+// Window can hold single line or multiline text. 
+// If it is single it can scroll horizontally in response to 
+// key input and mouse selection.
 //
 // $NoKeywords: $
 //=============================================================================//

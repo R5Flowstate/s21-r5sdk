@@ -1,21 +1,19 @@
 #ifndef ENGINE_STATICPROP_BOUNDS_DEBUG_H
 #define ENGINE_STATICPROP_BOUNDS_DEBUG_H
+//=============================================================================//
+//
+// Purpose: Static prop bounds debug draw / dump helpers
+//
+//=============================================================================//
 #pragma once
 #include "tier0/basetypes.h"
 #include "thirdparty/detours/include/idetour.h"
 
 //-----------------------------------------------------------------------------
-// Debug hook for static prop bounds check function (sub_7FF710844940)
-// This function is called during visibility traversal and crashes when
-// accessing invalid static prop indices.
-//
-// Function signature:
-//   bool __fastcall StaticPropBoundsCheck(unsigned int staticPropIndex, float* position, float radiusSq)
-//
-// Globals accessed:
-//   qword_7FF711CF4E80 = static prop runtime data (32-byte stride)
-//   qword_7FF711CF4EA0 = static prop bounds (24-byte stride)
-//   dword_7FF71B92DA5C = static prop threshold (objRef values >= this are static props)
+// Debug hook for StaticPropBoundsCheck during vis traversal.
+// Crashes on bad static-prop indices; resolves data/bounds/threshold globals
+// (data 32-byte stride, bounds 24-byte stride).
+// bool StaticPropBoundsCheck(unsigned int staticPropIndex, float* position, float radiusSq)
 //-----------------------------------------------------------------------------
 
 // Original function pointer
@@ -25,12 +23,12 @@ inline bool(*v_StaticPropBoundsCheck)(unsigned int staticPropIndex, float* posit
 bool StaticPropBoundsCheck_Hook(unsigned int staticPropIndex, float* position, float radiusSq);
 
 // Globals for debugging
-inline void** g_pStaticPropData = nullptr;       // qword_7FF711CF4E80
-inline void** g_pStaticPropBounds = nullptr;     // qword_7FF711CF4EA0
-inline int* g_pStaticPropThreshold = nullptr;    // dword_7FF71B92DA5C
+inline void** g_pStaticPropData = nullptr;
+inline void** g_pStaticPropBounds = nullptr;
+inline int* g_pStaticPropThreshold = nullptr;
 
 // BSP version global - declared as extern in cpp
-extern int* g_pBspVersion;  // dword_7FF736C9C6C4
+extern int* g_pBspVersion;
 
 ///////////////////////////////////////////////////////////////////////////////
 class VStaticPropBoundsDebug : public IDetour
@@ -46,34 +44,26 @@ class VStaticPropBoundsDebug : public IDetour
 	
 	virtual void GetFun(void) const
 	{
-		// Pattern for sub_7FF710844940:
-		// 48 83 EC 48              sub     rsp, 48h
-		// F3 0F 10 62 04           movss   xmm4, dword ptr [rdx+4]
-		// 0F 57 C0                 xorps   xmm0, xmm0
-		// 48 8B 05 ?? ?? ?? ??     mov     rax, cs:qword_7FF711CF4E80
+		// Match StaticPropBoundsCheck prologue (first RIP-relative global load).
 		Module_FindPattern(g_GameDll, "48 83 EC 48 F3 0F 10 62 04 0F 57 C0 48 8B 05").GetPtr(v_StaticPropBoundsCheck);
 	}
 	
 	virtual void GetVar(void) const
 	{
-		// Get globals from the function
+		// Resolve RIP-relative globals from StaticPropBoundsCheck and related patterns.
 		if (v_StaticPropBoundsCheck)
 		{
-			// qword_7FF711CF4E80 is at function+0xC with 7-byte RIP-relative addressing
+			// Static prop data base at function+0xC (7-byte RIP-relative mov).
 			CMemory funcMem((uintptr_t)v_StaticPropBoundsCheck);
 			funcMem.Offset(0xC).ResolveRelativeAddressSelf(3, 7).GetPtr(g_pStaticPropData);
-			
-			// qword_7FF711CF4EA0 is accessed later in the function
-			// Pattern: 48 8B 05 ?? ?? ?? ?? (mov rax, cs:qword_7FF711CF4EA0) around offset 0x48
+
+			// Bounds table around +0x48 (same RIP-relative form).
 			funcMem.Offset(0x48).ResolveRelativeAddressSelf(3, 7).GetPtr(g_pStaticPropBounds);
-			
-			// dword_7FF71B92DA5C - find via pattern "44 2B 0D" = sub r9d, cs:dword_...
-			// Pattern: 44 2B 0D ?? ?? ?? ?? 41 8B D9 C1 EB 1F
-			// This is the threshold global set during BSP loading
+
+			// Threshold set during BSP load: sub r9d, [rip+disp] then shifts.
 			Module_FindPattern(g_GameDll, "44 2B 0D ?? ?? ?? ?? 41 8B D9 C1 EB 1F").Offset(3).ResolveRelativeAddressSelf(0, 4).GetPtr(g_pStaticPropThreshold);
-			
-			// dword_7FF736C9C6C4 - BSP version global
-			// Pattern: cmp cs:dword_7FF736C9C6C4, 2Eh = 83 3D ?? ?? ?? ?? 2E
+
+			// BSP version: cmp [rip+disp], 0x2E.
 			Module_FindPattern(g_GameDll, "83 3D ?? ?? ?? ?? 2E 48 8B 05").Offset(2).ResolveRelativeAddressSelf(0, 5).GetPtr(g_pBspVersion);
 		}
 	}

@@ -1,6 +1,6 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -51,7 +51,7 @@ public:
 	// A block of CUserCmds has arrived from the user, decode them and buffer for execution during player simulation
 	virtual void			ProcessUsercmds(edict_t nEntity, bf_read* buf, int numCmds, int totalCmds, int droppedPackets, bool ignore, bool paused) = 0;
 
-	virtual void*			sub_140D5F910(edict_t nEntity) = 0;
+	virtual void*			ClientPostUsercmdsUnknown(edict_t nEntity) = 0;
 
 	// The client has submitted a keyvalues command
 	virtual void			ClientCommandKeyValues(edict_t nEntity, KeyValues* pKeyValues) = 0;
@@ -93,27 +93,26 @@ public:
 
 	// Add to the server/client lookup/precache table, the specified string is given a unique index
 	// NOTE: The indices for PrecacheModel are 1 based
-	//  a 0 returned from those methods indicates the model or sound was not correctly precached
+	// a 0 returned from those methods indicates the model or sound was not correctly precached
 	// However, generic and decal are 0 based
 	// If preload is specified, the file is loaded into the server/client's cache memory before level startup, otherwise
-	//  it'll only load when actually used (which can cause a disk i/o hitch if it occurs during play of a level).
+	// it'll only load when actually used (which can cause a disk i/o hitch if it occurs during play of a level).
 	virtual int			PrecacheModel(const char* szName) = 0;
 	virtual int			PrecacheDecal(const char* szName) = 0;
 
 	virtual int			GetNumEdicts(void) const = 0;
 
-	// !TODO:
-	virtual void sub_140313E70(void) = 0;
-	virtual void sub_140313EC0(void) = 0;
-	virtual void sub_140313F10(void) = 0;
-	virtual void sub_140313F70(void) = 0;
-	virtual void sub_140313FB0(void) = 0;
-	virtual void sub_140314020(void) = 0;
-	virtual void sub_140314060(void) = 0;
-	virtual void sub_140314080(void) = 0;
-	virtual void sub_1403140C0(void) = 0;
-	virtual void sub_140314140(void) = 0;
-	virtual void sub_140314150(void) = 0;
+	virtual void EngineServerUnknown0(void) = 0;
+	virtual void EngineServerUnknown1(void) = 0;
+	virtual void EngineServerUnknown2(void) = 0;
+	virtual void EngineServerUnknown3(void) = 0;
+	virtual void EngineServerUnknown4(void) = 0;
+	virtual void EngineServerUnknown5(void) = 0;
+	virtual void EngineServerUnknown6(void) = 0;
+	virtual void EngineServerUnknown7(void) = 0;
+	virtual void EngineServerUnknown8(void) = 0;
+	virtual void EngineServerUnknown9(void) = 0;
+	virtual void EngineServerUnknown10(void) = 0;
 
 
 	virtual bool		EmptyEdictSlotsAvailable(void) const = 0;
@@ -129,8 +128,8 @@ public:
 	// Issue the specified command to the specified client (mimics that client typing the command at the console).
 	virtual void		ClientCommand(const edict_t pEdict, PRINTF_FORMAT_STRING const char* szFmt, ...) FMTFUNCTION(3, 4) = 0;
 
-	// Set the lightstyle to the specified value and network the change to any connected clients.  Note that val must not 
-	//  change place in memory (use MAKE_STRING) for anything that's not compiled into your mod.
+	// Set the lightstyle to the specified value and network the change to any connected clients. Note that val must not 
+	// change place in memory (use MAKE_STRING) for anything that's not compiled into your mod.
 	virtual void		LightStyle( int nStyle, PRINTF_FORMAT_STRING const char *szVal ) = 0;
 
 	virtual bf_write*	UserMessageBegin(CRecipientFilter* filter, int a3, char* szMessageName, int nMsgIdx) = 0;
@@ -140,11 +139,11 @@ public:
 	// Print szMsg to the client console.
 	virtual void		ClientPrintf(const edict_t nEdict, const char* szMsg) = 0;
 
-	// SINGLE PLAYER/LISTEN SERVER ONLY (just matching the client .dll api for this)
+	// SINGLE PLAYER/LISTEN SERVER ONLY (just matching the client.dll api for this)
 	// Prints the formatted string to the notification area of the screen ( down the right hand edge
-	//  numbered lines starting at position 0
+	// numbered lines starting at position 0
 	virtual void		Con_NPrintf( int nPos, const char *szFmt, ... ) = 0; // Might not work, this vtable pointer points to a implementation that has a signature similar to 'Con_NXPrintf'.
-	// SINGLE PLAYER/LISTEN SERVER ONLY(just matching the client .dll api for this)
+	// SINGLE PLAYER/LISTEN SERVER ONLY(just matching the client.dll api for this)
 	// Similar to Con_NPrintf, but allows specifying custom text color and duration information
 	virtual void		Con_NXPrintf( const struct con_nprint_s *pInfo, const char *szFmt, ... ) = 0;
 
@@ -163,7 +162,7 @@ public:
 
 	// Get the current game directory (hl2, tf2, hl1, cstrike, etc.)
 	virtual void        GetGameDir(char* szGetGameDir, int nMaxlength) = 0;
-	// Used by AI node graph code to determine if .bsp and .ain files are out of date
+	// Used by AI node graph code to determine if.bsp and.ain files are out of date
 	virtual int 		CompareFileTime(const char* szFileName1, const char* szFileName2, int* iCompare) = 0;
 
 	// Locks/unlocks the network string tables (.e.g, when adding bots to server, this needs to happen).
@@ -175,7 +174,7 @@ public:
 	virtual int GetNumFakePlayers(void) const = 0;
 	virtual int GetNumHumanPlayers(void) const = 0;
 
-	// Create a bot with the given name.  Returns -1 if fake client can't be created
+	// Create a bot with the given name. Returns -1 if fake client can't be created
 	virtual edict_t CreateFakeClient(const char* szName, int nTeam) = 0;
 
 	// Get a convar keyvalue for specified client

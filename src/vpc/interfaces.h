@@ -1,6 +1,6 @@
 #pragma once
 #include "tier1/interface.h"
-#include "pluginsdk/ifactory.h"
+#include "vpc/ifactory.h"
 
 /*-----------------------------------------------------------------------------
  * _interfaces.h

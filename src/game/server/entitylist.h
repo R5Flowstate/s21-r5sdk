@@ -1,9 +1,9 @@
 //===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
-// $Workfile:     $
-// $Date:         $
+// $Workfile: $
+// $Date: $
 // $NoKeywords: $
 //===========================================================================//
 #if !defined( ENTITYLIST_H )
@@ -25,7 +25,7 @@ public:
 
 //-----------------------------------------------------------------------------
 // Purpose: a global list of all the entities in the game. All iteration through
-//          entities is done through this object.
+// entities is done through this object.
 //-----------------------------------------------------------------------------
 class CGlobalEntityList : public CBaseEntityList
 {

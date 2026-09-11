@@ -1,6 +1,6 @@
 //====== Copyright 1996-2005, Valve Corporation, All rights reserved. =======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -76,7 +76,7 @@ public:
 	//inline void TransformPlane( const cplane_t &inPlane, cplane_t &outPlane ) const;
 	//inline void InverseTransformPlane( const cplane_t &inPlane, cplane_t &outPlane ) const;
 
-	/// Computes an inverse.  Uses the 'TR' naming to be consistent with the same method in matrix3x4_t (which only works with orthonormal matrices) 
+	/// Computes an inverse. Uses the 'TR' naming to be consistent with the same method in matrix3x4_t (which only works with orthonormal matrices) 
 	inline void InverseTR(CTransform& out) const;
 
 public:

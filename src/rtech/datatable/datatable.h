@@ -1,5 +1,10 @@
 #ifndef RTECH_DATATABLE_H
 #define RTECH_DATATABLE_H
+//=============================================================================//
+//
+// Purpose: RTech datatable system declarations
+//
+//=============================================================================//
 #include "thirdparty/detours/include/idetour.h"
 
 //-----------------------------------------------------------------------------
@@ -40,57 +45,42 @@ struct DataTableHeader
 };
 static_assert(sizeof(DataTableHeader) == 40, "DataTableHeader size mismatch");
 
-struct DiskDatatable
-{
-	DataTableHeader header;
-	uint64_t        guid;
-	char*           memBlock;
-	size_t          memBlockSize;
-	bool            insertedInHashTable;
-	char            rpakPath[256];
-};
+//-----------------------------------------------------------------------------
+// Engine functions (pattern-resolved; no hardcoded RVAs)
+// GetDataTableFromScript is twinned on the dedi (server VM + client/UI VM).
+// Script_GetDatatable is shared across VMs (one copy).
+//-----------------------------------------------------------------------------
+inline DataTableHeader* (*v_GetDataTableFromScript[2])(void* sqvm);
+inline int g_nGetDataTableFromScriptCount = 0;
+inline int64_t (*v_Script_GetDatatable)(void* sqvm) = nullptr;
+inline uint64_t* (*v_sq_newuserdata)(void* sqvm, int size) = nullptr;
+// Second arg is unused on the userdata branch; stack-top is tagged.
+inline int64_t (*v_sq_settypetag)(void* sqvm, int64_t unused, uint64_t typetag) = nullptr;
+inline uint64_t (*v_HashNameAligned)(const char* name);
+inline uint64_t (*v_HashNameUnaligned)(const char* name);
 
 //-----------------------------------------------------------------------------
-// Engine functions
+// Returns the disk override for the datatable the script passed in, or the
+// engine's own header when there is none. Null on a malformed argument.
 //-----------------------------------------------------------------------------
-inline __int64(*v_Script_GetDatatable)(__int64 sqvm);
-inline uint64_t(*v_HashNameAligned)(const char* name);
-inline uint64_t(*v_HashNameUnaligned)(const char* name);
-
-//-----------------------------------------------------------------------------
-// Engine globals
-//-----------------------------------------------------------------------------
-inline void* g_pPakAssetHashTable;
-inline uint64_t* g_pDatatableGuidCache;
+const DataTableHeader* Datatable_ResolveFromScript(void* sqvm);
 
 ///////////////////////////////////////////////////////////////////////////////
 class V_Datatable : public IDetour
 {
 	virtual void GetAdr(void) const
 	{
+		LogFunAdr("GetDataTableFromScript", v_GetDataTableFromScript[0]);
+		if (g_nGetDataTableFromScriptCount > 1)
+			LogFunAdr("GetDataTableFromScript_1", v_GetDataTableFromScript[1]);
 		LogFunAdr("Script_GetDatatable", v_Script_GetDatatable);
+		LogFunAdr("sq_newuserdata", v_sq_newuserdata);
+		LogFunAdr("sq_settypetag", v_sq_settypetag);
 		LogFunAdr("HashNameAligned", v_HashNameAligned);
 		LogFunAdr("HashNameUnaligned", v_HashNameUnaligned);
-		LogVarAdr("g_pPakAssetHashTable", g_pPakAssetHashTable);
-		LogVarAdr("g_pDatatableGuidCache", g_pDatatableGuidCache);
 	}
-	virtual void GetFun(void) const
-	{
-		v_Script_GetDatatable = reinterpret_cast<decltype(v_Script_GetDatatable)>(
-			g_GameDll.GetModuleBase() + 0x7F19A0);
-		v_HashNameAligned = reinterpret_cast<decltype(v_HashNameAligned)>(
-			g_GameDll.GetModuleBase() + 0x46CD80);
-		v_HashNameUnaligned = reinterpret_cast<decltype(v_HashNameUnaligned)>(
-			g_GameDll.GetModuleBase() + 0x46CEA0);
-	}
-	virtual void GetVar(void) const
-	{
-		CMemory pakFind(g_GameDll.GetModuleBase() + 0x442172);
-		g_pPakAssetHashTable = pakFind.ResolveRelativeAddressSelf(0x3, 0x7).RCast<void*>();
-
-		CMemory guidCache(g_GameDll.GetModuleBase() + 0x7F1BDF);
-		g_pDatatableGuidCache = guidCache.ResolveRelativeAddressSelf(0x3, 0x7).RCast<uint64_t*>();
-	}
+	virtual void GetFun(void) const;
+	virtual void GetVar(void) const { }
 	virtual void GetCon(void) const { }
 	virtual void Detour(const bool bAttach) const;
 };

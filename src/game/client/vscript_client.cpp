@@ -7,12 +7,12 @@
 // Read the documentation in 'game/shared/vscript_shared.cpp' before modifying
 // existing code or adding new code!
 // 
-// To create client script bindings:
-// - use the DEFINE_CLIENT_SCRIPTFUNC_NAMED() macro.
+// To create client script bindings
+// - use the DEFINE_CLIENT_SCRIPTFUNC_NAMED macro.
 // - prefix your function with "ClientScript_" i.e.: "ClientScript_GetVersion".
 // 
-// To create ui script bindings:
-// - use the DEFINE_UI_SCRIPTFUNC_NAMED() macro.
+// To create ui script bindings
+// - use the DEFINE_UI_SCRIPTFUNC_NAMED macro.
 // - prefix your function with "UIScript_" i.e.: "UIScript_GetVersion".
 // 
 //=============================================================================//
@@ -24,188 +24,170 @@
 #include "engine/host_state.h"
 #include "engine/debugoverlay.h"
 #include "pluginsystem/pluginsystem.h"
-#include "networksystem/pylon.h"
+#include "networksystem/spire.h"
+#include "localize/localize_disk.h"
+#include "ebisusdk/EbisuSDK.h"
 #include "networksystem/listmanager.h"
 #include "networksystem/hostmanager.h"
+#include "pluginsystem/modsystem.h"
+#include "engine/client/bridge_connect_password.h"
+#include "game/client/hud_basechat.h"
 
 #include "vscript/vscript.h"
 #include "vscript/languages/squirrel_re/include/sqvm.h"
 
 #include "game/shared/vscript_gamedll_defs.h"
+#include "game/shared/scriptnetdata_limits.h"
 
 #include "game/shared/vscript_shared.h"
-#include "game/shared/vscript_debug_overlay_shared.h"
 
 #include "vscript_client.h"
-#include "viewmodel_poseparam.h"
+#include "vscript_player.h"
+#include "scriptnetdata_client.h"
+#include "ruitracks.h"
+#include "vscript/vsquirrel_s21.h"
 #include "game/client/clientleafsystem.h"
+#include "game/client/c_baseentity.h"
 #include "game/shared/weapon_script_vars.h"
+#include "game/shared/globalnonrewind_vars.h"
+#include "game/shared/deathfield_system.h"
+#include "game/shared/highlight_context.h"
+#include "game/shared/status_effects_sdk.h"
+#include "classvar_natives.h"
+#include "vscript/languages/squirrel_re/include/sqarray.h"
+#include "public/globalvars_base.h"
+#include "inputsystem/inputsystem.h"
 
-/*
-=====================
-SQVM_ClientScript_f
+extern CGlobalVarsBase* gpGlobals;
 
-  Executes input on the
-  VM in CLIENT context.
-=====================
-*/
-static void SQVM_ClientScript_f(const CCommand& args)
+// NOTE: script_client / script_ui ConCommands live in vsquirrel_s21.cpp.
+// Defining them here in client_static.lib made the linker drop this TU.
+
+//-----------------------------------------------------------------------------
+// Purpose: performance-HUD SPING for system menu (not EA MyPing). Late-reg only.
+//-----------------------------------------------------------------------------
+SQRESULT UIScript_GetConnectionPingMs(HSQUIRRELVM v)
 {
-    if (args.ArgC() >= 2)
+    if (!v || !v_sq_pushinteger)
     {
-        Script_Execute(args.ArgS(), SQCONTEXT::CLIENT);
+        Warning(eDLL_T::CLIENT,
+            "GetConnectionPingMs: v_sq_pushinteger unresolved (v=%p)\n", (void*)v);
+        return SQ_ERROR;
+    }
+    v_sq_pushinteger(v, static_cast<SQInteger>(RuiTracks_GetConnectionPingMs()));
+    return SQ_OK;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: report platform identity progress to the menu
+// Output: one of PLATFORM_IDENTITY_*, mirrored by ePlatformIdentity in script
+//-----------------------------------------------------------------------------
+SQRESULT UIScript_GetPlatformIdentityState(HSQUIRRELVM v)
+{
+    if (!v || !v_sq_pushinteger)
+    {
+        Warning(eDLL_T::CLIENT,
+            "GetPlatformIdentityState: v_sq_pushinteger unresolved (v=%p)\n", (void*)v);
+        return SQ_ERROR;
+    }
+    v_sq_pushinteger(v, static_cast<SQInteger>(EbisuSDK_GetPlatformIdentityState()));
+    return SQ_OK;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: register the identity state accessor on the UI VM
+//-----------------------------------------------------------------------------
+void Script_RegisterPlatformIdentityUI(CSquirrelVM* s)
+{
+    if (!s)
+    {
+        Warning(eDLL_T::CLIENT,
+            "[S21-REG] Script_RegisterPlatformIdentityUI: null UI VM\n");
+        return;
+    }
+
+    // Unrecognised return type still registers as 'var'; the error only shows at a call site.
+    const SQRESULT r = Script_RegisterFuncTC_S21(s, "GetPlatformIdentityState",
+        reinterpret_cast<void*>(UIScript_GetPlatformIdentityState),
+        "int", "");
+
+    if (r != SQ_OK)
+    {
+        Warning(eDLL_T::CLIENT,
+            "[S21-REG] GetPlatformIdentityState registration FAILED (r=%d)\n", (int)r);
+        return;
     }
 }
 
-/*
-=====================
-SQVM_UIScript_f
-
-  Executes input on the
-  VM in UI context.
-=====================
-*/
-static void SQVM_UIScript_f(const CCommand& args)
+void Script_RegisterConnectionPingUI(CSquirrelVM* s)
 {
-    if (args.ArgC() >= 2)
+    if (!s)
     {
-        Script_Execute(args.ArgS(), SQCONTEXT::UI);
+        Warning(eDLL_T::CLIENT,
+            "[S21-REG] Script_RegisterConnectionPingUI: null UI VM\n");
+        return;
+    }
+    // Return type must be "integer", not "int".
+    const SQRESULT r = Script_RegisterFuncTC_S21(s, "GetConnectionPingMs",
+        reinterpret_cast<void*>(UIScript_GetConnectionPingMs),
+        "integer", "");
+    if (r != SQ_OK)
+    {
+        Warning(eDLL_T::CLIENT,
+            "[S21-REG] GetConnectionPingMs registration FAILED (r=%d)\n", (int)r);
+        return;
     }
 }
 
-static ConCommand script_client("script_client", SQVM_ClientScript_f, "Run input code as CLIENT script on the VM", FCVAR_DEVELOPMENTONLY | FCVAR_CLIENTDLL | FCVAR_CHEAT);
-static ConCommand script_ui("script_ui", SQVM_UIScript_f, "Run input code as UI script on the VM", FCVAR_DEVELOPMENTONLY | FCVAR_CLIENTDLL | FCVAR_CHEAT);
+// Set while a browser refresh is outstanding so the panel can show a
+// spinner instead of an empty list.
+static std::atomic<bool> s_serverListRequestInFlight{ false };
+// Worker publishes completion here; main thread drains (g_TaskQueue is
+// unpumped -- VHost is not registered on the client).
+static std::atomic<bool> s_serverListComplete{ false };
+static bool s_serverListPendingSuccess = false;
+static size_t s_serverListPendingCount = 0;
+static string s_serverListPendingMessage;
+// Last message from the master server, surfaced to the panel verbatim.
+// Written only on the main thread (drain + natives); no extra lock.
+static string s_serverListMessage;
 
-//-----------------------------------------------------------------------------
-// Purpose: client NDebugOverlay proxies
-//-----------------------------------------------------------------------------
-static SQRESULT ClientScript_DebugDrawSolidBox(HSQUIRRELVM v)
+static void UIScript_FireServerListCompleted(bool success, const string& errorMsg, int serverCount)
 {
-    return SharedScript_DebugDrawSolidBox(v);
-}
-static SQRESULT ClientScript_DebugDrawSweptBox(HSQUIRRELVM v)
-{
-    return SharedScript_DebugDrawSweptBox(v);
-}
-static SQRESULT ClientScript_DebugDrawTriangle(HSQUIRRELVM v)
-{
-    return SharedScript_DebugDrawTriangle(v);
-}
-static SQRESULT ClientScript_DebugDrawSolidSphere(HSQUIRRELVM v)
-{
-    return SharedScript_DebugDrawSolidSphere(v);
-}
-static SQRESULT ClientScript_DebugDrawCapsule(HSQUIRRELVM v)
-{
-    return SharedScript_DebugDrawCapsule(v);
-}
-static SQRESULT ClientScript_CreateBox(HSQUIRRELVM v)
-{
-    return SharedScript_CreateBox(v);
-}
-static SQRESULT ClientScript_ClearBoxes(HSQUIRRELVM v)
-{
-    return SharedScript_ClearBoxes(v);
-}
+	if (!g_pUIScript)
+		return;
 
-//-----------------------------------------------------------------------------
-// Purpose: internal handler for adding debug texts on screen through scripts
-//-----------------------------------------------------------------------------
-static void ClientScript_Internal_DebugScreenTextWithColor(HSQUIRRELVM v, const float posX, const float posY, const Color color, const char* const text)
-{
-    g_pDebugOverlay->AddScreenTextOverlay(posX, posY, NDEBUG_PERSIST_TILL_NEXT_CLIENT, color.r(), color.g(), color.b(), color.a(), text);
+	HSCRIPT onRequestComplete = g_pUIScript->FindFunction(
+		"UICodeCallback_OnServerListRequestCompleted",
+		"void functionref( bool success, string errorMsg, int serverCount )",
+		nullptr);
+
+	if (!onRequestComplete)
+	{
+		Warning(eDLL_T::CLIENT,
+			"[SERVERBROWSER] UICodeCallback_OnServerListRequestCompleted missing\n");
+		return;
+	}
+
+	ScriptVariant_t args[3] = { success, errorMsg.c_str(), serverCount };
+	g_pUIScript->ExecuteFunction(onRequestComplete, args, SDK_ARRAYSIZE(args), nullptr, 0);
+
+	// Not freed on purpose. FindFunction returns engine-allocated memory; free()
+	// through the wrong CRT corrupted the heap (see prior note).
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: adds a debug text on the screen at given position
-//-----------------------------------------------------------------------------
-static SQRESULT ClientScript_DebugScreenText(HSQUIRRELVM v)
+// Main-thread only. Called from list natives so UI scripts that poll in-flight
+// or read the list still get a completion even when VHost/TaskQueue is skipped.
+static void UIScript_DrainServerListCompletion(void)
 {
-    if (g_pDebugOverlay)
-    {
-        SQFloat posX;
-        SQFloat posY;
-        const SQChar* text;
+	if (!s_serverListComplete.exchange(false, std::memory_order_acq_rel))
+		return;
 
-        sq_getfloat(v, 2, &posX);
-        sq_getfloat(v, 3, &posY);
-        sq_getstring(v, 4, &text);
+	s_serverListMessage = s_serverListPendingMessage;
+	const bool success = s_serverListPendingSuccess;
+	const int count = static_cast<int>(s_serverListPendingCount);
 
-        const Color color(255, 255, 255, 255);
-
-        ClientScript_Internal_DebugScreenTextWithColor(v, posX, posY, color, text);
-    }
-
-    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: adds a debug text on the screen at given position with color
-//-----------------------------------------------------------------------------
-static SQRESULT ClientScript_DebugScreenTextWithColor(HSQUIRRELVM v)
-{
-    if (g_pDebugOverlay)
-    {
-        SQFloat posX;
-        SQFloat posY;
-        const SQChar* text;
-        const SQVector3D* colorVec;
-
-        sq_getfloat(v, 2, &posX);
-        sq_getfloat(v, 3, &posY);
-        sq_getstring(v, 4, &text);
-        sq_getvector(v, 5, &colorVec);
-
-        const Color color = Script_VectorToColor(colorVec, 1.0f);
-        ClientScript_Internal_DebugScreenTextWithColor(v, posX, posY, color, text);
-    }
-
-    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: gets the current number of visible objects
-//-----------------------------------------------------------------------------
-static SQRESULT ClientScript_GetVisibleObjectCount(HSQUIRRELVM v)
-{
-	sq_pushinteger(v, static_cast<SQInteger>(ClientLeafSystem_GetVisibleObjectCount()));
-	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: gets the maximum number of visible objects (8191)
-//-----------------------------------------------------------------------------
-static SQRESULT ClientScript_GetVisibleObjectMax(HSQUIRRELVM v)
-{
-	sq_pushinteger(v, static_cast<SQInteger>(ClientLeafSystem_GetVisibleObjectMax()));
-	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: gets the visible object budget threshold
-//-----------------------------------------------------------------------------
-static SQRESULT ClientScript_GetVisibleObjectBudget(HSQUIRRELVM v)
-{
-	sq_pushinteger(v, static_cast<SQInteger>(ClientLeafSystem_GetVisibleObjectBudget()));
-	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: returns whether the visible object system is in overflow
-//-----------------------------------------------------------------------------
-static SQRESULT ClientScript_IsVisibleObjectOverflow(HSQUIRRELVM v)
-{
-	sq_pushbool(v, ClientLeafSystem_IsOverflowing());
-	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: gets the most recent server id
-//-----------------------------------------------------------------------------
-static SQRESULT ClientScript_GetServerID(HSQUIRRELVM v)
-{
-    sq_pushstring(v, Host_GetSessionID(), -1);
-    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+	UIScript_FireServerListCompleted(success, s_serverListMessage, count);
 }
 
 //-----------------------------------------------------------------------------
@@ -213,19 +195,59 @@ static SQRESULT ClientScript_GetServerID(HSQUIRRELVM v)
 //-----------------------------------------------------------------------------
 static SQBool Script_CheckServerIndexAndFailure(HSQUIRRELVM v, SQInteger iServer)
 {
-    SQInteger iCount = static_cast<SQInteger>(g_ServerListManager.m_vServerList.size());
+    const SQInteger iCount = static_cast<SQInteger>(g_ServerListManager.m_vServerList.size());
+    const char* reason = nullptr;
 
-    if (iServer >= iCount)
+    if (iServer == -1) // If its still -1, then 'sq_getinteger' failed
+        reason = "Invalid argument type provided.";
+    else if (iServer < 0)
+        reason = "Index must not be negative.";
+    else if (iServer >= iCount)
+        reason = "Index out of range.";
+
+    if (!reason)
+        return true;
+
+    // v_SQVM_RaiseError is null on this client (safe-mode skips GetFun).
+    if (v_SQVM_RaiseError)
+        v_SQVM_RaiseError(v, "%s (index %i, count %i)\n", reason, (int)iServer, (int)iCount);
+    else
+        Warning(eDLL_T::CLIENT, "[SERVERBROWSER] %s (index %i, count %i)\n",
+            reason, (int)iServer, (int)iCount);
+
+    // One-shot stack dump: S3 this=1, first arg=2.
+    static bool bDumpedStack = false;
+    if (!bDumpedStack)
     {
-        v_SQVM_RaiseError(v, "Index must be less than %i.\n", iCount);
-        return false;
-    }
-    else if (iServer == -1) // If its still -1, then 'sq_getinteger' failed
-    {
-        v_SQVM_RaiseError(v, "Invalid argument type provided.\n");
-        return false;
+        bDumpedStack = true;
+
+        const SQInteger top = sq_gettop(v);
+        Warning(eDLL_T::CLIENT, "[SERVERBROWSER] stack diag: gettop=%i\n", (int)top);
+
+        for (SQInteger i = 1; i <= 4 && i <= top; ++i)
+        {
+            const SQObjectPtr& o = stack_get(v, i);
+            SQInteger asInt = 0;
+            const bool numeric = sq_isnumeric(o) != 0;
+
+            if (numeric)
+                asInt = tointeger(o);
+
+            Warning(eDLL_T::CLIENT, "[SERVERBROWSER]   slot %i: type=0x%08X numeric=%d value=%i\n",
+                (int)i, (unsigned int)sq_type(o), numeric ? 1 : 0, (int)asInt);
+        }
     }
 
+    return false;
+}
+
+// Same bounds as Script_CheckServerIndexAndFailure, but silent -- stale panel index yields a blank row.
+static bool Script_ServerIndexValid(SQInteger iServer)
+{
+    if (iServer < 0)
+        return false;
+    if (iServer >= static_cast<SQInteger>(g_ServerListManager.m_vServerList.size()))
+        return false;
     return true;
 }
 
@@ -236,22 +258,12 @@ static void Internal_UIScript_RequestForServerBrowserListThreaded()
 
     const bool success = g_ServerListManager.RefreshServerList(responseMsg, serverCount);
 
-    g_TaskQueue.Dispatch([success, errorMsg = std::move(responseMsg), serverCount]
-        {
-            if (!g_pUIScript)
-                return;
-
-            HSCRIPT onRequestComplete = g_pUIScript->FindFunction("UICodeCallback_OnServerListRequestCompleted",
-                "void functionref( bool success, string errorMsg, int serverCount )", nullptr);
-
-            if (!onRequestComplete)
-                return;
-
-            ScriptVariant_t args[3] = { success, errorMsg.c_str(), (int)serverCount };
-            g_pUIScript->ExecuteFunction(onRequestComplete, args, SDK_ARRAYSIZE(args), nullptr, 0);
-
-            free(onRequestComplete);
-        }, 0);
+    // Do not use g_TaskQueue: VHost is not in the safe-mode allowlist, so Dispatch never runs.
+    s_serverListPendingSuccess = success;
+    s_serverListPendingCount = serverCount;
+    s_serverListPendingMessage = std::move(responseMsg);
+    s_serverListRequestInFlight.store(false, std::memory_order_release);
+    s_serverListComplete.store(true, std::memory_order_release);
 }
 
 //-----------------------------------------------------------------------------
@@ -259,69 +271,28 @@ static void Internal_UIScript_RequestForServerBrowserListThreaded()
 //-----------------------------------------------------------------------------
 static SQRESULT UIScript_RequestServerList(HSQUIRRELVM v)
 {
+    if (s_serverListRequestInFlight.exchange(true))
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+
+    g_Spire.SetLanguage(Localize_GetCurrentLanguage());
     std::thread(Internal_UIScript_RequestForServerBrowserListThreaded).detach();
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: get current server count from pylon
+// Purpose: get current server count from spire
 //-----------------------------------------------------------------------------
 static SQRESULT UIScript_GetServerCount(HSQUIRRELVM v)
 {
+    UIScript_DrainServerListCompletion();
+
+    AUTO_LOCK(g_ServerListManager.m_Mutex);
+
     size_t iCount = g_ServerListManager.m_vServerList.size();
     sq_pushinteger(v, static_cast<SQInteger>(iCount));
 
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
-
-//-----------------------------------------------------------------------------
-// Purpose: get response from private server request
-//-----------------------------------------------------------------------------
-static SQRESULT UIScript_GetHiddenServerName(HSQUIRRELVM v)
-{
-    const SQChar* privateToken = nullptr;
-
-    if (SQ_FAILED(sq_getstring(v, 2, &privateToken)) || VALID_CHARSTAR(privateToken))
-    {
-        v_SQVM_ScriptError("Empty or null private token");
-        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
-    }
-
-    string hiddenServerRequestMessage;
-    NetGameServer_t serverListing;
-
-    bool result = g_MasterServer.GetServerByToken(serverListing, hiddenServerRequestMessage, privateToken); // Send token connect request.
-    if (!result)
-    {
-        if (hiddenServerRequestMessage.empty())
-            sq_pushstring(v, "Request failed", -1);
-        else
-        {
-            hiddenServerRequestMessage = Format("Request failed: %s", hiddenServerRequestMessage.c_str());
-            sq_pushstring(v, hiddenServerRequestMessage.c_str(), (SQInteger)hiddenServerRequestMessage.length());
-        }
-
-        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-    }
-
-    if (serverListing.name.empty())
-    {
-        if (hiddenServerRequestMessage.empty())
-            hiddenServerRequestMessage = Format("Server listing empty");
-        else
-            hiddenServerRequestMessage = Format("Server listing empty: %s", hiddenServerRequestMessage.c_str());
-
-        sq_pushstring(v, hiddenServerRequestMessage.c_str(), (SQInteger)hiddenServerRequestMessage.length());
-    }
-    else
-    {
-        hiddenServerRequestMessage = Format("Found server: %s", serverListing.name.c_str());
-        sq_pushstring(v, hiddenServerRequestMessage.c_str(), (SQInteger)hiddenServerRequestMessage.length());
-    }
-
-    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-}
-
 //-----------------------------------------------------------------------------
 // Purpose: get server's current name from server list index
 //-----------------------------------------------------------------------------
@@ -452,138 +423,156 @@ static SQRESULT UIScript_GetServerHasPassword(HSQUIRRELVM v)
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: gets the most recent server id
-//-----------------------------------------------------------------------------
-static SQRESULT UIScript_GetServerID(HSQUIRRELVM v)
+static SQRESULT UIScript_GetServerRequiredMods(HSQUIRRELVM v)
 {
-    sq_pushstring(v, Host_GetSessionID(), -1);
+    AUTO_LOCK(g_ServerListManager.m_Mutex);
+
+    SQInteger iServer = -1;
+    sq_getinteger(v, 2, &iServer);
+
+    sq_newarray(v, 0);
+
+    if (!Script_ServerIndexValid(iServer))
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+
+    for (const string& s : g_ServerListManager.m_vServerList[iServer].requiredMods)
+    {
+        sq_pushstring(v, s.c_str(), (SQInteger)s.length());
+        sq_arrayappend(v, -2);
+    }
+
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: get promo data for server browser panels
-//-----------------------------------------------------------------------------
-static SQRESULT UIScript_GetPromoData(HSQUIRRELVM v)
+static SQRESULT UIScript_GetServerAllowedMods(HSQUIRRELVM v)
 {
-    enum class R5RPromoData : SQInteger
-    {
-        PromoLargeTitle,
-        PromoLargeDesc,
-        PromoLeftTitle,
-        PromoLeftDesc,
-        PromoRightTitle,
-        PromoRightDesc
-    };
+    AUTO_LOCK(g_ServerListManager.m_Mutex);
 
-    SQInteger idx = 0;
-    sq_getinteger(v, 2, &idx);
+    SQInteger iServer = -1;
+    sq_getinteger(v, 2, &iServer);
 
-    R5RPromoData ePromoIndex = static_cast<R5RPromoData>(idx);
-    const char* pszPromoKey;
+    sq_newarray(v, 0);
 
-    switch (ePromoIndex)
+    if (!Script_ServerIndexValid(iServer))
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+
+    for (const string& s : g_ServerListManager.m_vServerList[iServer].allowedMods)
     {
-    case R5RPromoData::PromoLargeTitle:
-    {
-        pszPromoKey = "#PROMO_LARGE_TITLE";
-        break;
-    }
-    case R5RPromoData::PromoLargeDesc:
-    {
-        pszPromoKey = "#PROMO_LARGE_DESCRIPTION";
-        break;
-    }
-    case R5RPromoData::PromoLeftTitle:
-    {
-        pszPromoKey = "#PROMO_LEFT_TITLE";
-        break;
-    }
-    case R5RPromoData::PromoLeftDesc:
-    {
-        pszPromoKey = "#PROMO_LEFT_DESCRIPTION";
-        break;
-    }
-    case R5RPromoData::PromoRightTitle:
-    {
-        pszPromoKey = "#PROMO_RIGHT_TITLE";
-        break;
-    }
-    case R5RPromoData::PromoRightDesc:
-    {
-        pszPromoKey = "#PROMO_RIGHT_DESCRIPTION";
-        break;
-    }
-    default:
-    {
-        pszPromoKey = "#PROMO_SDK_ERROR";
-        break;
-    }
+        sq_pushstring(v, s.c_str(), (SQInteger)s.length());
+        sq_arrayappend(v, -2);
     }
 
-    sq_pushstring(v, pszPromoKey, -1);
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
-static void Internal_UIScript_RequestEULAThreaded()
+static SQRESULT UIScript_GetServerModsProfile(HSQUIRRELVM v)
 {
-    MSEulaData_t eulaDataMs;
-    string responseMsg;
+    AUTO_LOCK(g_ServerListManager.m_Mutex);
 
-    const bool success = g_MasterServer.GetEULA(eulaDataMs, responseMsg);
+    SQInteger iServer = -1;
+    sq_getinteger(v, 2, &iServer);
 
-    g_TaskQueue.Dispatch([success, errorMsg = std::move(responseMsg), eulaData = std::move(eulaDataMs)]
-        {
-            if (!g_pUIScript)
-                return;
+    if (!Script_ServerIndexValid(iServer))
+    {
+        sq_pushstring(v, "", 0);
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+    }
 
-            HSCRIPT onRequestComplete = g_pUIScript->FindFunction("UICodeCallback_OnEULARequestCompleted",
-                "void functionref( bool success, string errorMsg, string language, string eulaData )", nullptr);
+    const string& modsProfile = g_ServerListManager.m_vServerList[iServer].modsProfile;
+    sq_pushstring(v, modsProfile.c_str(), (SQInteger)modsProfile.length());
 
-            if (!onRequestComplete)
-                return;
-
-            ScriptVariant_t args[4] = { success, errorMsg.c_str(), eulaData.language.c_str(), eulaData.contents.c_str() };
-            g_pUIScript->ExecuteFunction(onRequestComplete, args, SDK_ARRAYSIZE(args), nullptr, 0);
-
-            free(onRequestComplete);
-        }, 0);
-}
-
-static SQRESULT UIScript_RequestEULAContents(HSQUIRRELVM v)
-{
-    std::thread(Internal_UIScript_RequestEULAThreaded).detach();
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: connect to server from native server browser entries
-//-----------------------------------------------------------------------------
-static SQRESULT UIScript_ConnectToServer(HSQUIRRELVM v)
+static SQRESULT UIScript_GetServerRegion(HSQUIRRELVM v)
 {
-    const SQChar* ipAddress = nullptr;
-    if (SQ_FAILED(sq_getstring(v, 2, &ipAddress)))
+    AUTO_LOCK(g_ServerListManager.m_Mutex);
+
+    SQInteger iServer = -1;
+    sq_getinteger(v, 2, &iServer);
+
+    if (!Script_ServerIndexValid(iServer))
     {
-        v_SQVM_ScriptError("Missing ip address");
-        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+        sq_pushstring(v, "", 0);
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
     }
 
-    const SQChar* cryptoKey = nullptr;
-    if (SQ_FAILED(sq_getstring(v, 3, &cryptoKey)))
+    const string& region = g_ServerListManager.m_vServerList[iServer].region;
+    sq_pushstring(v, region.c_str(), (SQInteger)region.length());
+
+    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT UIScript_GetServerMissingMods(HSQUIRRELVM v)
+{
+    AUTO_LOCK(g_ServerListManager.m_Mutex);
+
+    SQInteger iServer = -1;
+    sq_getinteger(v, 2, &iServer);
+
+    if (!Script_ServerIndexValid(iServer))
     {
-        v_SQVM_ScriptError("Missing encryption key");
-        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+        sq_pushstring(v, "", 0);
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
     }
 
-    const SQChar* password = nullptr;
-    if (SQ_FAILED(sq_getstring(v, 4, &password)))
+    CUtlVector<CUtlString> required;
+    for (const string& s : g_ServerListManager.m_vServerList[iServer].requiredMods)
+        required.AddToTail(s.c_str());
+
+    CUtlVector<CUtlString> missing;
+    ModSystem_ComputeMissing(required, missing);
+
+    string joined;
+    FOR_EACH_VEC(missing, i)
     {
-        password = "";
+        if (i)
+            joined.append(", ");
+        joined.append(missing[i].String());
     }
 
-    Msg(eDLL_T::UI, "Connecting to server with ip address '%s' and encryption key '%s'\n", ipAddress, cryptoKey);
-    g_ServerListManager.ConnectToServer(ipAddress, cryptoKey, password);
+    sq_pushstring(v, joined.c_str(), (SQInteger)joined.length());
+    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
 
+static SQRESULT UIScript_ServerListHasRequiredMods(HSQUIRRELVM v)
+{
+    AUTO_LOCK(g_ServerListManager.m_Mutex);
+
+    SQInteger iServer = -1;
+    sq_getinteger(v, 2, &iServer);
+
+    if (!Script_ServerIndexValid(iServer))
+    {
+        sq_pushbool(v, false);
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+    }
+
+    CUtlVector<CUtlString> required;
+    for (const string& s : g_ServerListManager.m_vServerList[iServer].requiredMods)
+        required.AddToTail(s.c_str());
+
+    sq_pushbool(v, ModSystem_HasRequiredMods(required) ? true : false);
+    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT UIScript_GetServerListMessage(HSQUIRRELVM v)
+{
+    UIScript_DrainServerListCompletion();
+    sq_pushstring(v, s_serverListMessage.c_str(), (SQInteger)s_serverListMessage.length());
+    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT UIScript_IsServerListRequestInFlight(HSQUIRRELVM v)
+{
+    UIScript_DrainServerListCompletion();
+    sq_pushbool(v, s_serverListRequestInFlight.load(std::memory_order_acquire));
+    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT UIScript_ClearConnectPassword(HSQUIRRELVM v)
+{
+    Bridge_SetConnectPassword("");
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
@@ -597,12 +586,6 @@ static SQRESULT UIScript_ConnectToListedServer(HSQUIRRELVM v)
     SQInteger iServer = -1;
     sq_getinteger(v, 2, &iServer);
 
-    const SQChar* password = nullptr;
-    if (SQ_FAILED(sq_getstring(v, 4, &password)))
-    {
-        password = "";
-    }
-
     if (!Script_CheckServerIndexAndFailure(v, iServer))
     {
         SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
@@ -610,179 +593,203 @@ static SQRESULT UIScript_ConnectToListedServer(HSQUIRRELVM v)
 
     const NetGameServer_t& gameServer = g_ServerListManager.m_vServerList[iServer];
 
-    g_ServerListManager.ConnectToServer(gameServer.address, gameServer.port, gameServer.netKey, password);
+    g_ServerListManager.ConnectToServer(gameServer.address, gameServer.port, gameServer.netKey, string());
 
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: request token from pylon and join server with result.
-//-----------------------------------------------------------------------------
-static SQRESULT UIScript_ConnectToHiddenServer(HSQUIRRELVM v)
+// EULA text from the master server. Pull-based: no main-thread tick to dispatch a callback from here.
+static std::atomic<bool> s_eulaRequestInFlight{ false };
+static std::atomic<bool> s_eulaComplete{ false };
+static string s_eulaPendingContents;
+static int s_eulaPendingVersion = 0;
+// Main-thread only, published by the drain below.
+static string s_eulaContents;
+static int s_eulaVersion = 0;
+
+static void Internal_UIScript_RequestEULAThreaded_S21()
 {
-    const SQChar* privateToken = nullptr;
-    const SQRESULT strRet = sq_getstring(v, 2, &privateToken);
+    MSEulaData_t eulaData;
+    string responseMsg;
 
-    if (SQ_FAILED(strRet) || VALID_CHARSTAR(privateToken))
+    if (g_Spire.GetEULA(eulaData, responseMsg))
     {
-        v_SQVM_ScriptError("Empty or null private token");
-        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
-    }
-
-    string hiddenServerRequestMessage;
-    NetGameServer_t netListing;
-
-    const bool result = g_MasterServer.GetServerByToken(netListing, hiddenServerRequestMessage, privateToken); // Send token connect request.
-    if (result)
-    {
-        g_ServerListManager.ConnectToServer(netListing.address, netListing.port, netListing.netKey, "");
+        s_eulaPendingContents = std::move(eulaData.contents);
+        s_eulaPendingVersion = eulaData.version;
     }
     else
     {
-        Warning(eDLL_T::UI, "Failed to connect to private server: %s\n", hiddenServerRequestMessage.c_str());
+        Warning(eDLL_T::CLIENT, "[EULA] fetch failed: %s\n", responseMsg.c_str());
+        s_eulaPendingContents.clear();
+        s_eulaPendingVersion = 0;
     }
 
+    s_eulaRequestInFlight.store(false, std::memory_order_release);
+    s_eulaComplete.store(true, std::memory_order_release);
+}
+
+static void UIScript_DrainEULACompletion()
+{
+    if (!s_eulaComplete.exchange(false, std::memory_order_acquire))
+        return;
+
+    s_eulaContents = std::move(s_eulaPendingContents);
+    s_eulaVersion = s_eulaPendingVersion;
+}
+
+static SQRESULT UIScript_RequestEULAContents(HSQUIRRELVM v)
+{
+    if (s_eulaRequestInFlight.exchange(true))
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+
+    const char* lang = Localize_GetCurrentLanguage();
+    g_Spire.SetLanguage(lang);
+    DevMsg(eDLL_T::CLIENT, "[EULA] requesting lang='%s'\n", lang);
+    std::thread(Internal_UIScript_RequestEULAThreaded_S21).detach();
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: create server via native server browser entries
-// TODO: return a boolean on failure instead of raising an error, so we could
-// determine from scripts whether or not to spin a local server, or connect
-// to a dedicated server (for disconnecting and loading the lobby, for example)
-//-----------------------------------------------------------------------------
-static SQRESULT UIScript_CreateServer(HSQUIRRELVM v)
+// Empty until the fetch lands, and after a failure: the script keeps its built-in
+// text in that case rather than showing a blank agreement.
+static SQRESULT UIScript_GetEULAContents(HSQUIRRELVM v)
 {
-    const SQChar* serverName = nullptr;
-    const SQChar* serverDescription = nullptr;
-    const SQChar* serverMapName = nullptr;
-    const SQChar* serverPlaylist = nullptr;
-
-    sq_getstring(v, 2, &serverName);
-    sq_getstring(v, 3, &serverDescription);
-    sq_getstring(v, 4, &serverMapName);
-    sq_getstring(v, 5, &serverPlaylist);
-
-    SQInteger serverVisibility = 0;
-    sq_getinteger(v, 6, &serverVisibility);
-
-    if (!VALID_CHARSTAR(serverName) ||
-        !VALID_CHARSTAR(serverMapName) ||
-        !VALID_CHARSTAR(serverPlaylist))
-    {
-        v_SQVM_ScriptError("Empty or null server criteria");
-        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
-    }
-
-    hostname->SetValue(serverName);
-    hostdesc.SetValue(serverDescription);
-
-    pylon_host_visibility.SetValue((int)serverVisibility);
-
-    // Launch server.
-    g_ServerHostManager.LaunchServer(serverMapName, serverPlaylist);
-
+    UIScript_DrainEULACompletion();
+    sq_pushstring(v, s_eulaContents.c_str(), -1);
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: shuts the server down and disconnects all clients
-//-----------------------------------------------------------------------------
-static SQRESULT UIScript_DestroyServer(HSQUIRRELVM v)
+// 0 means the master server served no version; the script keeps its local one so
+// players are not re-prompted on every launch.
+static SQRESULT UIScript_GetEULAVersion(HSQUIRRELVM v)
 {
-    if (g_pHostState->m_bActiveGame)
-        g_pHostState->m_iNextState = HostStates_t::HS_GAME_SHUTDOWN;
-
+    UIScript_DrainEULACompletion();
+    sq_pushinteger(v, static_cast<SQInteger>(s_eulaVersion));
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
 //---------------------------------------------------------------------------------
-// Purpose: registers script functions in CLIENT context
-// Input  : *s - 
+// Purpose: binds the server-browser natives to the UI VM. Late-register; bulk UI register is not fired.
 //---------------------------------------------------------------------------------
-void Script_RegisterClientFunctions(CSquirrelVM* s)
+void Script_RegisterServerBrowserUI(CSquirrelVM* s)
 {
-    Script_RegisterCommonAbstractions(s);
-    Script_RegisterCoreClientFunctions(s);
-
-    // NOTE: plugin functions must always come after SDK functions!
-    for (auto& callback : !PluginSystem()->GetRegisterClientScriptFuncsCallbacks())
+    if (!s)
     {
-        // Register script functions inside plugins.
-        callback.Function()(s);
+        Warning(eDLL_T::CLIENT, "[S21-REG] Script_RegisterServerBrowserUI: null UI VM\n");
+        return;
+    }
+
+    struct Reg_t
+    {
+        const char* name;
+        void* func;
+        const char* ret;
+        const char* params;
+    };
+
+    // Type compiler path only. Script_RegisterFunc_S21 stores param memory
+    // the engine frees across the CRT boundary.
+    const Reg_t natives[] =
+    {
+        // Engine does not bind these on S21; lobby RequestServerList needs them here.
+        { "RequestServerList",                (void*)UIScript_RequestServerList,                 "void",           "" },
+        { "GetServerCount",                   (void*)UIScript_GetServerCount,                    "int",            "" },
+        { "GetServerName",                    (void*)UIScript_GetServerName,                     "string",         "int index" },
+        { "GetServerDescription",             (void*)UIScript_GetServerDescription,              "string",         "int index" },
+        { "GetServerMap",                     (void*)UIScript_GetServerMap,                      "string",         "int index" },
+        { "GetServerPlaylist",                (void*)UIScript_GetServerPlaylist,                 "string",         "int index" },
+        { "GetServerCurrentPlayers",          (void*)UIScript_GetServerCurrentPlayers,           "int",            "int index" },
+        { "GetServerMaxPlayers",              (void*)UIScript_GetServerMaxPlayers,               "int",            "int index" },
+        { "GetServerHasPassword",             (void*)UIScript_GetServerHasPassword,              "bool",           "int index" },
+        { "ConnectToListedServer",            (void*)UIScript_ConnectToListedServer,             "void",           "int index" },
+
+        { "GetServerModsProfile",             (void*)UIScript_GetServerModsProfile,              "string",         "int index" },
+        { "GetServerRegion",                  (void*)UIScript_GetServerRegion,                   "string",         "int index" },
+        { "GetServerMissingMods",             (void*)UIScript_GetServerMissingMods,              "string",         "int index" },
+        { "ServerListHasRequiredMods",        (void*)UIScript_ServerListHasRequiredMods,         "bool",           "int index" },
+        { "GetServerListMessage",             (void*)UIScript_GetServerListMessage,              "string",         "" },
+        { "IsServerListRequestInFlight",      (void*)UIScript_IsServerListRequestInFlight,       "bool",           "" },
+        { "GetServerRequiredMods",            (void*)UIScript_GetServerRequiredMods,             "array< string >", "int index" },
+        { "GetServerAllowedMods",             (void*)UIScript_GetServerAllowedMods,              "array< string >", "int index" },
+
+        { "RequestEULAContents",              (void*)UIScript_RequestEULAContents,                "void",           "" },
+        { "GetEULAContents",                  (void*)UIScript_GetEULAContents,                    "string",         "" },
+        { "GetEULAVersion",                   (void*)UIScript_GetEULAVersion,                     "int",            "" },
+        { "ClearConnectPassword",             (void*)UIScript_ClearConnectPassword,              "void",           "" },
+    };
+
+    for (const Reg_t& n : natives)
+    {
+        const SQRESULT r = Script_RegisterFuncTC_S21(s, n.name, n.func, n.ret, n.params);
+
+        // S21 returns the native-closure type tag on success, not SQ_OK; only
+        // SQ_ERROR is a hard failure.
+        if (r == SQ_ERROR)
+            Warning(eDLL_T::CLIENT, "[S21-REG] %s registration FAILED\n", n.name);
     }
 }
 
 //---------------------------------------------------------------------------------
-// Purpose: core client script functions
-// Input  : *s - 
+// Purpose: per-sender chat mute natives, keyed on the SayText sender slot.
 //---------------------------------------------------------------------------------
-void Script_RegisterCoreClientFunctions(CSquirrelVM* s)
+static SQRESULT ClientScript_SetChatMutedSlot(HSQUIRRELVM v)
 {
-    DEFINE_CLIENT_SCRIPTFUNC_NAMED(s, DebugDrawSolidBox, "Draw a debug overlay solid box", "void", "vector origin, vector mins, vector maxs, vector color, float alpha, bool drawThroughWorld, float duration", false);
-    DEFINE_CLIENT_SCRIPTFUNC_NAMED(s, DebugDrawSweptBox, "Draw a debug overlay swept box", "void", "vector start, vector end, vector mins, vector maxs, vector angles, vector color, float alpha, bool drawThroughWorld, float duration", false);
-    DEFINE_CLIENT_SCRIPTFUNC_NAMED(s, DebugDrawTriangle, "Draw a debug overlay triangle", "void", "vector p1, vector p2, vector p3, vector color, float alpha, bool drawThroughWorld, float duration", false);
-    DEFINE_CLIENT_SCRIPTFUNC_NAMED(s, DebugDrawSolidSphere, "Draw a debug overlay solid sphere", "void", "vector origin, float radius, int theta, int phi, vector color, float alpha, bool drawThroughWorld, float duration", false);
-    DEFINE_CLIENT_SCRIPTFUNC_NAMED(s, DebugDrawCapsule, "Draw a debug overlay capsule", "void", "vector start, vector end, float radius, vector color, float alpha, bool drawThroughWorld, float duration", false);
+    SQInteger nSlot = 0;
+    SQBool bMuted = false;
 
-    DEFINE_CLIENT_SCRIPTFUNC_NAMED(s, CreateBox, "Create a permanent box for map making", "void", "vector origin, vector angles, vector mins, vector maxs, vector color, float alpha", false);
-    DEFINE_CLIENT_SCRIPTFUNC_NAMED(s, ClearBoxes, "Clear all debug overlays and boxes", "void", "", false);
+    sq_getinteger(v, 2, &nSlot);
+    sq_getbool(v, 3, &bMuted);
 
-    DEFINE_CLIENT_SCRIPTFUNC_NAMED(s, GetServerID, "Gets the ID of the most recent server", "string", "", false);
+    Chat_SetSlotMuted(static_cast<int>(nSlot), bMuted != 0);
+    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
 
-    DEFINE_CLIENT_SCRIPTFUNC_NAMED(s, GetVisibleObjectCount, "Gets the current number of visible objects being rendered", "int", "", false);
-    DEFINE_CLIENT_SCRIPTFUNC_NAMED(s, GetVisibleObjectMax, "Gets the maximum number of visible objects (8191)", "int", "", false);
-    DEFINE_CLIENT_SCRIPTFUNC_NAMED(s, GetVisibleObjectBudget, "Gets the visible object budget threshold", "int", "", false);
-    DEFINE_CLIENT_SCRIPTFUNC_NAMED(s, IsVisibleObjectOverflow, "Returns true if the visible object system is in overflow", "bool", "", false);
+static SQRESULT ClientScript_IsChatMutedSlot(HSQUIRRELVM v)
+{
+    SQInteger nSlot = 0;
+    sq_getinteger(v, 2, &nSlot);
+
+    sq_pushbool(v, Chat_IsSlotMuted(static_cast<int>(nSlot)));
+    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT ClientScript_ClearChatMutes(HSQUIRRELVM v)
+{
+    Chat_ClearMutedSlots();
+    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
 //---------------------------------------------------------------------------------
-// Purpose: registers script functions in UI context
-// Input  : *s - 
+// Purpose: binds the chat-mute natives to the CLIENT VM. Late-register; bulk client register is not fired.
 //---------------------------------------------------------------------------------
-void Script_RegisterUIFunctions(CSquirrelVM* s)
+void Script_RegisterChatMuteClient(CSquirrelVM* s)
 {
-    Script_RegisterCommonAbstractions(s);
-
-    DEFINE_UI_SCRIPTFUNC_NAMED(s, RequestServerList, "Requests the latest public server list, calls UICodeCallback_OnServerListRequestCompleted on completion", "void", "", false);
-    DEFINE_UI_SCRIPTFUNC_NAMED(s, GetServerCount, "Gets the number of public servers", "int", "", false);
-
-    // Functions for retrieving server browser data
-    DEFINE_UI_SCRIPTFUNC_NAMED(s, GetHiddenServerName, "Gets hidden server name by token", "string", "string token", false);
-    DEFINE_UI_SCRIPTFUNC_NAMED(s, GetServerName, "Gets the name of the server at the specified index of the server list", "string", "int index", false);
-    DEFINE_UI_SCRIPTFUNC_NAMED(s, GetServerDescription, "Gets the description of the server at the specified index of the server list", "string", "int index", false);
-
-    DEFINE_UI_SCRIPTFUNC_NAMED(s, GetServerMap, "Gets the map of the server at the specified index of the server list", "string", "int index", false);
-    DEFINE_UI_SCRIPTFUNC_NAMED(s, GetServerPlaylist, "Gets the playlist of the server at the specified index of the server list", "string", "int index", false);
-    DEFINE_UI_SCRIPTFUNC_NAMED(s, GetServerCurrentPlayers, "Gets the current player count of the server at the specified index of the server list", "int", "int index", false);
-
-    DEFINE_UI_SCRIPTFUNC_NAMED(s, GetServerMaxPlayers, "Gets the max player count of the server at the specified index of the server list", "int", "int index", false);
-
-    DEFINE_UI_SCRIPTFUNC_NAMED(s, GetServerHasPassword, "Gets the current hasPassword bool at the specified index of the server list", "bool", "int index", false);
-
-    DEFINE_UI_SCRIPTFUNC_NAMED(s, GetServerID, "Gets the ID of the most recent server", "string", "", false);
-
-    // Misc main menu functions
-    DEFINE_UI_SCRIPTFUNC_NAMED(s, RequestEULAContents, "Requests the latest online EULA contents, calls UICodeCallback_OnEULARequestCompleted on completion", "void", "", false);
-    DEFINE_UI_SCRIPTFUNC_NAMED(s, GetPromoData, "Gets promo data for specified slot type", "string", "int slotType", false);
-
-    // Functions for connecting to servers
-    DEFINE_UI_SCRIPTFUNC_NAMED(s, ConnectToServer, "Joins server by ip address and encryption key", "void", "string address, string key", false);
-    DEFINE_UI_SCRIPTFUNC_NAMED(s, ConnectToListedServer, "Joins listed server by index", "void", "int index", false);
-    DEFINE_UI_SCRIPTFUNC_NAMED(s, ConnectToHiddenServer, "Joins hidden server by token", "void", "string token", false);
-
-    // NOTE: plugin functions must always come after SDK functions!
-    for (auto& callback : !PluginSystem()->GetRegisterUIScriptFuncsCallbacks())
+    if (!s)
     {
-        // Register script functions inside plugins.
-        callback.Function()(s);
+        Warning(eDLL_T::CLIENT, "[S21-REG] Script_RegisterChatMuteClient: null CLIENT VM\n");
+        return;
     }
-}
 
-void Script_RegisterUIServerFunctions(CSquirrelVM* s)
-{
-    DEFINE_UI_SCRIPTFUNC_NAMED(s, CreateServer, "Starts server with the specified settings", "void", "string name, string description, string levelName, string playlistName, int visibilityMode", false);
-    DEFINE_UI_SCRIPTFUNC_NAMED(s, DestroyServer, "Shuts the local server down", "void", "", false);
+    struct Reg_t
+    {
+        const char* name;
+        void* func;
+        const char* ret;
+        const char* params;
+    };
+
+    const Reg_t natives[] =
+    {
+        { "SetChatMutedSlot", (void*)ClientScript_SetChatMutedSlot, "void", "int slot, bool muted" },
+        { "IsChatMutedSlot",  (void*)ClientScript_IsChatMutedSlot,  "bool", "int slot" },
+        { "ClearChatMutes",   (void*)ClientScript_ClearChatMutes,   "void", "" },
+    };
+
+    for (const Reg_t& n : natives)
+    {
+        const SQRESULT r = Script_RegisterFuncTC_S21(s, n.name, n.func, n.ret, n.params);
+        if (r == SQ_ERROR)
+            Warning(eDLL_T::CLIENT, "[S21-REG] %s registration FAILED\n", n.name);
+    }
 }
 
 //---------------------------------------------------------------------------------
@@ -794,111 +801,6 @@ static ConVar settings_antilag("settings_antilag", "1", FCVAR_RELEASE, "Selected
 // NOTE: if we want to make a certain promo only show once, add the playerprofile flag to the cvar below. Current behavior = always show after game restart.
 static ConVar promo_version_accepted("promo_version_accepted", "0", FCVAR_RELEASE, "The accepted promo version.");
 
-//---------------------------------------------------------------------------------
-// Purpose: script code class function registration
-//---------------------------------------------------------------------------------
-static void Script_RegisterClientEntityClassFuncs()
-{
-    v_Script_RegisterClientEntityClassFuncs();
-    static bool initialized = false;
+static ConVar customMatch_enabled("customMatch_enabled", "0", FCVAR_RELEASE, "Enable custom match features.");
+static ConVar gladCards_debug("gladCards_debug", "0", FCVAR_DEVELOPMENTONLY, "Enable gladiator card debug logging.");
 
-    if (initialized)
-        return;
-
-    initialized = true;
-}
-//---------------------------------------------------------------------------------
-static void Script_RegisterClientPlayerClassFuncs()
-{
-    v_Script_RegisterClientPlayerClassFuncs();
-    static bool initialized = false;
-
-    if (initialized)
-        return;
-
-    initialized = true;
-}
-//---------------------------------------------------------------------------------
-static void Script_RegisterClientAIClassFuncs()
-{
-    v_Script_RegisterClientAIClassFuncs();
-    static bool initialized = false;
-
-    if (initialized)
-        return;
-
-    initialized = true;
-}
-//---------------------------------------------------------------------------------
-static void Script_RegisterClientWeaponClassFuncs()
-{
-    v_Script_RegisterClientWeaponClassFuncs();
-    static bool initialized = false;
-
-    if (initialized)
-        return;
-
-    initialized = true;
-
-    ViewmodelPoseParam_RegisterClientWeaponFuncs(g_clientScriptWeaponStruct);
-    WeaponScriptVars_RegisterWeaponFuncs(g_clientScriptWeaponStruct);
-}
-//---------------------------------------------------------------------------------
-static void Script_RegisterClientProjectileClassFuncs()
-{
-    v_Script_RegisterClientProjectileClassFuncs();
-    static bool initialized = false;
-
-    if (initialized)
-        return;
-
-    initialized = true;
-}
-//---------------------------------------------------------------------------------
-static void Script_RegisterClientTitanSoulClassFuncs()
-{
-    v_Script_RegisterClientTitanSoulClassFuncs();
-    static bool initialized = false;
-
-    if (initialized)
-        return;
-
-    initialized = true;
-}
-//---------------------------------------------------------------------------------
-static void Script_RegisterClientPlayerDecoyClassFuncs()
-{
-    v_Script_RegisterClientPlayerDecoyClassFuncs();
-    static bool initialized = false;
-
-    if (initialized)
-        return;
-
-    initialized = true;
-}
-//---------------------------------------------------------------------------------
-static void Script_RegisterClientFirstPersonProxyClassFuncs()
-{
-    v_Script_RegisterClientFirstPersonProxyClassFuncs();
-    static bool initialized = false;
-
-    if (initialized)
-        return;
-
-    initialized = true;
-}
-
-void VScriptClient::Detour(const bool bAttach) const
-{
-    DetourSetup(&v_ClientScript_DebugScreenText, &ClientScript_DebugScreenText, bAttach);
-    DetourSetup(&v_ClientScript_DebugScreenTextWithColor, &ClientScript_DebugScreenTextWithColor, bAttach);
-
-    DetourSetup(&v_Script_RegisterClientEntityClassFuncs, &Script_RegisterClientEntityClassFuncs, bAttach);
-    DetourSetup(&v_Script_RegisterClientPlayerClassFuncs, &Script_RegisterClientPlayerClassFuncs, bAttach);
-    DetourSetup(&v_Script_RegisterClientAIClassFuncs, &Script_RegisterClientAIClassFuncs, bAttach);
-    DetourSetup(&v_Script_RegisterClientWeaponClassFuncs, &Script_RegisterClientWeaponClassFuncs, bAttach);
-    DetourSetup(&v_Script_RegisterClientProjectileClassFuncs, &Script_RegisterClientProjectileClassFuncs, bAttach);
-    DetourSetup(&v_Script_RegisterClientTitanSoulClassFuncs, &Script_RegisterClientTitanSoulClassFuncs, bAttach);
-    DetourSetup(&v_Script_RegisterClientPlayerDecoyClassFuncs, &Script_RegisterClientPlayerDecoyClassFuncs, bAttach);
-    DetourSetup(&v_Script_RegisterClientFirstPersonProxyClassFuncs, &Script_RegisterClientFirstPersonProxyClassFuncs, bAttach);
-}

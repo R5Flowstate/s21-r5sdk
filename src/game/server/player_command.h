@@ -1,6 +1,6 @@
 //====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //=============================================================================//
@@ -27,10 +27,10 @@ public:
 	CPlayerMove(void);
 	virtual			~CPlayerMove(void) {}
 
-	// Hook statics:
+	// Hook statics
 	static void StaticRunCommand(CPlayerMove* thisp, CPlayer* player, CUserCmd* ucmd, IMoveHelper* moveHelper);
 
-	// Public interfaces:
+	// Public interfaces
 	// Run a movement command from the player
 	virtual void	RunCommand(CPlayer* player, CUserCmd* ucmd, IMoveHelper* moveHelper) = 0;
 
@@ -46,6 +46,10 @@ protected:
 };
 
 inline void (*CPlayerMove__RunCommand)(CPlayerMove* thisp, CPlayer* player, CUserCmd* ucmd, IMoveHelper* moveHelper);
+
+// Wrapper entries are counted as CMDCHAIN_WRAPPER_ENTERED (bridge_cmd_chain.h),
+// alongside every other stage of the chain, so the whole path is read off one
+// line instead of one counter per subsystem.
 
 ///////////////////////////////////////////////////////////////////////////////
 class VPlayerMove : public IDetour

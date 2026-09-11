@@ -86,33 +86,7 @@ void CBSPCollisionDebug::Shutdown()
 	// Nothing to do here
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: Decode a packed int16 vertex from the vertex buffer
-// Packed format: 6 bytes (int16 x, int16 y, int16 z)
-// Decode: world = origin + int16 * scale (where scale already includes *65536)
-// The SIMD code does: cvtepi32_ps(unpacklo_epi16(0, int16)) * scale + origin
-// unpacklo_epi16(0, int16) puts int16 in high 16 bits = int16 << 16
-// So effective decode is: origin + (int16 << 16) * scale = origin + int16 * 65536 * scale
-//-----------------------------------------------------------------------------
-Vector3D CBSPCollisionDebug::DecodePackedVertex(const int16_t* packedVerts, int vertexIndex,
-	const Vector3D& origin, float quantScale)
-{
-	const int16_t* v = &packedVerts[vertexIndex * 3];
-	const float effectiveScale = quantScale * 65536.0f;
-	
-	return Vector3D(
-		origin.x + (float)v[0] * effectiveScale,
-		origin.y + (float)v[1] * effectiveScale,
-		origin.z + (float)v[2] * effectiveScale
-	);
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: Decode a float vertex from the vertex buffer
-// Float format: 12 bytes (float x, float y, float z)
-// Type 4 float vertices are ABSOLUTE world coordinates, NOT relative to origin!
-// This differs from Type 5 packed vertices which are origin-relative.
-//-----------------------------------------------------------------------------
+// Type 4: absolute world floats. Type 5+: packed int16 relative to origin.
 Vector3D CBSPCollisionDebug::DecodeFloatVertex(const float* floatVerts, int vertexIndex,
 	const Vector3D& origin)
 {
@@ -145,26 +119,7 @@ void CBSPCollisionDebug::DrawTriangle(const Vector3D& v0, const Vector3D& v1, co
 	}
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: Draw leaf geometry (actual triangles) for a leaf node
-// Child types from remap tool:
-//   0 = Internal node
-//   1 = None/empty
-//   2 = Empty leaf
-//   3 = Bundle (references other nodes)
-//   4 = TriStrip (float vertices)
-//   5 = Poly3 (packed int16, triangle)
-//   6 = Poly4 (packed int16, quad - 2 triangles)
-//   7 = Poly5+ (packed int16, 5+ vertices)
-//   8 = ConvexHull
-//   9 = StaticProp
-//   10 = Heightfield
-//
-// Leaf data format for Poly3 (Type 5):
-//   Header (4 bytes): bits 0-11 = surfPropIdx, bits 12-15 = (numPolys-1), bits 16-31 = baseVertex
-//   Per-triangle (4 bytes): bits 0-10 = v0_offset, bits 11-19 = v1_delta, bits 20-28 = v2_delta
-//   Vertex indexing: running_base = baseVertex << 10, v0 = running_base + offset
-//-----------------------------------------------------------------------------
+// Type 4: absolute world floats. Type 5+: packed int16 relative to origin.
 void CBSPCollisionDebug::DrawLeafTriangles(const CollisionModelContext_t* ctx, uint32_t childIdx,
 	int childType, const Vector3D& origin, float quantScale, int depth)
 {
@@ -180,8 +135,6 @@ void CBSPCollisionDebug::DrawLeafTriangles(const CollisionModelContext_t* ctx, u
 	const int renderMode = bsp_collision_debug_mode.GetInt();
 	const int alpha = bsp_collision_debug_alpha.GetInt();
 
-	//if (childType == 5)
-	//{
 	//	// Poly3 - packed int16 triangle
 	//	// childIdx is the offset into leafDataStream (in uint32_t units)
 	//	const uint32_t* leafData = &ctx->leafDataStream[childIdx];
@@ -192,36 +145,31 @@ void CBSPCollisionDebug::DrawLeafTriangles(const CollisionModelContext_t* ctx, u
 	//	const int numPolys = ((header >> 12) & 0xF) + 1;
 	//	const int baseVertex = (header >> 16) & 0xFFFF;
 	//	
-	//	int runningBase = baseVertex << 10;  // Vertex base index
+	//	int runningBase = baseVertex << 10; // Vertex base index
 	//	
 	//	for (int i = 0; i < numPolys && i < 16; i++)
-	//	{
-	//		// Per-triangle data: bits 0-10 = v0_offset, bits 11-19 = v1_delta, bits 20-28 = v2_delta
-	//		const uint32_t triData = leafData[1 + i];
-	//		const int v0_offset = triData & 0x7FF;         // 11 bits
-	//		const int v1_delta = (triData >> 11) & 0x1FF;  // 9 bits
-	//		const int v2_delta = (triData >> 20) & 0x1FF;  // 9 bits
+	// // Per-triangle data: bits 0-10 = v0_offset, bits 11-19 = v1_delta, bits 20-28 = v2_delta
+	// const uint32_t triData = leafData[1 + i];
+	// const int v0_offset = triData & 0x7FF; // 11 bits
+	// const int v1_delta = (triData >> 11) & 0x1FF; // 9 bits
+	// const int v2_delta = (triData >> 20) & 0x1FF; // 9 bits
 	//		
-	//		// Calculate absolute vertex indices
-	//		const int idx0 = runningBase + v0_offset;
-	//		const int idx1 = idx0 + 1 + v1_delta;
-	//		const int idx2 = idx0 + 1 + v2_delta;
+	// // Calculate absolute vertex indices
+	// const int idx0 = runningBase + v0_offset;
+	// const int idx1 = idx0 + 1 + v1_delta;
+	// const int idx2 = idx0 + 1 + v2_delta;
 	//		
-	//		// Update running base for next triangle
-	//		runningBase = idx0;
+	// // Update running base for next triangle
+	// runningBase = idx0;
 	//		
-	//		// Decode vertices and draw triangle
-	//		const Vector3D v0 = DecodePackedVertex(packedVerts, idx0, origin, quantScale);
-	//		const Vector3D v1 = DecodePackedVertex(packedVerts, idx1, origin, quantScale);
-	//		const Vector3D v2 = DecodePackedVertex(packedVerts, idx2, origin, quantScale);
+	// // Decode vertices and draw triangle
+	// const Vector3D v0 = DecodePackedVertex(packedVerts, idx0, origin, quantScale);
+	// const Vector3D v1 = DecodePackedVertex(packedVerts, idx1, origin, quantScale);
+	// const Vector3D v2 = DecodePackedVertex(packedVerts, idx2, origin, quantScale);
 	//		
-	//		// Per-triangle color for variety
-	//		const Color triColor = GetTriangleColor(childIdx, i, alpha);
-	//		DrawTriangle(v0, v1, v2, triColor, renderMode);
-	//	}
-	//}
-	//else if (childType == 6)
-	//{
+	// // Per-triangle color for variety
+	// const Color triColor = GetTriangleColor(childIdx, i, alpha);
+	// DrawTriangle(v0, v1, v2, triColor, renderMode);
 	//	// Poly4 - packed int16 quad (draw as 2 triangles)
 	//	const uint32_t* leafData = &ctx->leafDataStream[childIdx];
 	//	const int16_t* packedVerts = reinterpret_cast<const int16_t*>(ctx->verts);
@@ -233,36 +181,31 @@ void CBSPCollisionDebug::DrawLeafTriangles(const CollisionModelContext_t* ctx, u
 	//	int runningBase = baseVertex << 10;
 	//	
 	//	for (int i = 0; i < numPolys && i < 16; i++)
-	//	{
-	//		// For quads, we need 4 vertex references
-	//		const uint32_t triData = leafData[1 + i];
-	//		const int v0_offset = triData & 0x7FF;
-	//		const int v1_delta = (triData >> 11) & 0x1FF;
-	//		const int v2_delta = (triData >> 20) & 0x1FF;
+	// // For quads, we need 4 vertex references
+	// const uint32_t triData = leafData[1 + i];
+	// const int v0_offset = triData & 0x7FF;
+	// const int v1_delta = (triData >> 11) & 0x1FF;
+	// const int v2_delta = (triData >> 20) & 0x1FF;
 	//		
-	//		const int idx0 = runningBase + v0_offset;
-	//		const int idx1 = idx0 + 1 + v1_delta;
-	//		const int idx2 = idx0 + 1 + v2_delta;
-	//		const int idx3 = idx2 + 1;  // Assume v3 follows v2
+	// const int idx0 = runningBase + v0_offset;
+	// const int idx1 = idx0 + 1 + v1_delta;
+	// const int idx2 = idx0 + 1 + v2_delta;
+	// const int idx3 = idx2 + 1; // Assume v3 follows v2
 	//		
-	//		runningBase = idx0;
+	// runningBase = idx0;
 	//		
-	//		const Vector3D v0 = DecodePackedVertex(packedVerts, idx0, origin, quantScale);
-	//		const Vector3D v1 = DecodePackedVertex(packedVerts, idx1, origin, quantScale);
-	//		const Vector3D v2 = DecodePackedVertex(packedVerts, idx2, origin, quantScale);
-	//		const Vector3D v3 = DecodePackedVertex(packedVerts, idx3, origin, quantScale);
+	// const Vector3D v0 = DecodePackedVertex(packedVerts, idx0, origin, quantScale);
+	// const Vector3D v1 = DecodePackedVertex(packedVerts, idx1, origin, quantScale);
+	// const Vector3D v2 = DecodePackedVertex(packedVerts, idx2, origin, quantScale);
+	// const Vector3D v3 = DecodePackedVertex(packedVerts, idx3, origin, quantScale);
 	//		
-	//		// Per-triangle color for variety
-	//		const Color triColor = GetTriangleColor(childIdx, i * 2, alpha);
-	//		const Color triColor2 = GetTriangleColor(childIdx, i * 2 + 1, alpha);
+	// // Per-triangle color for variety
+	// const Color triColor = GetTriangleColor(childIdx, i * 2, alpha);
+	// const Color triColor2 = GetTriangleColor(childIdx, i * 2 + 1, alpha);
 	//		
-	//		// Draw as two triangles
-	//		DrawTriangle(v0, v1, v2, triColor, renderMode);
-	//		DrawTriangle(v0, v2, v3, triColor2, renderMode);
-	//	}
-	//}
-	//else if (childType == 7)
-	//{
+	// // Draw as two triangles
+	// DrawTriangle(v0, v1, v2, triColor, renderMode);
+	// DrawTriangle(v0, v2, v3, triColor2, renderMode);
 	//	// Poly5+ - packed int16 polygon with 5+ vertices
 	//	const uint32_t* leafData = &ctx->leafDataStream[childIdx];
 	//	const int16_t* packedVerts = reinterpret_cast<const int16_t*>(ctx->verts);
@@ -274,29 +217,26 @@ void CBSPCollisionDebug::DrawLeafTriangles(const CollisionModelContext_t* ctx, u
 	//	int runningBase = baseVertex << 10;
 	//	
 	//	for (int i = 0; i < numPolys && i < 16; i++)
-	//	{
-	//		// Similar to Poly3/4 but with more vertices per polygon
-	//		const uint32_t triData = leafData[1 + i];
-	//		const int v0_offset = triData & 0x7FF;
-	//		const int v1_delta = (triData >> 11) & 0x1FF;
-	//		const int v2_delta = (triData >> 20) & 0x1FF;
+	// // Similar to Poly3/4 but with more vertices per polygon
+	// const uint32_t triData = leafData[1 + i];
+	// const int v0_offset = triData & 0x7FF;
+	// const int v1_delta = (triData >> 11) & 0x1FF;
+	// const int v2_delta = (triData >> 20) & 0x1FF;
 	//		
-	//		const int idx0 = runningBase + v0_offset;
-	//		const int idx1 = idx0 + 1 + v1_delta;
-	//		const int idx2 = idx0 + 1 + v2_delta;
+	// const int idx0 = runningBase + v0_offset;
+	// const int idx1 = idx0 + 1 + v1_delta;
+	// const int idx2 = idx0 + 1 + v2_delta;
 	//		
-	//		runningBase = idx0;
+	// runningBase = idx0;
 	//		
-	//		// For Poly5+, draw what we can as triangles
-	//		const Vector3D v0 = DecodePackedVertex(packedVerts, idx0, origin, quantScale);
-	//		const Vector3D v1 = DecodePackedVertex(packedVerts, idx1, origin, quantScale);
-	//		const Vector3D v2 = DecodePackedVertex(packedVerts, idx2, origin, quantScale);
+	// // For Poly5+, draw what we can as triangles
+	// const Vector3D v0 = DecodePackedVertex(packedVerts, idx0, origin, quantScale);
+	// const Vector3D v1 = DecodePackedVertex(packedVerts, idx1, origin, quantScale);
+	// const Vector3D v2 = DecodePackedVertex(packedVerts, idx2, origin, quantScale);
 	//		
-	//		// Per-triangle color for variety
-	//		const Color triColor = GetTriangleColor(childIdx, i, alpha);
-	//		DrawTriangle(v0, v1, v2, triColor, renderMode);
-	//	}
-	//}
+	// // Per-triangle color for variety
+	// const Color triColor = GetTriangleColor(childIdx, i, alpha);
+	// DrawTriangle(v0, v1, v2, triColor, renderMode);
 	if (childType == 4)
 	{
 		// Type 4 - float vertices (triangle format, not strip)
@@ -335,25 +275,13 @@ void CBSPCollisionDebug::DrawLeafTriangles(const CollisionModelContext_t* ctx, u
 	}
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: Get the bounds of a BVH node child
-// The bounds in BVH nodes are stored as int16 quantized values
-// The engine uses SIMD unpacking that shifts int16 to high 16 bits of int32,
-// effectively multiplying by 65536, then multiplies by decodeScale and adds origin.
-// Formula: world = int16_value * 65536 * decodeScale + origin
-//-----------------------------------------------------------------------------
+// int16 BVH bounds; world = origin + int16 * 65536 * decodeScale.
 void CBSPCollisionDebug::GetNodeBounds(const CollBvh4Node_t* node, int childIndex, float scale,
 	const Vector3D& origin, Vector3D& outMins, Vector3D& outMaxs)
 {
-	// The engine's SIMD code does: unpacklo_epi16(0, int16) which shifts to high 16 bits
-	// This effectively multiplies by 65536, then multiplies by decodeScale
-	// So the effective scale is: decodeScale * 65536
 	const float effectiveScale = scale * 65536.0f;
 
-	// BVH nodes store bounds as int16 values per axis:
-	// minMax[axis][0][child] = min
-	// minMax[axis][1][child] = max
-	// world = int16_value * effectiveScale + origin
+	// minMax[axis][0/1][child] = min/max. world = int16 * effectiveScale + origin.
 	outMins.x = (float)node->GetMin(0, childIndex) * effectiveScale + origin.x;
 	outMins.y = (float)node->GetMin(1, childIndex) * effectiveScale + origin.y;
 	outMins.z = (float)node->GetMin(2, childIndex) * effectiveScale + origin.z;
@@ -395,7 +323,7 @@ bool CBSPCollisionDebug::NodeIntersectsAABB(const CollBvh4Node_t* node, int chil
 
 //-----------------------------------------------------------------------------
 // Purpose: Recursively draw BVH nodes
-// Based on CollBvh_VisitNodes_r from engine decompilation
+// Mirrors CollBvh_VisitNodes_r.
 //-----------------------------------------------------------------------------
 void CBSPCollisionDebug::DrawNodeRecursive(const CollBvh4Node_t* nodes, int nodeIndex,
 	const Vector3D& origin, float scale, int depth, int maxDepth,
@@ -409,19 +337,19 @@ void CBSPCollisionDebug::DrawNodeRecursive(const CollBvh4Node_t* nodes, int node
 
 	const CollBvh4Node_t* node = &nodes[nodeIndex];
 
-	// Child type extraction (from packedMetaData[2] and [3]):
-	//   type0 = packedMetaData[2] & 0xF
-	//   type1 = (packedMetaData[2] >> 4) & 0xF
-	//   type2 = packedMetaData[3] & 0xF
-	//   type3 = (LOBYTE(packedMetaData[3]) >> 4)
+	// Child type extraction (from packedMetaData[2] and [3])
+	// type0 = packedMetaData[2] & 0xF
+	// type1 = (packedMetaData[2] >> 4) & 0xF
+	// type2 = packedMetaData[3] & 0xF
+	// type3 = (LOBYTE(packedMetaData[3]) >> 4)
 	//
-	// Child index extraction:
-	//   index[i] = packedMetaData[i] >> 8
+	// Child index extraction
+	// index[i] = packedMetaData[i] >> 8
 	//
-	// Type meanings:
-	//   0 = internal node (recurse with childIndex)
-	//   1 = empty/skip
-	//   2+ = leaf with polygon data
+	// Type meanings
+	// 0 = internal node (recurse with childIndex)
+	// 1 = empty/skip
+	// 2+ = leaf with polygon data
 
 	for (int i = 0; i < 4; i++)
 	{
@@ -513,7 +441,7 @@ void CBSPCollisionDebug::Render()
 
 	if (!g_ppCollisionModelContexts)
 	{
-		// Pattern not found - feature disabled for this game version
+		// GetVar resolve failed; global stays null
 		return;
 	}
 
@@ -549,23 +477,6 @@ void CBSPCollisionDebug::Render()
 	DrawBVHNodesAroundPoint(playerPos, radius, -1);
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: Console command to toggle BSP collision debug
-//-----------------------------------------------------------------------------
-void CBSPCollisionDebug::CC_DrawBSPCollision(const CCommand& args)
-{
-	if (args.ArgC() < 2)
-	{
-		Msg(eDLL_T::ENGINE, "Usage: bsp_collision_debug <0/1>\n");
-		Msg(eDLL_T::ENGINE, "  0 = off\n");
-		Msg(eDLL_T::ENGINE, "  1 = draw collision triangles\n");
-		return;
-	}
-
-	const int mode = atoi(args.Arg(1));
-	bsp_collision_debug.SetValue(mode);
-}
-
 #endif // !DEDICATED
 
 //-----------------------------------------------------------------------------
@@ -575,23 +486,13 @@ void CBSPCollisionDebug::CC_DrawBSPCollision(const CCommand& args)
 void VBSPCollisionDebug::GetVar(void) const
 {
 #ifndef DEDICATED
-	// The collision model contexts array is accessed in a function like:
-	//   mov eax, edx             ; 8B C2
-	//   lea rcx, [rax+rax*8]     ; 48 8D 0C C0
-	//   mov rax, cs:qword_XXXX   ; 48 8B 05 XX XX XX XX <-- pointer to collision contexts
-	//   lea rax, [rax+rcx*8]     ; 48 8D 04 C8
-	//   retn                     ; C3
-	//
-	// This function returns: qword_1634F1638 + 72 * index
-	// The 72-byte CollisionModelContext_t is the per-model collision context struct
+	// Pattern ends with mov rax,[rip+disp] of the collision-context table;
+	// returns table + 72 * index (CollisionModelContext_t per model).
 	CMemory result = Module_FindPattern(g_GameDll, "8B C2 48 8D 0C C0 48 8B 05 ?? ?? ?? ?? 48 8D 04 C8 C3");
 	
 	if (result)
 	{
-		// The RIP-relative address is at offset 0x6 from pattern start (inside the mov rax instruction)
-		// mov rax, [rip+offset] is: 48 8B 05 XX XX XX XX
-		// Pattern: 8B C2 48 8D 0C C0 [48 8B 05 XX XX XX XX] 48 8D 04 C8 C3
-		// Offset to 48 8B 05 is 6, relative address at 6+3=9, instruction ends at 6+7=13
+		// RIP-relative of the collision-context table is at pattern+6.
 		g_ppCollisionModelContexts = result.Offset(0x6).ResolveRelativeAddressSelf(0x3, 0x7).RCast<CollisionModelContext_t**>();
 	}
 
@@ -606,8 +507,3 @@ void VBSPCollisionDebug::GetVar(void) const
 	}
 #endif // !DEDICATED
 }
-
-///////////////////////////////////////////////////////////////////////////////
-// Register the detour - this must be in the .cpp file, not the header
-// Defined outside DEDICATED block so ConVars are registered on both client and server
-REGISTER(VBSPCollisionDebug);

@@ -4,12 +4,17 @@
 //
 //===============================================================================//
 #include "tier0/fasttimer.h"
+#include "tier0/threadtools.h"
 #include "vscript/vscript.h"
 #include "pluginsystem/modsystem.h"
 #include "sqclosure.h"
 #include "sqfuncproto.h"
 #include "sqstring.h"
 #include "vsquirrel.h"
+#ifndef CLIENT_DLL
+#include "engine/host_state.h"
+#include "game/shared/scriptremotefunctions_server.h"
+#endif // !CLIENT_DLL
 
 //---------------------------------------------------------------------------------
 // Console variables
@@ -35,9 +40,13 @@ void(*UiAdminPanelScriptRegister_Callback)(CSquirrelVM* const s) = nullptr;
 // Registering constants in scripts.
 void(*ScriptConstantRegister_Callback)(CSquirrelVM* const s) = nullptr;
 
+// Optional notify after a SERVER ExecuteFunction SCRIPT_ERROR. Shutdown
+// cancel is the snapshot restore inside ExecuteFunction. Null on the client.
+void(*ServerScriptExecuteError_Callback)(const char* pszName) = nullptr;
+
 //---------------------------------------------------------------------------------
 // Purpose: Initialises a Squirrel VM instance
-// Output : True on success, false on failure
+// Output: True on success, false on failure
 //---------------------------------------------------------------------------------
 bool CSquirrelVM::Init(CSquirrelVM* s, SQCONTEXT context, SQFloat curTime)
 {
@@ -52,11 +61,13 @@ bool CSquirrelVM::Init(CSquirrelVM* s, SQCONTEXT context, SQFloat curTime)
 	switch (context)
 	{
 	case SQCONTEXT::SERVER:
+#if !defined(CLIENT_DLL)
 		g_pServerScript = s;
 
 		if (ServerScriptRegister_Callback)
 			ServerScriptRegister_Callback(s);
-
+		ScriptRemoteC2S_DropFnCache();
+#endif
 		break;
 	case SQCONTEXT::CLIENT:
 		g_pClientScript = s;
@@ -85,14 +96,14 @@ bool CSquirrelVM::Init(CSquirrelVM* s, SQCONTEXT context, SQFloat curTime)
 
 //---------------------------------------------------------------------------------
 // Purpose: destroys the signal entry list head
-// Input  : *s - 
-//			v - 
-//			f - 
-// Output : true on success, false otherwise
+// Input: *s - 
+// Output: true on success, false otherwise
 //---------------------------------------------------------------------------------
 bool CSquirrelVM::DestroySignalEntryListHead(CSquirrelVM* s, HSQUIRRELVM v, SQFloat f)
 {
 	SQBool result = CSquirrelVM__DestroySignalEntryListHead(s, v, f);
+	// Canonical preprocessor token is DEVELOPER (developer cvar). Product
+	// scripts are migrated off bare #if DEV; do not also register DEV here.
 	s->RegisterConstant("DEVELOPER", developer->GetInt());
 
 	// Must have one.
@@ -104,8 +115,8 @@ bool CSquirrelVM::DestroySignalEntryListHead(CSquirrelVM* s, HSQUIRRELVM v, SQFl
 
 //---------------------------------------------------------------------------------
 // Purpose: registers a global constant
-// Input  : *name - 
-//			value - 
+// Input: *name - 
+// value - 
 //---------------------------------------------------------------------------------
 SQRESULT CSquirrelVM::RegisterConstant(const SQChar* name, SQInteger value)
 {
@@ -114,8 +125,8 @@ SQRESULT CSquirrelVM::RegisterConstant(const SQChar* name, SQInteger value)
 
 //---------------------------------------------------------------------------------
 // Purpose: runs text as script on the VM
-// Input  : *script - 
-// Output : true on success, false otherwise
+// Input: *script - 
+// Output: true on success, false otherwise
 //---------------------------------------------------------------------------------
 bool CSquirrelVM::Run(const SQChar* const script)
 {
@@ -143,15 +154,31 @@ bool CSquirrelVM::Run(const SQChar* const script)
 
 //---------------------------------------------------------------------------------
 // Purpose: executes a function by handle
-// Input  : hFunction - 
-//			*pArgs - 
-//			nArgs - 
-//			*pReturn - 
-//			hScope - 
-// Output : SCRIPT_DONE on success, SCRIPT_ERROR otherwise
+// Input: hFunction - 
+// *pArgs - 
+// nArgs - 
+// *pReturn - 
+// hScope - 
+// Output: SCRIPT_DONE on success, SCRIPT_ERROR otherwise
 //---------------------------------------------------------------------------------
 ScriptStatus_t CSquirrelVM::ExecuteFunction(HSCRIPT hFunction, const ScriptVariant_t* const pArgs, unsigned int nArgs, ScriptVariant_t* const pReturn, HSCRIPT hScope)
 {
+#ifndef CLIENT_DLL
+	// The VM has no cross-thread story: a second thread inside SQVM::Execute
+	// races the frame's own script dispatch and corrupts refcounts. Refuse
+	// rather than let the caller take the VM apart.
+	if (g_ThreadMainThreadID && g_ThreadServerFrameThreadID && !ThreadInMainOrServerFrameThread())
+	{
+		static uint32_t s_nOffThreadCalls = 0;
+
+		if (s_nOffThreadCalls++ % 64 == 0)
+			Warning(eDLL_T::SERVER, "[VM-THREAD] refused off-thread ExecuteFunction from thread %lu (count %u)\n",
+				ThreadGetCurrentId(), s_nOffThreadCalls);
+
+		return ScriptStatus_t::SCRIPT_ERROR;
+	}
+#endif // !CLIENT_DLL
+
 	const SQObjectPtr* const f = reinterpret_cast<SQObjectPtr*>(hFunction);
 
 	// Only script closures (OT_CLOSURE) have a SQFunctionProto with profiling
@@ -160,6 +187,7 @@ ScriptStatus_t CSquirrelVM::ExecuteFunction(HSCRIPT hFunction, const ScriptVaria
 	const SQFunctionProto* fp = nullptr;
 	const char* functionName = "(native)";
 
+#ifndef CLIENT_DLL
 	if (sq_isclosure(*f))
 	{
 		const SQClosure* const closure = _closure(*f);
@@ -168,6 +196,9 @@ ScriptStatus_t CSquirrelVM::ExecuteFunction(HSCRIPT hFunction, const ScriptVaria
 		if (fp)
 			functionName = _stringval(fp->_funcname);
 	}
+#else
+	(void)f;
+#endif
 
 	const bool hasFuncProto = fp != nullptr;
 	CFastTimer callTimer;
@@ -177,7 +208,37 @@ ScriptStatus_t CSquirrelVM::ExecuteFunction(HSCRIPT hFunction, const ScriptVaria
 		callTimer.Start();
 
 	// NOTE: pArgs and pReturn are most likely of type 'ScriptVariant_t', needs to be reversed.
+#ifndef CLIENT_DLL
+	HostStates_t iStateBefore = HostStates_t::HS_RUN;
+	HostStates_t iNextBefore = HostStates_t::HS_RUN;
+	if (g_pHostState && this->GetContext() == SQCONTEXT::SERVER)
+	{
+		iStateBefore = g_pHostState->m_iCurrentState;
+		iNextBefore = g_pHostState->m_iNextState;
+	}
+#endif // !CLIENT_DLL
+
 	const ScriptStatus_t result = CSquirrelVM__ExecuteFunction(this, hFunction, pArgs, nArgs, pReturn, hScope);
+
+	if (result != SCRIPT_DONE && this->GetContext() == SQCONTEXT::SERVER)
+	{
+#ifndef CLIENT_DLL
+		if (g_pHostState
+			&& iStateBefore != HostStates_t::HS_GAME_SHUTDOWN
+			&& iNextBefore != HostStates_t::HS_GAME_SHUTDOWN
+			&& (g_pHostState->m_iCurrentState == HostStates_t::HS_GAME_SHUTDOWN
+				|| g_pHostState->m_iNextState == HostStates_t::HS_GAME_SHUTDOWN))
+		{
+			g_pHostState->m_iCurrentState = iStateBefore;
+			g_pHostState->m_iNextState = iNextBefore;
+			Warning(eDLL_T::SERVER,
+				"[VM-ERROR] cancelled host shutdown scheduled by '%s'\n",
+				functionName);
+		}
+#endif // !CLIENT_DLL
+		if (ServerScriptExecuteError_Callback)
+			ServerScriptExecuteError_Callback(functionName);
+	}
 
 	if (hasFuncProto)
 	{
@@ -207,8 +268,8 @@ ScriptStatus_t Script_ExecuteFunction(CSquirrelVM* s, HSCRIPT hFunction, const S
 
 //---------------------------------------------------------------------------------
 // Purpose: executes a code callback
-// Input  : *name - 
-// Output : true on success, false otherwise
+// Input: *name - 
+// Output: true on success, false otherwise
 //---------------------------------------------------------------------------------
 bool CSquirrelVM::ExecuteCodeCallback(const SQChar* const name)
 {
@@ -217,8 +278,8 @@ bool CSquirrelVM::ExecuteCodeCallback(const SQChar* const name)
 
 //---------------------------------------------------------------------------------
 // Purpose: registers a code function
-// Input  : *binding - 
-//			useTypeCompiler - 
+// Input: *binding - 
+// useTypeCompiler - 
 //---------------------------------------------------------------------------------
 SQRESULT CSquirrelVM::RegisterFunction(ScriptFunctionBinding_t* const binding, const bool useTypeCompiler)
 {
@@ -228,9 +289,9 @@ SQRESULT CSquirrelVM::RegisterFunction(ScriptFunctionBinding_t* const binding, c
 
 //---------------------------------------------------------------------------------
 // Purpose: Finds a function in the squirrel VM
-// Input  : *pszFunctionName - 
-//			*pszFunctionSig - 
-//			 hScope - 
+// Input: *pszFunctionName - 
+// *pszFunctionSig - 
+// hScope - 
 // Output: Function handle on success NULL on failure
 //---------------------------------------------------------------------------------
 const HSCRIPT CSquirrelVM::FindFunction(const char* const pszFunctionName, const char* const pszFunctionSig, HSCRIPT hScope)
@@ -240,8 +301,8 @@ const HSCRIPT CSquirrelVM::FindFunction(const char* const pszFunctionName, const
 
 //---------------------------------------------------------------------------------
 // Purpose: sets current VM as the global precompiler
-// Input  : *name - 
-//			value - 
+// Input: *name - 
+// value - 
 //---------------------------------------------------------------------------------
 void CSquirrelVM::SetAsCompiler(RSON::Node_t* rson)
 {
@@ -264,8 +325,8 @@ void CSquirrelVM::SetAsCompiler(RSON::Node_t* rson)
 
 //---------------------------------------------------------------------------------
 // Purpose: prints the output of each VM to the console
-// Input  : *sqvm - 
-//			*fmt - 
+// Input: *sqvm - 
+// *fmt - 
 //			... - 
 //---------------------------------------------------------------------------------
 SQRESULT Script_PrintFunc(HSQUIRRELVM v, SQChar* fmt, ...)
@@ -333,8 +394,8 @@ SQRESULT Script_PrintFunc(HSQUIRRELVM v, SQChar* fmt, ...)
 
 //---------------------------------------------------------------------------------
 // Purpose: prints the warnings of each VM to the console
-// Input  : *v -
-//          nformatstringidx -  
+// Input: *v -
+// nformatstringidx - 
 //---------------------------------------------------------------------------------
 SQBool Script_WarningFunc(HSQUIRRELVM v, SQInteger nformatstringidx)
 {

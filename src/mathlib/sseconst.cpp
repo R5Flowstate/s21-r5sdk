@@ -1,6 +1,6 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 //===========================================================================//
 
@@ -108,14 +108,14 @@ const uint16 ALIGN16 g_SIMD_Quat48_Unpack_Shift[] = {
 
 // this permutes uint16's x,y,z packed in the most significant four halfwords of a fltx4 
 // so that each gets its own word in the output. expected use is // __vperm( XX, Four_Threes, permute )
-// -- that way each int is represented as 3.0 + n * 2^-22 , which we can pull into the 
+// -- that way each int is represented as 3.0 + n * 2^-22, which we can pull into the 
 // appropriate range with a single madd!
 const uint8 ALIGN16 g_SIMD_Quat48_Unpack_Permute0[16] =
 {
-	16, 17, 0, 1,											// word one:   00XX
-	16, 17, 2, 3,											// word two:   00YY
+	16, 17, 0, 1,											// word one: 00XX
+	16, 17, 2, 3,											// word two: 00YY
 	16, 17, 4, 5,											// word three: 00ZZ
-	16, 17, 6, 7											// word four:  00WW
+	16, 17, 6, 7											// word four: 00WW
 };
 
 // the other permutes are a little trickier. note: I'm defining them out of order.
@@ -124,13 +124,13 @@ const uint8 ALIGN16 g_SIMD_Quat48_Unpack_Permute0[16] =
 // out1 = __vperm( x0y0z0x1y1z1x2y2, Four_Threes, *reinterpret_cast<const fltx4 *>(g_SIMD_Quat48_Unpack_Permute1) ); // __x1__y1__z1____
 const uint8 ALIGN16 g_SIMD_Quat48_Unpack_Permute1[16] =
 {
-	16, 17, 6, 7,											// word one:   00XX
-	16, 17, 8, 9,											// word two:   00YY
+	16, 17, 6, 7,											// word one: 00XX
+	16, 17, 8, 9,											// word two: 00YY
 	16, 17, 10, 11,											// word three: 00ZZ
-	16, 17, 12, 13											// word four:  00WW
+	16, 17, 12, 13											// word four: 00WW
 };
 
-// out3 = __vperm( z2x3y3z3x4y4z4x5, Four_Threes, *reinterpret_cast<const fltx4 *>(g_SIMD_Quat48_Unpack_Permute3) ); // __x3__y3__z3__z2  // z2 is important, goes into out2
+// out3 = __vperm( z2x3y3z3x4y4z4x5, Four_Threes, *reinterpret_cast<const fltx4 *>(g_SIMD_Quat48_Unpack_Permute3) ); // __x3__y3__z3__z2 // z2 is important, goes into out2
 const uint8 ALIGN16 g_SIMD_Quat48_Unpack_Permute3[16] =
 {
 	16, 17, 2, 3,
@@ -139,7 +139,7 @@ const uint8 ALIGN16 g_SIMD_Quat48_Unpack_Permute3[16] =
 	16, 17, 0, 1
 };
 
-// out4 = __vperm( z2x3y3z3x4y4z4x5, Four_Threes, *reinterpret_cast<const fltx4 *>(g_SIMD_Quat48_Unpack_Permute4) ); // __x4__y4__z4__x5  // x5 is important, goes into out5
+// out4 = __vperm( z2x3y3z3x4y4z4x5, Four_Threes, *reinterpret_cast<const fltx4 *>(g_SIMD_Quat48_Unpack_Permute4) ); // __x4__y4__z4__x5 // x5 is important, goes into out5
 const uint8 ALIGN16 g_SIMD_Quat48_Unpack_Permute4[16] =
 {
 	16, 17, 8, 9,
@@ -154,7 +154,7 @@ const uint8 ALIGN16 g_SIMD_Quat48_Unpack_Permute6[16] =
 	16, 17, 4, 5,    // word one
 	16, 17, 6, 7,  // word two
 	16, 17, 8, 9,  // word three
-	16, 17, 10, 11   // word four  (garbage)
+	16, 17, 10, 11   // word four (garbage)
 };
 
 // out7 = __vperm( y5z5x6y6z6x7y7z7, Four_Threes, *reinterpret_cast<const fltx4 *>(g_SIMD_Quat48_Unpack_Permute7) ); // __x7__y7__z7____
@@ -163,38 +163,38 @@ const uint8 ALIGN16 g_SIMD_Quat48_Unpack_Permute7[16] =
 	16, 17, 10, 11,    // word one
 	16, 17, 12, 13,  // word two
 	16, 17, 14, 15,  // word three
-	16, 17, 16, 17   // word four  (garbage)
+	16, 17, 16, 17   // word four (garbage)
 };
 
 // these last two are tricky because we mix old output with source input. we get the 3.0f
 // from the old output.
-// out2 = __vperm( x0y0z0x1y1z1x2y2, out3, *reinterpret_cast<const fltx4 *>(g_SIMD_Quat48_Unpack_Permute2)  ); // __x2__y2__z2____
+// out2 = __vperm( x0y0z0x1y1z1x2y2, out3, *reinterpret_cast<const fltx4 *>(g_SIMD_Quat48_Unpack_Permute2) ); // __x2__y2__z2____
 const uint8 ALIGN16 g_SIMD_Quat48_Unpack_Permute2[16] =
 {
-	16, 17, 12, 13,  // 3.x2   
+	16, 17, 12, 13,  // 3.x2 
 	16, 17, 14, 15,  // 3.y2
 	16, 17, 30, 31,  // 3.z2 (from out2)
 	16, 17, 16, 17
 };
 
-// out5 = __vperm( y5z5x6y6z6x7y7z7, out4, *reinterpret_cast<const fltx4 *>(g_SIMD_Quat48_Unpack_Permute5)  ) // __x5__y5__z5____
+// out5 = __vperm( y5z5x6y6z6x7y7z7, out4, *reinterpret_cast<const fltx4 *>(g_SIMD_Quat48_Unpack_Permute5) ) // __x5__y5__z5____
 const uint8 ALIGN16 g_SIMD_Quat48_Unpack_Permute5[16] =
 {
-	16, 17, 30, 31,  // 3.x5  (from out5)  
+	16, 17, 30, 31,  // 3.x5 (from out5) 
 	16, 17,  0,  1,  // 3.y5
 	16, 17,  2,  3,  // 3.z5 
-	16, 17, 16, 17   // garbage   
+	16, 17, 16, 17   // garbage 
 };
 
 
-// magic constants that we use to convert the unpacked q48 components from 2 + n * 2^-22 (where n = 0 .. 65535)
-// to -1.0 .. 1
+// magic constants that we use to convert the unpacked q48 components from 2 + n * 2^-22 (where n = 0.. 65535)
+// to -1.0.. 1
 #define UnpackMul16s ( (1 << 22) / 32767.5 )
 #define UnpackAdd16s ( ( -UnpackMul16s * 3.0 ) - 1 )
 // we put the constants all into one word to save a little memory bandwidth
-// but otherwise it would look like this:
+// but otherwise it would look like this
 // static const fltx4 vUpkMul = { UnpackMul16s, UnpackMul16s, UnpackMul16s, UnpackMul16s };
-// static const fltx4 vUpkAdd = { UnpackAdd16s , UnpackAdd16s , UnpackAdd16s , UnpackAdd16s  };
+// static const fltx4 vUpkAdd = { UnpackAdd16s, UnpackAdd16s, UnpackAdd16s, UnpackAdd16s };
 const fltx4 g_SIMD_Quat48_Unpack_Magic_Constants = { UnpackMul16s , UnpackAdd16s, 0, 0 };
 #undef UnpackMul16s
 #undef UnpackAdd16s
@@ -268,7 +268,7 @@ void FourVectors::RotateManyBy(FourVectors* RESTRICT pVectors, unsigned int numV
 	// Same algorithm as above, but the loop is unrolled to eliminate data hazard latencies
 	// and simplify prefetching. Named variables are deliberately used instead of arrays to
 	// ensure that the variables live on the registers instead of the stack (stack load/store
-	// is a serious penalty on 360).  Nb: for prefetching to be most efficient here, the
+	// is a serious penalty on 360). Nb: for prefetching to be most efficient here, the
 	// loop should be unrolled to 8 FourVectors per iteration; because each FourVectors is 
 	// 48 bytes long, 48 * 8 = 384, its least common multiple with the 128-byte cache line. 
 	// That way you can fetch the next 3 cache lines while you work on these three. 
@@ -429,7 +429,7 @@ void FourVectors::RotateManyBy(FourVectors* RESTRICT pVectors, unsigned int numV
 	// Same algorithm as above, but the loop is unrolled to eliminate data hazard latencies
 	// and simplify prefetching. Named variables are deliberately used instead of arrays to
 	// ensure that the variables live on the registers instead of the stack (stack load/store
-	// is a serious penalty on 360).  Nb: for prefetching to be most efficient here, the
+	// is a serious penalty on 360). Nb: for prefetching to be most efficient here, the
 	// loop should be unrolled to 8 FourVectors per iteration; because each FourVectors is 
 	// 48 bytes long, 48 * 8 = 384, its least common multiple with the 128-byte cache line. 
 	// That way you can fetch the next 3 cache lines while you work on these three. 
@@ -693,8 +693,8 @@ void FourVectors_TransformManyGroupsOfEightBy(FourVectors* RESTRICT pVectors, un
 void FourVectors_TransformManyGroupsOfEightBy_128byteAligned(FourVectors* RESTRICT pVectors, unsigned int numVectors, const matrix3x4_t& rotationMatrix, FourVectors* RESTRICT pOut)
 {
 	/* If this has changed, you will need to change all the prefetches, *
-	 * and groups of eight are no longer the ideal unit for iterating   *
-	 * on many vectors.													*/
+	 * and groups of eight are no longer the ideal unit for iterating *
+	 * on many vectors. */
 	COMPILE_TIME_ASSERT(sizeof(FourVectors) == 48);
 
 	Assert(numVectors > 0);
@@ -1036,7 +1036,7 @@ void FourVectors::TransformManyBy(FourVectors* RESTRICT pVectors, unsigned int n
 
 		do
 		{
-			// Trust in the compiler to schedule these operations correctly:
+			// Trust in the compiler to schedule these operations correctly
 			pOut->x = MaddSIMD(pVectors->z, matSplat02, MaddSIMD(pVectors->y, matSplat01, MaddSIMD(pVectors->x, matSplat00, matSplat03)));
 			pOut->y = MaddSIMD(pVectors->z, matSplat12, MaddSIMD(pVectors->y, matSplat11, MaddSIMD(pVectors->x, matSplat00, matSplat13)));
 			pOut->z = MaddSIMD(pVectors->z, matSplat22, MaddSIMD(pVectors->y, matSplat21, MaddSIMD(pVectors->x, matSplat00, matSplat23)));
@@ -1267,7 +1267,7 @@ void FourVectors::TransformManyBy(FourVectors* RESTRICT pVectors, unsigned int n
 		do
 		{
 			fltx4 resultX, resultY, resultZ;
-			// Trust in the compiler to schedule these operations correctly:
+			// Trust in the compiler to schedule these operations correctly
 			resultX = MaddSIMD(pVectors->z, matSplat02, MaddSIMD(pVectors->y, matSplat01, MaddSIMD(pVectors->x, matSplat00, matSplat03)));
 			resultY = MaddSIMD(pVectors->z, matSplat12, MaddSIMD(pVectors->y, matSplat11, MaddSIMD(pVectors->x, matSplat00, matSplat13)));
 			resultZ = MaddSIMD(pVectors->z, matSplat22, MaddSIMD(pVectors->y, matSplat21, MaddSIMD(pVectors->x, matSplat00, matSplat23)));
@@ -1293,9 +1293,9 @@ void FourVectors::TransformManyBy(FourVectors* RESTRICT pVectors, unsigned int n
 void TransformManyPointsBy(VectorAligned* RESTRICT pVectors, unsigned int numVectors, FLTX4 mRow0, FLTX4 mRow1, FLTX4 mRow2)
 {
 	/**************************************************
-	 *  Here is an elaborate and carefully scheduled  *
+	 *  Here is an elaborate and carefully scheduled *
 	 *  algorithm nicked from xboxmath.inl and hacked *
-	 *  up for 3x4 matrices.                          *
+	 *  up for 3x4 matrices. *
 	 **************************************************/
 
 	COMPILE_TIME_ASSERT(sizeof(VectorAligned) == sizeof(XMFLOAT4)); // VectorAligned's need to be 16 bytes
@@ -1303,8 +1303,6 @@ void TransformManyPointsBy(VectorAligned* RESTRICT pVectors, unsigned int numVec
 	XMVECTOR R0[8], R1[8], R2[8];
 	XMVECTOR vIn[8];
 
-	//    C_ASSERT(UnrollCount == 8);
-	//    C_ASSERT(sizeof(XMFLOAT4) == 16);
 	Assert(pVectors);
 	Assert(((UINT_PTR)pVectors & 3) == 0); // assert alignment 
 

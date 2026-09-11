@@ -1,6 +1,6 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 //===========================================================================//
 
@@ -23,7 +23,7 @@ public:
 	{
 	}
 
-	// Get data by the string itself:
+	// Get data by the string itself
 	T& operator[]( const char *pString )
 	{
 		CUtlSymbol symbol = m_SymbolTable.AddString( pString );
@@ -93,7 +93,7 @@ public:
 			// this is the expected case when we've added one more to the tail.
 			m_Vector.AddToTail( item );
 		}
-		else // ( m_Vector.Count() < index )
+		else // ( m_Vector.Count < index )
 		{
 			// this is a strange shouldn't-happen case.
 			//AssertMsg( false, "CUtlStringMap insert unexpected entries." );

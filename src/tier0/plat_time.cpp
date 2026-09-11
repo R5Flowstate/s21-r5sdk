@@ -22,12 +22,15 @@ static void InitTime()
 {
 	if (!s_bTimeInitted)
 	{
-		s_bTimeInitted = true;
 		QueryPerformanceFrequency(&g_PerformanceFrequency);
 		g_PerformanceCounterToS = 1.0 / g_PerformanceFrequency.QuadPart;
 		g_PerformanceCounterToMS = 1e3 / g_PerformanceFrequency.QuadPart;
 		g_PerformanceCounterToUS = 1e6 / g_PerformanceFrequency.QuadPart;
 		QueryPerformanceCounter(&g_ClockStart);
+
+		// Published last: a second thread that sees the flag must not be able to
+		// find the conversion constants still zero and hand back a garbage time.
+		s_bTimeInitted = true;
 	}
 }
 

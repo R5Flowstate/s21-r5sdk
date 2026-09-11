@@ -5,7 +5,8 @@ add_module( "lib" ${PROJECT_NAME} "vpc" ${FOLDER_CONTEXT} TRUE TRUE )
 
 start_sources()
 
-if( ${PROJECT_NAME} STREQUAL "game_shared_static" )
+if( ${PROJECT_NAME} STREQUAL "game_shared_static"
+ OR ${PROJECT_NAME} STREQUAL "game_shared_static_cl" )
 
 add_sources( SOURCE_GROUP "AI"
     "shared/ai_utility_shared.cpp"
@@ -27,6 +28,8 @@ add_sources( SOURCE_GROUP "Simulation"
 add_sources( SOURCE_GROUP "Animation"
     "shared/animation.cpp"
     "shared/animation.h"
+    "shared/pose_param.cpp"
+    "shared/pose_param.h"
 )
 
 add_sources( SOURCE_GROUP "Activity"
@@ -34,12 +37,22 @@ add_sources( SOURCE_GROUP "Activity"
     "shared/activity.h"
     "shared/activitymodifier.cpp"
     "shared/activitymodifier.h"
+    # DEDI server activity xlat (S3 ordinals -> S21)
+    "shared/activity_s3_to_s21.h"
+    "shared/activity_s21_enum.h"
+    # CLIENT activity xlat (folded from s21-client)
+    "shared/activity_s3_to_s21_client.cpp"
+    "shared/activity_s3_to_s21_client.h"
+    "shared/activity_s3_to_s21_table.h"
+    # DEDI weapon-state xlat (S3 ordinals -> S21), same wire-encode class
+    "shared/weapstate_s3_to_s21.h"
 )
 
 add_sources( SOURCE_GROUP "Effects"
     "shared/status_effect.h"
+    "shared/status_effects_sdk.cpp"
+    "shared/status_effects_sdk.h"
     "shared/particleproperty.h"
-    "shared/particle_parse.h"
 )
 
 add_sources( SOURCE_GROUP "Physics"
@@ -55,15 +68,64 @@ add_sources( SOURCE_GROUP "Player"
 add_sources( SOURCE_GROUP "Weapon"
     "shared/r1/weapon_playerdata.h"
     "shared/r1/weapon_parse.h"
-    "shared/r1/blast_pattern.cpp"
-    "shared/r1/blast_pattern.h"
     "shared/r1/weapon_bolt.cpp"
     "shared/r1/weapon_bolt.h"
     "shared/r1/grapple.h"
     "shared/r1/smartammo.h"
     "shared/weapon_script_vars.cpp"
     "shared/weapon_script_vars.h"
+    "shared/weapon_enforce.h"
+    "shared/offhand_slots_ext.h"
+    "shared/offhand_activation_patches.cpp"
+    "shared/offhand_activation_patches.h"
+    "shared/offhand_instant_swap.cpp"
+    "shared/offhand_instant_swap.h"
+    "shared/weapon_dualwield_slot_patch.cpp"
+    "shared/weapon_dualwield_slot_patch.h"
+    "shared/heap_canary.cpp"
+    "shared/heap_canary.h"
+    "shared/weapon_legendary_ext.cpp"
+    "shared/weapon_legendary_ext.h"
+    "shared/weapon_customact_c2s_xlat.cpp"
+    "shared/weapon_customact_c2s_xlat.h"
+    "shared/weapon_heat.cpp"
+    "shared/weapon_heat.h"
+    "shared/globalnonrewind_vars.h"
+    "shared/deathfield_system.cpp"
+    "shared/deathfield_system.h"
+    "shared/alliance_compat.cpp"
+    "shared/alliance_compat.h"
+    "shared/highlight_context.cpp"
+    "shared/highlight_context.h"
+    "shared/edict_dirty.h"
+    "shared/dt_extend.h"
+    "shared/dt_extend_diag.h"
+    "shared/dt_extend_system14.h"
+    "shared/player_extend_sidecar.h"
+    "shared/sdk_entity_state.h"
+    "shared/scriptnetdata_ext.cpp"
+    "shared/scriptnetdata_ext.h"
+    "shared/scriptnetdata_limits.h"
 )
+
+if( ${PROJECT_NAME} STREQUAL "game_shared_static" )
+add_sources( SOURCE_GROUP "Server Only"
+    "shared/activity_s3_to_s21.cpp"
+    "shared/offhand_slots_ext.cpp"
+    "shared/globalnonrewind_vars.cpp"
+    "shared/util_shared.cpp"
+    "shared/vscript_debug_overlay_shared.cpp"
+    "shared/scriptremotefunctions_shared.cpp"
+)
+
+add_sources( SOURCE_GROUP "Weapon"
+    "shared/dt_extend.cpp"
+    "shared/dt_extend_diag.cpp"
+    "shared/dt_extend_system14.cpp"
+    "shared/bridge_anim_anchor.cpp"
+    "shared/player_extend_sidecar.cpp"
+)
+endif()
 
 add_sources( SOURCE_GROUP "Network"
     "shared/playernet_vars.h"
@@ -73,12 +135,13 @@ add_sources( SOURCE_GROUP "Network"
 add_sources( SOURCE_GROUP "Input"
     "shared/usercmd.cpp"
     "shared/usercmd.h"
+    "shared/bridge_cmd_seed.cpp"
+    "shared/bridge_cmd_seed.h"
     "shared/pingcmd.h"
 )
 
 add_sources( SOURCE_GROUP "Utility"
     "shared/imovehelper.h"
-    "shared/util_shared.cpp"
     "shared/util_shared.h"
 )
 
@@ -87,16 +150,25 @@ add_sources( SOURCE_GROUP "Shared"
     "shared/shareddefs.h"
     "shared/takedamageinfo.h"
     "shared/shared_activity.h"
+    "shared/chatbuilder.h"
 )
 
 add_sources( SOURCE_GROUP "Script"
     "shared/vscript_shared.cpp"
     "shared/vscript_shared.h"
-    "shared/vscript_debug_overlay_shared.cpp"
     "shared/vscript_debug_overlay_shared.h"
     "shared/vscript_gamedll_defs.h"
     "shared/scriptremotefunctions.cpp"
     "shared/scriptremotefunctions.h"
+    "shared/scriptremotefunctions_shared.h"
+    "shared/cbaseentity_getscriptinstance_client_stub.cpp"
+    "shared/vscript_remotefunctions_sdk.h"
+    "client/vscript_player.cpp"
+    "client/vscript_player.h"
+    "client/scriptnetdata_client.cpp"
+    "client/scriptnetdata_client.h"
+    "client/convar_stubs.cpp"
+    "shared/convar_script_compat.cpp"
 )
 
 add_sources( SOURCE_GROUP "ModSystem"
@@ -132,10 +204,8 @@ add_sources( SOURCE_GROUP "AI"
     "server/ai_moveprobe.h"
     "server/ai_motor.h"
     "server/ai_route.h"
-    "server/ai_interest.cpp"
     "server/ai_interest.h"
     "server/ai_waypoint.h"
-    "server/ai_pathfinder.cpp"
     "server/ai_pathfinder.h"
     "server/ai_memory.h"
     "server/ai_squad.h"
@@ -175,20 +245,129 @@ add_sources( SOURCE_GROUP "Player"
     "server/player.h"
     "server/player_command.cpp"
     "server/player_command.h"
+    "server/bridge_cmd_chain.cpp"
+    "server/bridge_cmd_chain.h"
     "server/playerlocaldata.h"
+    "server/jetdrive.cpp"
+    "server/jetdrive.h"
+    "server/track_entity.cpp"
+    "server/track_entity.h"
+    "server/zipline_extend_state.cpp"
+    "server/zipline_extend_state.h"
+    "server/context_action.cpp"
+    "server/context_action.h"
+    "server/player_launch.cpp"
+    "server/player_launch.h"
+    "server/skydive.cpp"
+    "server/skydive.h"
+    "server/mantle_boost.cpp"
+    "server/mantle_boost.h"
+    "server/melee_lunge_probe.cpp"
+    "server/melee_lunge_probe.h"
+    "server/melee_activity_trace.cpp"
+    "server/melee_activity_trace.h"
+    "server/movescale_weapon_parity.cpp"
+    "server/movescale_weapon_parity.h"
+    "server/halfduck_zip_parity.cpp"
+    "server/halfduck_zip_parity.h"
+    "server/move_sim_trace.cpp"
+    "server/move_sim_trace.h"
+    "server/repel_realm_gate.cpp"
+    "server/repel_realm_gate.h"
+    "server/zipline_cooldown.cpp"
+    "server/zipline_cooldown.h"
+    "server/zipline_exit_parity.cpp"
+    "server/zipline_exit_parity.h"
+    "server/poseparam_ext.cpp"
+    "server/poseparam_ext.h"
+    "server/tapstrafe.cpp"
+    "server/tapstrafe.h"
+    "server/trigger_slip_diag.cpp"
+    "server/trigger_slip_diag.h"
+    "server/trigger_starttouch_dedupe.cpp"
+    "server/trigger_starttouch_dedupe.h"
+    "server/trigger_clientpredict.cpp"
+    "server/trigger_clientpredict.h"
+    "server/jumppad_parity.cpp"
+    "server/jumppad_parity.h"
+    "server/trigger_cannon.cpp"
+    "server/trigger_cannon.h"
+    "server/trigger_gravity.cpp"
+    "server/trigger_gravity.h"
+    "server/trigger_updraft.cpp"
+    "server/trigger_updraft.h"
+    "server/consumable_inv.cpp"
+    "server/consumable_inv.h"
+    "server/bridge_fire_clock.cpp"
+    "server/bridge_fire_clock.h"
+    "server/bridge_zoom_gate.cpp"
+    "server/bridge_zoom_gate.h"
+    "server/weapon_kv_s21_ext.cpp"
+    "server/weapon_kv_s21_ext.h"
+    "server/bridge_equip_gate.cpp"
+    "server/bridge_equip_gate.h"
+    "server/bridge_deploy_gate.cpp"
+    "server/bridge_deploy_gate.h"
 )
+
 
 add_sources( SOURCE_GROUP "Weapon"
     "server/r1/weapon_x.cpp"
     "server/r1/weapon_x.h"
+    "server/r1/blast_pattern.cpp"
+    "server/r1/blast_pattern.h"
+    "server/infinite_ammo.cpp"
+    "server/infinite_ammo.h"
+    "server/weapon_ammo_pool_mod.cpp"
+    "server/weapon_ammo_pool_mod.h"
+    "server/weapon_enforce.cpp"
+    "server/weapon_select_mirror.cpp"
+    "server/weapon_select_mirror.h"
+    "server/energize.cpp"
+    "server/energize.h"
+    "server/akimbo.cpp"
+    "server/akimbo.h"
+    "server/sndc_alloc.cpp"
+    "server/sndc_alloc.h"
 )
 
 add_sources( SOURCE_GROUP "Script"
     "server/vscript_server.cpp"
     "server/vscript_server.h"
+    "server/vscript_server_natives.cpp"
+    "server/vscript_server_natives.h"
+    "server/classvar_natives.cpp"
+    "server/classvar_natives.h"
+    "server/vscript_server_placement.cpp"
+    "server/vscript_server_placement.h"
+    "shared/scriptremotefunctions_server.h"
+    "server/scriptremotefunctions.cpp"
+    "server/vscript_remotefunctions_sdk.cpp"
+    "server/vscript_remotefunctions_buffer_expand.cpp"
+    "server/vscript_remotefunctions_buffer_expand.h"
+    "server/sdk_entity_state.cpp"
+    "server/scriptnetdata_limits.cpp"
+    "server/persistence_ext.cpp"
+    "server/persistence_ext.h"
+    "server/persistence_basevar_overflow.cpp"
+    "server/persistence_basevar_overflow.h"
+    "server/passive_changed.cpp"
+    "server/passive_changed.h"
+    "server/extended_range_use.cpp"
+    "server/extended_range_use.h"
+    "server/player_overheat.cpp"
+    "server/player_overheat.h"
+    "server/translocation.cpp"
+    "server/translocation.h"
+    "server/chatbuilder.cpp"
+    "server/chatbuilder.h"
 )
 
 add_sources( SOURCE_GROUP "Physics"
+    "server/hitbox_debug.cpp"
+    "server/hitbox_debug.h"
+    "server/headglitch_detect.cpp"
+    "server/headglitch_detect.h"
     "server/physics_main.cpp"
     "server/physics_main.h"
 )
@@ -206,14 +385,14 @@ add_sources( SOURCE_GROUP "Utility"
     "server/variant_t.h"
 )
 
-add_sources( SOURCE_GROUP "LiveAPI"
-    "server/liveapi/liveapi.cpp"
-    "server/liveapi/liveapi.h"
-)
-
 add_sources( SOURCE_GROUP "Recipient Filter"
     "server/recipientfilter.cpp"
     "server/recipientfilter.h"
+)
+
+add_sources( SOURCE_GROUP "Sound"
+    "server/sound.cpp"
+    "server/sound.h"
 )
 
 file( GLOB GAME_SERVER_PUBLIC_HEADERS
@@ -225,26 +404,20 @@ endif()
 if( ${PROJECT_NAME} STREQUAL "client_static" )
 
 add_sources( SOURCE_GROUP "Entity"
-    "client/c_baseentity.cpp"
     "client/c_baseentity.h"
-    "client/c_baseanimating.h"
-    "client/c_baseanimatingoverlay.h"
-    "client/c_basecombatcharacter.h"
     "client/cliententitylist.cpp"
     "client/cliententitylist.h"
     "client/entitylist_clientbase.h"
     "client/icliententityinternal.h"
-)
-
-add_sources( SOURCE_GROUP "Player"
-    "client/c_player.cpp"
-    "client/c_player.h"
-    "client/c_playerlocaldata.h"
+    "client/body_skin.cpp"
+    "client/body_skin.h"
 )
 
 add_sources( SOURCE_GROUP "Weapon"
     "client/r1/c_weapon_x.cpp"
     "client/r1/c_weapon_x.h"
+    "client/weapon_mod_visual.cpp"
+    "client/weapon_mod_visual.h"
 )
 
 add_sources( SOURCE_GROUP "Input"
@@ -264,19 +437,15 @@ add_sources( SOURCE_GROUP "Leaf System"
 add_sources( SOURCE_GROUP "Rendering"
     "client/enginesprite.h"
     "client/hud.h"
-    "client/spritemodel.cpp"
     "client/viewrender.cpp"
     "client/viewrender.h"
     "client/iviewrender.h"
 )
 
 add_sources( SOURCE_GROUP "Animation"
-    "client/animationlayer.h"
 )
 
 add_sources( SOURCE_GROUP "Utility"
-    "client/movehelper_client.cpp"
-    "client/movehelper_client.h"
     "client/util_client.cpp"
     "client/util_client.h"
 )
@@ -284,8 +453,13 @@ add_sources( SOURCE_GROUP "Utility"
 add_sources( SOURCE_GROUP "Script"
     "client/vscript_client.cpp"
     "client/vscript_client.h"
+    # Client-only send path (ClientScript_Remote_ServerCallFunction).
     "client/concommandcallback.cpp"
     "client/concommandcallback.h"
+    "client/classvar_natives.cpp"
+    "client/classvar_natives.h"
+    "client/fs_1v1_convars.cpp"
+    "client/fs_1v1_convars.h"
 )
 
 add_sources( SOURCE_GROUP "Viewmodel"
@@ -299,13 +473,53 @@ add_sources( SOURCE_GROUP "Hud"
 )
 
 add_sources( SOURCE_GROUP "Zipline"
-    "client/c_zipline_fix.cpp"
-    "client/c_zipline_fix.h"
+    "client/c_zipline.cpp"
+    "client/c_zipline.h"
 )
 
 add_sources( SOURCE_GROUP "RUI"
     "client/ruitracks.cpp"
     "client/ruitracks.h"
+    "client/rui_walltime.cpp"
+    "client/rui_walltime.h"
+)
+
+# CLIENT exclusives folded from s21-client (pred / bridge / diag)
+add_sources( SOURCE_GROUP "Prediction"
+    "client/pred_diag.cpp"
+    "client/pred_diag.h"
+    "client/pred_authority.cpp"
+    "client/pred_authority.h"
+    "client/pred_authority_probes.cpp"
+    "client/pred_authority_probes.h"
+    "client/mantle_boost.cpp"
+    "client/mantle_boost.h"
+    "client/mantle_boost_rui.cpp"
+    "client/mantle_boost_rui.h"
+    "client/trigger_cannon.cpp"
+    "client/trigger_cannon.h"
+    "client/halfduck_zip_parity.cpp"
+    "client/halfduck_zip_parity.h"
+    "client/move_sim_trace.cpp"
+    "client/move_sim_trace.h"
+    "client/melee_lunge_probe.cpp"
+    "client/melee_lunge_probe.h"
+    "client/melee_activity_trace.cpp"
+    "client/melee_activity_trace.h"
+    "client/bridge_cmd_seed.cpp"
+    "client/bridge_cmd_seed.h"
+    "client/bridge_fire_tap.cpp"
+    "client/bridge_fire_tap.h"
+)
+
+add_sources( SOURCE_GROUP "Grapple Rope"
+    "client/grapple_rope_diag.cpp"
+    "client/grapple_rope_diag.h"
+)
+
+add_sources( SOURCE_GROUP "Jump Pad"
+    "client/jumppad_viewpunch_diag.cpp"
+    "client/jumppad_viewpunch_diag.h"
 )
 
 file( GLOB GAME_CLIENT_PUBLIC_HEADERS
@@ -329,6 +543,18 @@ elseif( ${PROJECT_NAME} STREQUAL "client_static" )
 target_compile_definitions( ${PROJECT_NAME} PRIVATE
     "CLIENT_DLL"
 )
+elseif( ${PROJECT_NAME} STREQUAL "game_shared_static"
+     OR ${PROJECT_NAME} STREQUAL "game_shared_static_cl" )
+# Dual game_shared: plain (server/dedicated bodies) + _cl (CLIENT_DLL bodies).
+# Dual-body shared TUs (#if CLIENT_DLL) compile client path only on *_cl.
+# Legacy single-lib rebuild: -DR5SDK_UNIFY_CLIENT_SHARED=ON forces CLIENT_DLL
+# on plain game_shared_static (client-only worktree builds).
+if( ${PROJECT_NAME} STREQUAL "game_shared_static_cl" OR R5SDK_UNIFY_CLIENT_SHARED )
+target_compile_definitions( ${PROJECT_NAME} PRIVATE
+    "CLIENT_DLL"
+    "R5SDK_UNIFY_CLIENT_SHARED"
+)
+endif()
 
 endif()
 
@@ -343,3 +569,12 @@ endmacro()
 add_game_project( "server_static" )
 add_game_project( "client_static" )
 add_game_project( "game_shared_static" )
+add_game_project( "game_shared_static_cl" )
+
+if( TARGET game_shared_static_cl )
+    target_sources( game_shared_static_cl PRIVATE
+        "${ENGINE_SOURCE_DIR}/game/shared/dt_extend_client_stub.cpp"
+        "${ENGINE_SOURCE_DIR}/game/shared/dt_extend.h"
+    )
+endif()
+

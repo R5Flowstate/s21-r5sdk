@@ -10,22 +10,27 @@
 class CNetConBase
 {
 public:
-	CNetConBase(void)
+	CNetConBase(const bool isServer) : m_Socket(isServer)
 	{
 		memset(m_NetKey, 0, sizeof(m_NetKey));
 	}
 
 	void SetKey(const char* pBase64NetKey, const bool bUseDefaultOnFailure = false);
 	const char* GetKey(void) const;
+	// True when the active key is the public demo constant (not for live encrypt).
+	bool IsUsingDefaultEncryptionKey(void) const;
 
 	virtual bool Connect(const char* pHostName, const int nHostPort = SOCKET_ERROR);
+	bool ConnectTimeout(const char* pHostName, const int nHostPort, float flTimeoutSec);
 	virtual void Disconnect(const char* szReason = nullptr) { NOTE_UNUSED(szReason); };
 
 	virtual bool ProcessBuffer(ConnectedNetConsoleData_s& data, const byte* pRecvBuf, u32 nRecvLen, const u32 nMaxLen);
-	virtual bool ProcessMessage(const byte* /*pMsgBuf*/, const u32 /*nMsgLen*/, const u32 /*nMaxLen*/) { return true; };
+	virtual bool ProcessMessage(ConnectedNetConsoleData_s& /*data*/, const u32 /*nMaxLen*/) { return true; };
 
-	virtual bool Encrypt(CryptoContext_s& ctx, const byte* pInBuf, byte* pOutBuf, const u32 nDataLen) const;
-	virtual bool Decrypt(CryptoContext_s& ctx, const byte* pInBuf, byte* pOutBuf, const u32 nDataLen) const;
+	virtual bool Encrypt(CryptoContext_s& ctx, const byte* pInBuf, byte* pOutBuf,
+		const u32 nDataLen, const u8* pAad, const size_t nAadLen) const;
+	virtual bool Decrypt(CryptoContext_s& ctx, const byte* pInBuf, byte* pOutBuf,
+		const u32 nDataLen, const u8* pAad, const size_t nAadLen) const;
 
 	virtual bool Encode(google::protobuf::MessageLite* pMsg, byte* pMsgBuf, const u32 nMsgLen) const;
 	virtual bool Decode(google::protobuf::MessageLite* pMsg, const byte* pMsgBuf, const u32 nMsgLen) const;

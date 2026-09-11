@@ -1,4 +1,4 @@
-﻿//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
 // Purpose: Sets up the tasks for default AI.
 //
@@ -7,7 +7,7 @@
 //#include "ai_basenpc.h"
 #include "ai_task.h"
 
-// memdbgon must be the last include file in a .cpp file!!!
+// memdbgon must be the last include file in a.cpp file!!!
 #include "tier0/memdbgon.h"
 
 static const char* const s_ppszTaskFailureText[NUM_FAIL_CODES] =

@@ -13,9 +13,9 @@
 
 //-----------------------------------------------------------------------------
 // Purpose: Builds a directory which is a subdirectory of the current mod.
-// Input  : *pSubDir -
-//			*pBuf -
-//			nBufLen - 
+// Input: *pSubDir -
+// *pBuf -
+// nBufLen - 
 //-----------------------------------------------------------------------------
 void GetModSubdirectory(const char* pSubDir, char* pBuf, ssize_t nBufLen)
 {
@@ -43,9 +43,9 @@ void GetModSubdirectory(const char* pSubDir, char* pBuf, ssize_t nBufLen)
 
 //-----------------------------------------------------------------------------
 // Purpose: Builds a directory which is a subdirectory of the current mod's *content*.
-// Input  : *pSubDir -
-//			*pBuf - 
-//			nBufLen - 
+// Input: *pSubDir -
+// *pBuf - 
+// nBufLen - 
 //-----------------------------------------------------------------------------
 void GetModContentSubdirectory( const char *pSubDir, char *pBuf, ssize_t nBufLen )
 {
@@ -56,9 +56,9 @@ void GetModContentSubdirectory( const char *pSubDir, char *pBuf, ssize_t nBufLen
 
 //-----------------------------------------------------------------------------
 // Purpose: Generates a filename under the 'game' subdirectory given a subdirectory of 'content'.
-// Input  : *pContentFileName -
-//			*pBuf - 
-//			nBufLen - 
+// Input: *pContentFileName -
+// *pBuf - 
+// nBufLen - 
 //-----------------------------------------------------------------------------
 void ComputeModFilename( const char *pContentFileName, char *pBuf, ssize_t nBufLen )
 {
@@ -82,9 +82,9 @@ void ComputeModFilename( const char *pContentFileName, char *pBuf, ssize_t nBufL
 
 //-----------------------------------------------------------------------------
 // Purpose: Generates a filename under the 'content' subdirectory given a subdirectory of 'game'.
-// Input  : *pGameFileName -
-//			*pBuf - 
-//			nBufLen - 
+// Input: *pGameFileName -
+// *pBuf - 
+// nBufLen - 
 //-----------------------------------------------------------------------------
 void ComputeModContentFilename( const char *pGameFileName, char *pBuf, ssize_t nBufLen )
 {
@@ -108,11 +108,11 @@ void ComputeModContentFilename( const char *pGameFileName, char *pBuf, ssize_t n
 
 //-----------------------------------------------------------------------------
 // Purpose: Search start directory, recurse into sub directories collecting all files matching the target name.
-// Input  : &fileList - 
-//			*szStartDirectory - 
-//			*szTargetFileName - 
-//			*pathID - 
-//			separator - 
+// Input: &fileList - 
+// *szStartDirectory - 
+// *szTargetFileName - 
+// *pathID - 
+// separator - 
 //-----------------------------------------------------------------------------
 void RecursiveFindFilesMatchingName( CUtlVector< CUtlString > &fileList, const char* szStartDirectory, const char* szTargetFileName, const char *pPathID, char separator )
 {
@@ -145,11 +145,11 @@ void RecursiveFindFilesMatchingName( CUtlVector< CUtlString > &fileList, const c
 
 //-----------------------------------------------------------------------------
 // Builds a list of all files under a directory with a particular extension.
-// Input  : &fileList - 
-//			*pDirectory - 
-//			*pExtension - 
-//			*pPathID - 
-//			separator - 
+// Input: &fileList - 
+// *pDirectory - 
+// *pExtension - 
+// *pPathID - 
+// separator - 
 //-----------------------------------------------------------------------------
 void AddFilesToList( CUtlVector< CUtlString > &fileList, const char *pDirectory, const char *pExtension, const char* pPathID, char separator )
 {
@@ -209,8 +209,8 @@ void AddFilesToList( CUtlVector< CUtlString > &fileList, const char *pDirectory,
 
 //-----------------------------------------------------------------------------
 // Purpose: Returns the search path as a list of paths.
-// Input  : &pathList -
-//			*pPathID - 
+// Input: &pathList -
+// *pPathID - 
 //-----------------------------------------------------------------------------
 void GetSearchPath(CUtlVector< CUtlString >& pathList, const char* pPathID)
 {
@@ -230,10 +230,10 @@ void GetSearchPath(CUtlVector< CUtlString >& pathList, const char* pPathID)
 
 //-----------------------------------------------------------------------------
 // Purpose: Given file name in the current dir generate a full path to it.
-// Input  : *pFileName -
-//			*pPathID - 
-//			*pBuf - 
-//			nBufLen - 
+// Input: *pFileName -
+// *pPathID - 
+// *pBuf - 
+// nBufLen - 
 // Output: True on success, false otherwise.
 //-----------------------------------------------------------------------------
 bool GenerateFullPath(const char* pFileName, char const* pPathID, char* pBuf, ssize_t nBufLen)

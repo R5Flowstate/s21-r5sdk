@@ -28,7 +28,7 @@ extern InterfaceReg** s_ppInterfaceRegs;
 
 //-----------------------------------------------------------------------------
 // Use this to expose an interface that can have multiple instances.
-// e.g.:
+// e.g.
 // EXPOSE_INTERFACE( CInterfaceImp, IInterface, "MyInterface001" )
 // This will expose a class called CInterfaceImp that implements IInterface (a pure class)
 // clients can receive a pointer to this class by calling CreateInterface( "MyInterface001" )

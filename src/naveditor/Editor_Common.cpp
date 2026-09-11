@@ -25,14 +25,6 @@
 #include "DetourTileCache/Include/DetourTileCache.h"
 #include "include/ShapeVolumeTool.h"
 
-static void EditorCommon_DrawInputGeometry(duDebugDraw* const dd, const InputGeom* const geom,
-	const float maxSlope, const float textureScale)
-{
-	duDebugDrawTriMeshSlope(dd, geom->getMesh()->getVerts(), geom->getMesh()->getVertCount(),
-		geom->getMesh()->getTris(), geom->getMesh()->getNormals(), geom->getMesh()->getTriCount(),
-		maxSlope, textureScale, nullptr);
-}
-
 static void EditorCommon_DrawBoundingBox(duDebugDraw* const dd, const InputGeom* const geom)
 {
 	const rdVec3D* const origBmin = geom->getMeshBoundsMin();
@@ -71,9 +63,10 @@ static void EditorCommon_DrawTilingGrid(duDebugDraw* const dd, const InputGeom* 
 	duDebugDrawGridXY(dd, bmax->x, bmin->y, bmin->z, tw, th, s, duRGBA(0, 0, 0, 64), 1.0f, nullptr);
 }
 
-int EditorCommon_SetAndRenderTileProperties(const InputGeom* const geom, 
+int EditorCommon_CalcTileProperties(const InputGeom* const geom,
 	const int minTilebits, const int maxTileBits, const int tileSize,
-	const float cellSize, int& maxTiles, int& maxPolysPerTile)
+	const float cellSize, int& maxTiles, int& maxPolysPerTile,
+	int& tileCountX, int& tileCountY)
 {
 	int gridSize = 1;
 
@@ -87,9 +80,6 @@ int EditorCommon_SetAndRenderTileProperties(const InputGeom* const geom,
 		const int tw = (gw + ts-1) / ts;
 		const int th = (gh + ts-1) / ts;
 
-		ImGui::Text("Tiles: %d x %d", tw, th);
-		ImGui::Text("Tile Sizes: %g x %g (%g)", tw*cellSize, th*cellSize, tileSize*cellSize);
-
 		// Max tiles and max polys affect how the tile IDs are calculated.
 		// There are MAX_TILE_BITS bits available for identifying a tile and a polygon.
 		const int tileBits = rdMin((int)rdIlog2(rdNextPow2(tw*th)), minTilebits);
@@ -99,15 +89,35 @@ int EditorCommon_SetAndRenderTileProperties(const InputGeom* const geom,
 		maxPolysPerTile = 1 << polyBits;
 
 		gridSize = tw*th;
-
-		ImGui::Text("Max Tiles: %d", maxTiles);
-		ImGui::Text("Max Polys: %d", maxPolysPerTile);
+		tileCountX = tw;
+		tileCountY = th;
 	}
 	else
 	{
 		maxTiles = 0;
 		maxPolysPerTile = 0;
 		gridSize = 1;
+		tileCountX = 0;
+		tileCountY = 0;
+	}
+
+	return gridSize;
+}
+
+int EditorCommon_SetAndRenderTileProperties(const InputGeom* const geom, 
+	const int minTilebits, const int maxTileBits, const int tileSize,
+	const float cellSize, int& maxTiles, int& maxPolysPerTile)
+{
+	int tileCountX = 0, tileCountY = 0;
+	const int gridSize = EditorCommon_CalcTileProperties(geom, minTilebits, maxTileBits,
+		tileSize, cellSize, maxTiles, maxPolysPerTile, tileCountX, tileCountY);
+
+	if (geom)
+	{
+		ImGui::Text("Tiles: %d x %d", tileCountX, tileCountY);
+		ImGui::Text("Tile Sizes: %g x %g (%g)", tileCountX*cellSize, tileCountY*cellSize, tileSize*cellSize);
+		ImGui::Text("Max Tiles: %d", maxTiles);
+		ImGui::Text("Max Polys: %d", maxPolysPerTile);
 	}
 
 	return gridSize;
@@ -277,9 +287,9 @@ void Editor_StaticTileMeshCommon::renderTileMeshData()
 
 	const float texScale = 1.0f / (m_cellSize * 10.0f);
 
-	// Draw input mesh
+	// Draw input mesh (cached — only recomputed when mesh changes)
 	if (getTileMeshDrawFlags() & DU_DRAW_RECASTMESH_INPUT_MESH)
-		EditorCommon_DrawInputGeometry(&m_dd, m_geom, m_agentMaxSlope, texScale);
+		drawInputMeshCached(m_agentMaxSlope, texScale);
 
 	glDepthMask(GL_FALSE);
 
@@ -306,7 +316,7 @@ void Editor_StaticTileMeshCommon::renderTileMeshData()
 	if (m_navMesh && m_navQuery)
 	{
 		if (m_tileMeshDrawFlags & DU_DRAW_RECASTMESH_NAVMESH)
-			duDebugDrawNavMeshWithClosedList(&m_dd, *m_navMesh, *m_navQuery, detourDrawOffset, detourDrawFlags, m_traverseLinkDrawParams);
+			drawNavMeshCached(detourDrawFlags);
 	}
 
 	glDepthMask(GL_TRUE);
@@ -562,9 +572,9 @@ void Editor_DynamicTileMeshCommon::renderTileMeshData()
 	const rdVec3D* recastDrawOffset = getRecastDrawOffset();
 	const rdVec3D* detourDrawOffset = getDetourDrawOffset();
 
-	// Draw input mesh
+	// Draw input mesh (cached — only recomputed when mesh changes)
 	if (recastDrawFlags & DU_DRAW_RECASTMESH_INPUT_MESH)
-		EditorCommon_DrawInputGeometry(&m_dd, m_geom, m_agentMaxSlope, texScale);
+		drawInputMeshCached(m_agentMaxSlope, texScale);
 
 	// Draw bounds
 	EditorCommon_DrawBoundingBox(&m_dd, m_geom);
@@ -581,7 +591,7 @@ void Editor_DynamicTileMeshCommon::renderTileMeshData()
 	if (m_navMesh && m_navQuery)
 	{
 		if (recastDrawFlags & DU_DRAW_RECASTMESH_NAVMESH)
-			duDebugDrawNavMeshWithClosedList(&m_dd, *m_navMesh, *m_navQuery, detourDrawOffset, detourDrawFlags, m_traverseLinkDrawParams);
+			drawNavMeshCached(detourDrawFlags);
 	}
 
 	int selectedVolumeIndex = -1;

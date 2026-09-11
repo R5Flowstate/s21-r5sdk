@@ -1,4 +1,4 @@
-﻿//========= Copyright © 1996-2006, Valve LLC, All rights reserved. ============
+//========= Copyright © 1996-2006, Valve LLC, All rights reserved. ============
 //
 // Purpose: Low level byte swapping routines.
 //
@@ -11,7 +11,7 @@
 #endif
 
 #include "tier0/dbg.h"
-#include "public/datamap.h"	// needed for typedescription_t.  note datamap.h is tier1 as well.
+#include "public/datamap.h"	// needed for typedescription_t. note datamap.h is tier1 as well.
 
 class CByteSwap
 {
@@ -28,7 +28,7 @@ public:
 	void SwapFieldToTargetEndian(void* pOutputBuffer, void* pData, typedescription_t* pField);
 
 	//-----------------------------------------------------------------------------
-	// Write a block of fields.  Works a bit like the saverestore code.  
+	// Write a block of fields. Works a bit like the saverestore code. 
 	//-----------------------------------------------------------------------------
 	void SwapFieldsToTargetEndian(void* pOutputBuffer, void* pBaseData, datamap_t* pDataMap);
 
@@ -64,9 +64,9 @@ public:
 	//-----------------------------------------------------------------------------
 	// Sets the target byte ordering we are swapping to or from.
 	//
-	// Braindead Endian Reference:
-	//		x86 is LITTLE Endian
-	//		PowerPC is BIG Endian
+	// Braindead Endian Reference
+	// x86 is LITTLE Endian
+	// PowerPC is BIG Endian
 	//-----------------------------------------------------------------------------
 	inline void SetTargetBigEndian(bool bigEndian)
 	{
@@ -103,23 +103,23 @@ public:
 	}
 
 	//-----------------------------------------------------------------------------
-	// IsByteSwapped()
+	// IsByteSwapped
 	//
 	// When supplied with a chunk of input data and a constant or magic number
 	// (in native format) determines the endienness of the current machine in
 	// relation to the given input data.
 	//
-	// Returns:
-	//		1  if input is the same as nativeConstant.
-	//		0  if input is byteswapped relative to nativeConstant.
-	//		-1 if input is not the same as nativeConstant and not byteswapped either.
+	// Returns
+	// 1 if input is the same as nativeConstant.
+	// 0 if input is byteswapped relative to nativeConstant.
+	// -1 if input is not the same as nativeConstant and not byteswapped either.
 	//
 	// ( This is useful for detecting byteswapping in magic numbers in structure 
 	// headers for example. )
 	//-----------------------------------------------------------------------------
 	template<typename T> inline int SourceIsNativeEndian(T input, T nativeConstant)
 	{
-		// If it's the same, it isn't byteswapped:
+		// If it's the same, it isn't byteswapped
 		if (input == nativeConstant)
 			return 1;
 
@@ -144,7 +144,7 @@ public:
 		Assert(count >= 0);
 		Assert(outputBuffer);
 
-		// Fail gracefully in release:
+		// Fail gracefully in release
 		if (count <= 0 || !outputBuffer)
 			return;
 
@@ -154,7 +154,7 @@ public:
 			inputBuffer = outputBuffer;
 		}
 
-		// Swap everything in the buffer:
+		// Swap everything in the buffer
 		for (int i = 0; i < count; i++)
 		{
 			LowLevelByteSwap<T>(&outputBuffer[i], &inputBuffer[i]);
@@ -173,7 +173,7 @@ public:
 		Assert(count >= 0);
 		Assert(outputBuffer);
 
-		// Fail gracefully in release:
+		// Fail gracefully in release
 		if (count <= 0 || !outputBuffer)
 			return;
 
@@ -190,14 +190,14 @@ public:
 			if (!inputBuffer)
 				return;
 
-			// Otherwise copy the inputBuffer to the outputBuffer:
+			// Otherwise copy the inputBuffer to the outputBuffer
 			if (outputBuffer != inputBuffer)
 				memcpy(outputBuffer, inputBuffer, count * sizeof(T));
 			return;
 
 		}
 
-		// Swap everything in the buffer:
+		// Swap everything in the buffer
 		for (int i = 0; i < count; i++)
 		{
 			LowLevelByteSwap<T>(&outputBuffer[i], &inputBuffer[i]);
@@ -206,8 +206,8 @@ public:
 
 private:
 	//-----------------------------------------------------------------------------
-	// The lowest level byte swapping workhorse of doom.  output always contains the 
-	// swapped version of input.  ( Doesn't compare machine to target endianness )
+	// The lowest level byte swapping workhorse of doom. output always contains the 
+	// swapped version of input. ( Doesn't compare machine to target endianness )
 	//-----------------------------------------------------------------------------
 	template<typename T> static void LowLevelByteSwap(T* output, T* input)
 	{
@@ -251,8 +251,8 @@ private:
 #if defined( _X360 )
 	// specialized for void * to get 360 XDK compile working despite changelist 281331
 	//-----------------------------------------------------------------------------
-	// The lowest level byte swapping workhorse of doom.  output always contains the 
-	// swapped version of input.  ( Doesn't compare machine to target endianness )
+	// The lowest level byte swapping workhorse of doom. output always contains the 
+	// swapped version of input. ( Doesn't compare machine to target endianness )
 	//-----------------------------------------------------------------------------
 	template<> static void LowLevelByteSwap(void** output, void** input)
 	{

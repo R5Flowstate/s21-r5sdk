@@ -7,7 +7,7 @@
 // remove all the spaces to turn it into a byte array which will take up
 // 7 bytes total in the resulting binary. The signature and mask are always
 // equal in length, and neither of the 2 buffers are null terminated. The size
-// can be retrieved with GetData.size() or GetMask().size().
+// can be retrieved with GetData.size or GetMask.size.
 namespace SigCompileTime
 {
 	// NOTE: this is V_nibble from src/tier1/strtools.cpp, but made constexpr
@@ -139,8 +139,8 @@ namespace SigCompileTime
 	}
 }
 
-// Note(amos): see https://stackoverflow.com/a/58446127                           - 
-//             and https://blog.therocode.net/2018/09/compile-time-string-parsing - 
+// Note(amos): see https://stackoverflow.com/a/58446127 - 
+// and https://blog.therocode.net/2018/09/compile-time-string-parsing - 
 // In order to use the string literal as constexpr, we wrap it in a constexpr lambda
 // expression. This is valid C++17 code, however the usage of the deduced value in
 // SigCompileTime::CreateSignature(...) breaks compatibility with MSVC 15.6.7. The

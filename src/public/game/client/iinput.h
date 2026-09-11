@@ -37,17 +37,17 @@ public:
 
 	virtual void MakeWeaponSelection( int secondary, int primary ) = 0;
 
-	virtual void sub_140702970() = 0;
-	virtual void sub_140702980() = 0;
+	virtual void Unknown_IInputSlot0() = 0;
+	virtual void Unknown_IInputSlot1() = 0;
 
 	virtual bool MouseInitialized() = 0;
 
 	// Retrieve key state
 	virtual float		KeyState( kbutton_t* key ) = 0;
 
-	virtual void sub_140701EC0() = 0;
-	virtual void sub_140701F50() = 0;
-	virtual void sub_140702000() = 0;
+	virtual void Unknown_IInputSlot2() = 0;
+	virtual void Unknown_IInputSlot3() = 0;
+	virtual void Unknown_IInputSlot4() = 0;
 
 	// Look for key
 	virtual kbutton_t* FindKey(const char* name) = 0;
@@ -97,8 +97,8 @@ public:
 	virtual void		Unknown_SetFloatB0( float a2 ) = 0;
 	virtual float		Unknown_GetFloatB0() = 0;
 
-	virtual void		nullsub_0() = 0;
-	virtual int			sub_1407060E0() = 0;
+	virtual void		InputNullSlot() = 0;
+	virtual int			Unknown_IInputSlot5() = 0;
 
 	// Causes an input to have to be re-pressed to become active
 	virtual void		ClearInputButton( int bits ) = 0;

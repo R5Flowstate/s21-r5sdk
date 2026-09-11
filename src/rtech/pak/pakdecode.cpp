@@ -464,14 +464,14 @@ static bool Pak_RTechStreamDecode(PakDecoder_s* const decoder, const size_t inLe
 					if (v26 == 1)
 					{
 						v51 = *v29;
-						//++dword_14D40B2BC;
+
 						v52 = 0i64;
 						for (k = 0x101010101010101i64 * v51; (unsigned int)v52 < v50; v52 = (unsigned int)(v52 + 8))
 							*(_QWORD*)&v28[v52] = k;
 					}
 					else
 					{
-						//++dword_14D40B2B8;
+
 						if (v50)
 						{
 							v54 = v29 - v28;
@@ -487,7 +487,7 @@ static bool Pak_RTechStreamDecode(PakDecoder_s* const decoder, const size_t inLe
 				}
 				else
 				{
-					//++dword_14D40B2AC;
+
 					for (m = 0i64; (unsigned int)m < (unsigned int)v48; m = (unsigned int)(m + 8))
 						*(_QWORD*)&v28[m] = *(_QWORD*)&v29[m];
 				}

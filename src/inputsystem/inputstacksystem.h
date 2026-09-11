@@ -1,6 +1,6 @@
-﻿//===== Copyright © 1996-2010, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2010, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 //===========================================================================//
 #ifndef INPUTCLIENTSTACK_H
@@ -57,27 +57,9 @@ private:
 // the SDK's implementation is used, make sure all methods are tested properly
 // first before fully migrating to the SDK's implementation. The only method
 // that appeared to have changed compared to other source game interfaces is
-// CInputStackSystem::PopInputContext(), which now actually takes the context
+// CInputStackSystem::PopInputContext, which now actually takes the context
 // handle to pop it rather than pushing/popping handles in an explicit order.
 extern CInputStackSystem* g_pInputStackSystem;
-
-///////////////////////////////////////////////////////////////////////////////
-class VInputStackSystem : public IDetour
-{
-	virtual void GetAdr(void) const
-	{
-		LogVarAdr("g_InputStackSystem", g_pInputStackSystem);
-	}
-	virtual void GetFun(void) const { }
-	virtual void GetVar(void) const
-	{
-		g_pInputStackSystem = Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 48 8B F9 E8 ?? ?? ?? ?? 33 C9").OffsetSelf(0x120)
-			.FindPatternSelf("48 8D", CMemory::Direction::DOWN, 40).ResolveRelativeAddressSelf(0x3, 0x7).RCast<CInputStackSystem*>();
-	}
-	virtual void GetCon(void) const { }
-	virtual void Detour(const bool bAttach) const { };
-};
-///////////////////////////////////////////////////////////////////////////////
 
 
 #endif // INPUTCLIENTSTACK_H

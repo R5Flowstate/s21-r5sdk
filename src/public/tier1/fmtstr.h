@@ -1,7 +1,7 @@
-//========= Copyright  1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: A simple class for performing safe and in-expression sprintf-style
-//			string formatting
+// string formatting
 //
 // $NoKeywords: $
 //=============================================================================//
@@ -285,9 +285,9 @@ typedef CFmtStrN<8192> CFmtStrMax;
 
 //-----------------------------------------------------------------------------
 // Purpose: Fast-path number-to-string helper (with optional quoting)
-//			Derived off of the Steam CNumStr but with a few tweaks, such as
-//			trimming off the in-our-cases-unnecessary strlen calls (by not
-//			storing the length in the class).
+// Derived off of the Steam CNumStr but with a few tweaks, such as
+// trimming off the in-our-cases-unnecessary strlen calls (by not
+// storing the length in the class).
 //-----------------------------------------------------------------------------
 
 class CNumStr

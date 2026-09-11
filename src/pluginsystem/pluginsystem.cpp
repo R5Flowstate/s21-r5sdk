@@ -18,8 +18,34 @@
 static ConVar pluginsystem_debug("pluginsystem_debug", "0", FCVAR_RELEASE, "Debug the pluginsystem");
 
 //-----------------------------------------------------------------------------
+// Purpose: resolve this install's plugin directory once, exe-relative. Anything
+//          enumerated outside it must not reach LoadLibraryA (mod basePaths
+//          mount into the GAME pathID AddFilesToList walks).
+//-----------------------------------------------------------------------------
+static void PluginSystem_GetInstallPluginRoot(char* pOut, const size_t nOutLen)
+{
+	pOut[0] = '\0';
+
+	char exePath[MAX_PATH] = {};
+	if (!GetModuleFileNameA(NULL, exePath, MAX_PATH))
+		return;
+
+	char* pSlash = strrchr(exePath, '\\');
+	const char* pFwd = strrchr(exePath, '/');
+	if (pFwd && (!pSlash || pFwd > pSlash))
+		pSlash = const_cast<char*>(pFwd);
+
+	if (!pSlash)
+		return;
+
+	*pSlash = '\0';
+	Q_snprintf(pOut, nOutLen, "%s\\" PLUGIN_INSTALL_DIR, exePath);
+	V_strlower(pOut);
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: initialize the plugin system
-// Input  :
+// Input 
 //-----------------------------------------------------------------------------
 void CPluginSystem::Init()
 {
@@ -38,9 +64,24 @@ void CPluginSystem::Init()
 	CUtlVector< CUtlString > pluginPaths;
 	AddFilesToList(pluginPaths, PLUGIN_INSTALL_DIR, "dll", "GAME");
 
+	char szInstallRoot[MAX_PATH] = {};
+	PluginSystem_GetInstallPluginRoot(szInstallRoot, sizeof(szInstallRoot));
+	const size_t nRootLen = Q_strlen(szInstallRoot);
+
 	for (int i = 0; i < pluginPaths.Count(); ++i)
 	{
 		CUtlString& path = pluginPaths[i];
+
+		// Fail closed: unresolvable install root loads nothing. The boundary
+		// char must be the separator so 'plugins_foo' cannot prefix-match.
+		if (nRootLen == 0 ||
+			Q_strnicmp(path.String(), szInstallRoot, nRootLen) != 0 ||
+			(path.String()[nRootLen] != '\0' && path.String()[nRootLen] != '\\'))
+		{
+			Warning(eDLL_T::ENGINE, "Skipping plugin outside install dir: '%s'\n", path.String());
+			continue;
+		}
+
 		bool addInstance = true;
 
 		FOR_EACH_VEC(m_Instances, j)
@@ -77,7 +118,7 @@ void CPluginSystem::Init()
 
 //-----------------------------------------------------------------------------
 // Purpose: shutdown the plugin system
-// Input  :
+// Input 
 //-----------------------------------------------------------------------------
 void CPluginSystem::Shutdown()
 {
@@ -99,8 +140,8 @@ void CPluginSystem::Shutdown()
 
 //-----------------------------------------------------------------------------
 // Purpose: load a plugin instance
-// Input  : pluginInst* -
-// Output : bool
+// Input: pluginInst* -
+// Output: bool
 //-----------------------------------------------------------------------------
 bool CPluginSystem::LoadInstance(PluginInstance_t& pluginInst)
 {
@@ -114,9 +155,7 @@ bool CPluginSystem::LoadInstance(PluginInstance_t& pluginInst)
 
 	CModule pluginModule(pluginInst.name.String());
 
-	// Pass selfModule here on load function, we have to do
-	// this because local listen/dedi/client dll's are called
-	// different, refer to a comment on the pluginsdk.
+	// Pass the SDK module name; listen/dedi/client DLLs are named differently.
 	PluginInstance_t::OnLoad onLoadFn = pluginModule.GetExportedSymbol(
 		"PluginInstance_OnLoad").RCast<PluginInstance_t::OnLoad>();
 
@@ -134,8 +173,8 @@ bool CPluginSystem::LoadInstance(PluginInstance_t& pluginInst)
 
 //-----------------------------------------------------------------------------
 // Purpose: unload a plugin instance
-// Input  : pluginInst* -
-// Output : bool
+// Input: pluginInst* -
+// Output: bool
 //-----------------------------------------------------------------------------
 bool CPluginSystem::UnloadInstance(PluginInstance_t& pluginInst)
 {
@@ -160,19 +199,9 @@ bool CPluginSystem::UnloadInstance(PluginInstance_t& pluginInst)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: reload a plugin instance
-// Input  : pluginInst* -
-// Output : bool
-//-----------------------------------------------------------------------------
-bool CPluginSystem::ReloadInstance(PluginInstance_t& pluginInst)
-{
-	return UnloadInstance(pluginInst) ? LoadInstance(pluginInst) : false;
-}
-
-//-----------------------------------------------------------------------------
 // Purpose: get all plugin instances
-// Input  : 
-// Output : CUtlVector<CPluginSystem::PluginInstance>&
+// Input 
+// Output: CUtlVector<CPluginSystem::PluginInstance>&
 //-----------------------------------------------------------------------------
 CUtlVector<CPluginSystem::PluginInstance_t>& CPluginSystem::GetInstances()
 {
@@ -181,7 +210,7 @@ CUtlVector<CPluginSystem::PluginInstance_t>& CPluginSystem::GetInstances()
 
 //-----------------------------------------------------------------------------
 // Purpose: install plugin callback for function
-// Input  : *help
+// Input: *help
 //-----------------------------------------------------------------------------
 void CPluginSystem::InstallCallback(PluginOperation_s* const pio)
 {
@@ -256,7 +285,7 @@ void CPluginSystem::InstallCallback(PluginOperation_s* const pio)
 
 //-----------------------------------------------------------------------------
 // Purpose: remove plugin callback for function
-// Input  : *help
+// Input: *help
 //-----------------------------------------------------------------------------
 void CPluginSystem::RemoveCallback(PluginOperation_s* const pio)
 {
@@ -316,9 +345,9 @@ void CPluginSystem::RemoveCallback(PluginOperation_s* const pio)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : *pio
-// Output : void*
+// Purpose
+// Input: *pio
+// Output: void*
 //-----------------------------------------------------------------------------
 void* CPluginSystem::RunOperation(PluginOperation_s* const pio)
 {
@@ -344,9 +373,9 @@ void* CPluginSystem::RunOperation(PluginOperation_s* const pio)
 
 //-----------------------------------------------------------------------------
 // Purpose: returns the caller module by return address
-// Input  : *pluginSystem - 
-//          returnAddress - 
-// Output : const char*
+// Input: *pluginSystem - 
+// returnAddress - 
+// Output: const char*
 //-----------------------------------------------------------------------------
 static const char* PluginSystem_GetCallerModuleName(CPluginSystem* const pluginSystem, const QWORD returnAddress)
 {

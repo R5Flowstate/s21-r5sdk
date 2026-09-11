@@ -63,7 +63,7 @@ public:
 	const T&   operator[]( I i ) const;
 
 	// gets element names
-	//char	   *GetElementName( I i );
+	//char *GetElementName( I i );
 	char const *GetElementName( I i ) const;
 
 	void		SetElementName( I i, char const *pName );
@@ -189,9 +189,9 @@ template <class T, class I>
 inline void CUtlDict<T, I>::SetElementName( I i, char const *pName )
 {
 	MEM_ALLOC_CREDIT_CLASS();
-	// TODO:  This makes a copy of the old element
-	// TODO:  This relies on the rb tree putting the most recently
-	//  removed element at the head of the insert list
+	// TODO: This makes a copy of the old element
+	// TODO: This relies on the rb tree putting the most recently
+	// removed element at the head of the insert list
 	free( const_cast< char* >( m_Elements.Key( i ) ) );
 	m_Elements.Reinsert( strdup( pName ), i );
 }

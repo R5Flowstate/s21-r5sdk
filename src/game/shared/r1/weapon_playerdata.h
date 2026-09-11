@@ -1,6 +1,9 @@
 #ifndef SHARED_WEAPON_PLAYERDATA_H
 #define SHARED_WEAPON_PLAYERDATA_H
 
+// m_proScreen_owner is an EHANDLE; include predictioncopy.h so a first-include TU compiles.
+#include "game/shared/predictioncopy.h"
+
 class WeaponPlayerData
 {
 public:

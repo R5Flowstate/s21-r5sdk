@@ -25,7 +25,7 @@
 #pragma warning(disable : 6211) // warning C6211: Leaking memory 'newKeyValue' due to an exception. Consider using a local catch block to clean up memory
 #pragma warning(disable : 6031) // warning C6031: Return value ignored: '_getcwd'
 
-// These warnings are because /analyze doesn't like our use of constants, especially things like IsPC()
+// These warnings are because /analyze doesn't like our use of constants, especially things like IsPC
 #pragma warning(disable : 6326) // warning C6326: Potential comparison of a constant with another constant
 #pragma warning(disable : 6239) // warning C6239: (<non-zero constant> && <expression>) always evaluates to the result of <expression>. Did you intend to use the bitwise-and operator?
 #pragma warning(disable : 6285) // warning C6285: (<non-zero constant> || <non-zero constant>) is always a non-zero constant. Did you intend to use the bitwise-and operator?
@@ -33,16 +33,16 @@
 #pragma warning(disable : 6235) // warning C6235: (<non-zero constant> || <expression>) is always a non-zero constant
 #pragma warning(disable : 6240) // warning C6240: (<expression> && <non-zero constant>) always evaluates to the result of <expression>. Did you intend to use the bitwise-and operator?
 
-// These warnings aren't really important:
+// These warnings aren't really important
 #pragma warning(disable : 6323) // warning C6323: Use of arithmetic operator on Boolean type(s)
 
 // Miscellaneous other /analyze warnings. We should consider fixing these at some point.
-//#pragma warning(disable : 6204) // warning C6204: Possible buffer overrun in call to 'memcpy': use of unchecked parameter 'src'
-//#pragma warning(disable : 6262) // warning C6262: Function uses '16464' bytes of stack: exceeds /analyze:stacksize'16384'. Consider moving some data to heap
+//#pragma warning(disable: 6204) // warning C6204: Possible buffer overrun in call to 'memcpy': use of unchecked parameter 'src'
+//#pragma warning(disable: 6262) // warning C6262: Function uses '16464' bytes of stack: exceeds /analyze:stacksize'16384'. Consider moving some data to heap
 // This is a serious warning. Don't suppress it.
-//#pragma warning(disable : 6263) // warning C6263: Using _alloca in a loop: this can quickly overflow stack
+//#pragma warning(disable: 6263) // warning C6263: Using _alloca in a loop: this can quickly overflow stack
 // 6328 is also used for passing __int64 to printf when int is expected so we can't suppress it.
-//#pragma warning(disable : 6328) // warning C6328: 'char' passed as parameter '1' when 'unsigned char' is required in call to 'V_isdigit'
+//#pragma warning(disable: 6328) // warning C6328: 'char' passed as parameter '1' when 'unsigned char' is required in call to 'V_isdigit'
 // /analyze doesn't like GCOMPILER_ASSERT's implementation of compile-time asserts
 #pragma warning(disable : 6326) // warning C6326: Potential comparison of a constant with another constant
 #pragma warning(disable : 6335) // warning C6335: Leaking process information handle 'pi.hThread'
@@ -87,7 +87,7 @@
 // Use the macros above to annotate string functions that fill buffers as shown here,
 // in order to give VS's /analyze more opportunities to find bugs.
 // void V_wcsncpy( OUT_Z_BYTECAP(maxLenInBytes) wchar_t *pDest, wchar_t const *pSrc, int maxLenInBytes );
-// int V_snwprintf( OUT_Z_CAP(maxLenInCharacters) wchar_t *pDest, int maxLenInCharacters, PRINTF_FORMAT_STRING const wchar_t *pFormat, ... );
+// int V_snwprintf( OUT_Z_CAP(maxLenInCharacters) wchar_t *pDest, int maxLenInCharacters, PRINTF_FORMAT_STRING const wchar_t *pFormat,... );
 
 #endif // _PREFAST_
 #endif // _MSC_VER >= 1600 // VS 2010 and above.

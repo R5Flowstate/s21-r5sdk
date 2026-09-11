@@ -418,9 +418,10 @@ void NavMeshTesterTool::handleMenu()
 
 	const NavMeshType_e loadedNavMeshType = m_editor->getLoadedNavMeshType();
 
-	// TODO: perhaps clamp with m_nav->m_params.traverseTableCount? Technically a navmesh should 
-	// contain all the traversal tables it supports, so if we crash the navmesh is technically corrupt.
-	const int traverseTableCount = NavMesh_GetTraverseTableCountForNavMeshType(loadedNavMeshType);
+	// Clamp to the mesh's own table count so a sparse mesh cannot index past its array.
+	int traverseTableCount = NavMesh_GetTraverseTableCountForNavMeshType(loadedNavMeshType);
+	if (const dtNavMesh* nav = m_editor->getNavMesh())
+		traverseTableCount = rdMin(traverseTableCount, nav->getParams()->traverseTableCount);
 	const TraverseAnimType_e baseType = NavMesh_GetFirstTraverseAnimTypeForType(loadedNavMeshType);
 
 	for (int i = ANIMTYPE_NONE; i < traverseTableCount; i++)

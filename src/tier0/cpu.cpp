@@ -1,6 +1,6 @@
 //===== Copyright (c) 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //=============================================================================//
@@ -75,7 +75,7 @@ inline static IntelCacheDesc_t s_IntelL3DataCacheDesc[] = {
 	{ 0x29, 4 * 1024 },
 	{ 0x46, 4 * 1024 },
 	{ 0x47, 8 * 1024 },
-	{ 0x49, 4 * 1024 }, // Only valid when: family == 0x0F && model == 0x06.
+	{ 0x49, 4 * 1024 },
 	{ 0x4a, 6 * 1024 },
 	{ 0x4b, 8 * 1024 },
 	{ 0x4c, 12 * 1024 },
@@ -306,42 +306,38 @@ static bool HTSupported(void)
 	enum {
 		HT_BIT                = 0x10000000,// EDX[28] - Bit 28 set indicates Hyper-Threading Technology is supported in hardware.
 		FAMILY_ID             = 0x0f00,    // EAX[11:8] - Bit 11 thru 8 contains family processor id.
-		EXT_FAMILY_ID         = 0x0f00000, // EAX[23:20] - Bit 23 thru 20 contains extended family  processor id.
+		EXT_FAMILY_ID         = 0x0f00000, // EAX[23:20] - Bit 23 thru 20 contains extended family processor id.
 		FAMILY_ID_386         = 0x0300,
-		FAMILY_ID_486         = 0x0400,    // EAX[8:12]  -  486, 487 and overdrive.
-		FAMILY_ID_PENTIUM     = 0x0500,    // Pentium, Pentium OverDrive  60 - 200.
+		FAMILY_ID_486         = 0x0400,    // EAX[8:12] - 486, 487 and overdrive.
+		FAMILY_ID_PENTIUM     = 0x0500,    // Pentium, Pentium OverDrive 60 - 200.
 		FAMILY_ID_PENTIUM_PRO = 0x0600,    // P Pro, P II, P III, P M, Celeron M, Core Duo, Core Solo, Core2 Duo, Core2 Extreme, P D, Xeon model F,
-		                                   // also 45-nm : Intel Atom, Core i7, Xeon MP ; see Intel Processor Identification and the CPUID instruction pg 20,21.
-		FAMILY_ID_EXTENDED    = 0x0F00     // P IV, Xeon, Celeron D, P D, .
+		                                   // also 45-nm: Intel Atom, Core i7, Xeon MP; see Intel Processor Identification and the CPUID instruction pg 20,21.
+		FAMILY_ID_EXTENDED    = 0x0F00     // P IV, Xeon, Celeron D, P D,.
 	};
 
 	// This works on both newer AMD and Intel CPUs.
 	CpuIdResult_t cpuid1 = cpuid(1);
 
 	// Previously, we detected P4 specifically; now, we detect GenuineIntel with HT enabled in general.
-	// if (((cpuid1.eax & FAMILY_ID) ==  FAMILY_ID_EXTENDED) || (cpuid1.eax & EXT_FAMILY_ID))
+	// if (((cpuid1.eax & FAMILY_ID) == FAMILY_ID_EXTENDED) || (cpuid1.eax & EXT_FAMILY_ID))
 
-	//  Check to see if this is an Intel Processor with HT or CMT capability , and if HT/CMT is enabled.
+	// Check to see if this is an Intel Processor with HT or CMT capability, and if HT/CMT is enabled.
 	// ddk: This codef is actually correct: see example code at http://software.intel.com/en-us/articles/multi-core-detect/
 	return (cpuid1.edx & HT_BIT) != 0 && // Genuine Intel Processor with Hyper-Threading Technology implemented.
 		((cpuid1.ebx >> 16) & 0xFF) > 1; // Hyper-Threading OR Core Multi-Processing has been enabled.
 }
 
 // | Commented out as its currently unused, this is to avoid a compiler warning |
-// | regarding unused function of static linkage.                               |
+// | regarding unused function of static linkage. |
 // Returns the number of logical processors per physical processors.
 //static uint8_t LogicalProcessorsPerPackage(void)
-//{
 //	// EBX[23:16] indicate number of logical processors per package.
 //	const unsigned NUM_LOGICAL_BITS = 0x00FF0000;
 //
-//	if (!HTSupported())
-//	{
-//		return 1;
-//	}
+//	if (!HTSupported)
+// return 1;
 //
 //	return static_cast<uint8_t>(((cpuid(1).ebx & NUM_LOGICAL_BITS) >> 16));
-//}
 
 // Measure the processor clock speed by sampling the cycle count, waiting
 // for some fraction of a second, then measuring the elapsed number of cycles.
@@ -419,14 +415,14 @@ const CPUInformation& GetCPUInformation(void)
 	// Redundant, but just in case the user somehow messes with the size.
 	memset(&pi, 0x0, sizeof(pi));
 
-	// Fill out the structure, and return it: 
+	// Fill out the structure, and return it
 	pi.m_Size = sizeof(pi);
 
-	// Grab the processor frequency:
+	// Grab the processor frequency
 	pi.m_Speed = CalculateClockSpeed();
 
-	// Get the logical and physical processor counts:
-	//pi.m_nLogicalProcessors = LogicalProcessorsPerPackage();
+	// Get the logical and physical processor counts
+	//pi.m_nLogicalProcessors = LogicalProcessorsPerPackage;
 
 	bool bAuthenticAMD = (0 == _stricmp(GetProcessorVendorId(), "AuthenticAMD"));
 	bool bGenuineIntel = !bAuthenticAMD && (0 == _stricmp(GetProcessorVendorId(), "GenuineIntel"));
@@ -437,7 +433,7 @@ const CPUInformation& GetCPUInformation(void)
 	GetSystemInfo(&si);
 
 	// Fixing: si.dwNumberOfProcessors is the number of logical processors according to experiments on i7, P4 and a DirectX sample (Aug'09).
-	// This is contrary to MSDN documentation on GetSystemInfo().
+	// This is contrary to MSDN documentation on GetSystemInfo.
 	pi.m_nLogicalProcessors = uint8_t(si.dwNumberOfProcessors);
 
 	CpuTopology topo;
@@ -457,7 +453,7 @@ const CPUInformation& GetCPUInformation(void)
 	{
 		CpuIdResult_t cpuid1 = cpuid(1);
 		uint32_t bFPU = cpuid1.edx & 1; // This should always be set on anything we support.
-		// Determine Processor Features:
+		// Determine Processor Features
 		pi.m_bRDTSC = (cpuid1.edx >> 4) & 1;
 		pi.m_bCMOV  = (cpuid1.edx >> 15) & 1;
 		pi.m_bFCMOV = (pi.m_bCMOV && bFPU) ? 1 : 0;
@@ -475,7 +471,7 @@ const CPUInformation& GetCPUInformation(void)
 		pi.m_bHRVSR = (cpuid1.ecx >> 31) & 1;
 		pi.m_szProcessorID = const_cast<char*>(GetProcessorVendorId());
 		pi.m_szProcessorBrand = const_cast<char*>(GetProcessorBrand());
-		pi.m_bHT = (pi.m_nPhysicalProcessors < pi.m_nLogicalProcessors); //HTSupported();
+		pi.m_bHT = (pi.m_nPhysicalProcessors < pi.m_nLogicalProcessors); //HTSupported;
 
 		pi.m_nModel = cpuid1.eax; // Full CPU model info.
 		pi.m_nFeatures[0] = cpuid1.edx; // x87+ features.

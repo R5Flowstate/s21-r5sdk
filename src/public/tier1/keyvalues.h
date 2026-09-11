@@ -52,11 +52,11 @@ enum MergeKeyValuesOp_t
 
 //-----------------------------------------------------------------------------
 // Purpose: Simple recursive data access class
-//			Used in vgui for message parameters and resource files
-//			Destructor deletes all child KeyValues nodes
-//			Data is stored in key (string names) - (string/int/float)value pairs called nodes.
+// Used in vgui for message parameters and resource files
+// Destructor deletes all child KeyValues nodes
+// Data is stored in key (string names) - (string/int/float)value pairs called nodes.
 //
-//	About KeyValues Text File Format:
+//	About KeyValues Text File Format
 
 //	It has 3 control characters '{', '}' and '"'. Names and values may be quoted or
 //	not. The quote '"' character must not be used within name or values, only for
@@ -65,9 +65,9 @@ enum MergeKeyValuesOp_t
 //	Sequence the parser must now that by setting KeyValues::UsesEscapeSequences( true ),
 //	which it's off by default. Non-quoted tokens ends with a whitespace, '{', '}' and '"'.
 //	So you may use '{' and '}' within quoted tokens, but not for non-quoted tokens.
-//  An open bracket '{' after a key name indicates a list of subkeys which is finished
-//  with a closing bracket '}'. Subkeys use the same definitions recursively.
-//  Whitespaces are space, return, newline and tabulator. Allowed Escape sequences
+// An open bracket '{' after a key name indicates a list of subkeys which is finished
+// with a closing bracket '}'. Subkeys use the same definitions recursively.
+// Whitespaces are space, return, newline and tabulator. Allowed Escape sequences
 //	are \n, \t, \\, \n and \". The number character '#' is used for macro purposes 
 //	(eg #include), don't use it as first character in key names.
 //-----------------------------------------------------------------------------

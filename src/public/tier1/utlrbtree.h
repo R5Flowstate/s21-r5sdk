@@ -1,6 +1,6 @@
 //========= Copyright (c) 1996-2005, Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose
 //
 // $Header: $
 // $NoKeywords: $
@@ -150,7 +150,7 @@ public:
 	// constructor, destructor
 	// Left at growSize = 0, the memory will first allocate 1 element and double in size
 	// at each increment.
-	// LessFunc_t is required, but may be set after the constructor using SetLessFunc() below
+	// LessFunc_t is required, but may be set after the constructor using SetLessFunc below
 	CUtlRBTree(IndexType_t growSize = 0, IndexType_t initSize = 0, const LessFunc_t& lessfunc = 0);
 	CUtlRBTree(const LessFunc_t& lessfunc);
 	~CUtlRBTree();
@@ -158,7 +158,7 @@ public:
 	void EnsureCapacity(IndexType_t num);
 
 	// NOTE: CopyFrom is fast but dangerous! It just memcpy's all nodes - it does NOT run copy constructors, so
-	//       it is not a true deep copy (i.e 'T' must be POD for this to work - e.g CUtlString will not work).
+	// it is not a true deep copy (i.e 'T' must be POD for this to work - e.g CUtlString will not work).
 	void CopyFrom(const CUtlRBTree<T, I, L, M>& other);
 
 	// gets particular elements
@@ -174,12 +174,12 @@ public:
 	I Count() const;
 
 	// Max "size" of the vector
-	// it's not generally safe to iterate from index 0 to MaxElement()-1 (you could do this as a potential
-	// iteration optimization, IF CUtlMemory is the allocator, and IF IsValidIndex() is tested for each element...
-	//  but this should be implemented inside the CUtlRBTree iteration API, if anywhere)
+	// it's not generally safe to iterate from index 0 to MaxElement-1 (you could do this as a potential
+	// iteration optimization, IF CUtlMemory is the allocator, and IF IsValidIndex is tested for each element...
+	// but this should be implemented inside the CUtlRBTree iteration API, if anywhere)
 	I  MaxElement() const;
 
-	// Gets the children                               
+	// Gets the children 
 	I  Parent(I i) const;
 	I  LeftChild(I i) const;
 	I  RightChild(I i) const;
@@ -213,7 +213,7 @@ public:
 
 	// Insert method (inserts in order)
 	// NOTE: the returned 'index' will be valid as long as the element remains in the tree
-	//       (other elements being added/removed will not affect it)
+	// (other elements being added/removed will not affect it)
 	I  Insert(T const& insert);
 	void Insert(const T* pArray, I nItems);
 	I  InsertIfNotFound(T const& insert);
@@ -345,7 +345,7 @@ public:
 		if (!BaseClass::Elements().IsIdxValid(i))
 			return false;
 
-#ifdef _DEBUG // it's safe to skip this here, since the only way to get indices after m_LastAlloc is to use MaxElement()
+#ifdef _DEBUG // it's safe to skip this here, since the only way to get indices after m_LastAlloc is to use MaxElement
 		if (BaseClass::Elements().IsIdxAfter(i, this->m_LastAlloc))
 		{
 			Assert(0);
@@ -499,7 +499,7 @@ inline	I  CUtlRBTree<T, I, L, M>::MaxElement() const
 
 
 //-----------------------------------------------------------------------------
-// Gets the children                               
+// Gets the children 
 //-----------------------------------------------------------------------------
 
 template < class T, class I, typename L, class M >
@@ -674,7 +674,7 @@ inline void CUtlRBTree<T, I, L, M>::SetColor(I i, typename CUtlRBTree<T, I, L, M
 // Allocates/ deallocates nodes
 //-----------------------------------------------------------------------------
 #pragma warning(push)
-#pragma warning(disable:4389) // '==' : signed/unsigned mismatch
+#pragma warning(disable:4389) // '==': signed/unsigned mismatch
 template < class T, class I, typename L, class M >
 I  CUtlRBTree<T, I, L, M>::NewNode()
 {

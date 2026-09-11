@@ -9,8 +9,8 @@ class CBaseEntity;
 
 //-----------------------------------------------------------------------------
 // Purpose: A COutputEvent consists of an array of these CEventActions. 
-//			Each CEventAction holds the information to fire a single input in 
-//			a target entity, after a specific delay.
+// Each CEventAction holds the information to fire a single input in 
+// a target entity, after a specific delay.
 //-----------------------------------------------------------------------------
 class CEventAction
 {
@@ -38,7 +38,7 @@ public:
 
 //-----------------------------------------------------------------------------
 // Purpose: Stores a list of connections to other entities, for data/commands to be
-//			communicated along.
+// communicated along.
 //-----------------------------------------------------------------------------
 class CBaseEntityOutput
 {
@@ -50,7 +50,7 @@ public:
 protected:
 	variant_t m_Value;
 	CEventAction* m_ActionList;
-	//DECLARE_SIMPLE_DATADESC();
+	//DECLARE_SIMPLE_DATADESC;
 
 	CBaseEntityOutput() {} // this class cannot be created, only it's children
 

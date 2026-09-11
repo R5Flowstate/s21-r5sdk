@@ -20,7 +20,7 @@ public:
 
 struct ClientDataBlockHeader_s
 {
-	char reserved[3]; // unused in retail
+	char reserved[3]; // unused padding
 	bool isCompressed;
 };
 
@@ -32,25 +32,5 @@ inline bool (*ClientDataBlockReceiver__ProcessDataBlock)(ClientDataBlockReceiver
 	const short transferId, const int transferSize, const short counter, const short currentBlockId,
 	const void* const blockBuffer, const int blockBufferBytes);
 
-///////////////////////////////////////////////////////////////////////////////
-class VClientDataBlockReceiver : public IDetour
-{
-	virtual void GetAdr(void) const
-	{
-		LogFunAdr("ClientDataBlockReceiver::AcknowledgeTransmission", ClientDataBlockReceiver__AcknowledgeTransmission);
-		LogFunAdr("ClientDataBlockReceiver::ProcessDataBlock", ClientDataBlockReceiver__ProcessDataBlock);
-	}
-	virtual void GetFun(void) const
-	{
-		Module_FindPattern(g_GameDll, "40 53 48 81 EC ?? ?? ?? ?? 4C 8B 51 08").GetPtr(ClientDataBlockReceiver__AcknowledgeTransmission);
-
-		Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 48 89 7C 24 ?? 41 56 48 83 EC 30 0F B7 44 24 ??")
-			.GetPtr(ClientDataBlockReceiver__ProcessDataBlock);
-	}
-	virtual void GetVar(void) const { }
-	virtual void GetCon(void) const { }
-	virtual void Detour(const bool bAttach) const;
-};
-///////////////////////////////////////////////////////////////////////////////
 
 #endif // DATABLOCK_RECEIVER_H

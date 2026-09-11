@@ -1,9 +1,9 @@
-﻿//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose
 //
-// $Workfile:     $
-// $Date:         $
+// $Workfile: $
+// $Date: $
 // $NoKeywords: $
 //=============================================================================//
 
@@ -150,7 +150,7 @@ inline SideType VPlane::GetPointSideExact(const Vector3D& vPoint) const
 
 
 // BUGBUG: This should either simply use the implementation in mathlib or cease to exist.
-// mathlib implementation is much more efficient.  Check to see that VPlane isn't used in
+// mathlib implementation is much more efficient. Check to see that VPlane isn't used in
 // performance critical code.
 inline SideType VPlane::BoxOnPlaneSide(const Vector3D& vMin, const Vector3D& vMax) const
 {

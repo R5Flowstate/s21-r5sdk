@@ -1,3 +1,4 @@
+#if defined(CLIENT_DLL)
 #ifndef VSCRIPT_SERVER_H
 #define VSCRIPT_SERVER_H
 #include "vscript/languages/squirrel_re/vsquirrel.h"
@@ -130,3 +131,276 @@ class VScriptServer : public IDetour
 ///////////////////////////////////////////////////////////////////////////////
 
 #endif // VSCRIPT_SERVER_H
+#else // !CLIENT_DLL
+#ifndef VSCRIPT_SERVER_H
+#define VSCRIPT_SERVER_H
+#include "vscript/languages/squirrel_re/vsquirrel.h"
+#include "game/server/anim_recording.h"
+
+void Script_RegisterServerFunctions(CSquirrelVM* s);
+void Script_RegisterCoreServerFunctions(CSquirrelVM* s);
+void Script_RegisterAdminServerFunctions(CSquirrelVM* s);
+
+void Script_RegisterServerEnums(CSquirrelVM* const s);
+void ServerScript_PlacementLevelShutdown(void);
+
+// TraceLine entitiesOnly arity re-register. Safe to call repeatedly; last call wins.
+// Invoked at VM Init and again immediately before server script precompile.
+void Script_RegisterTraceLineEntitiesOnlyArity(CSquirrelVM* s);
+
+#define DEFINE_SERVER_SCRIPTFUNC_NAMED(s, functionName, helpString, returnType, parameters, isVariadic, ...) \
+	Script_RegisterFuncNamed(s, MKSTRING(functionName), MKSTRING(Server_Script_##functionName),  \
+	helpString, returnType, parameters, isVariadic, ServerScript_##functionName, __VA_ARGS__)        \
+
+inline SQRESULT (*v_ServerScript_DebugScreenText)(HSQUIRRELVM v);
+inline SQRESULT (*v_ServerScript_DebugScreenTextWithColor)(HSQUIRRELVM v);
+inline AnimRecordingAssetHeader_s* (*v_ServerScript_GetRecordedAnimationFromCurrentStack)(HSQUIRRELVM v); // Internally retrieves it from the first arg (index 2).
+
+// GRX_CURRENCY codeconst. Engine writes COUNT=4 after SDK Init; post-orig detour wins.
+inline void (*v_Script_RegisterServerCodeConstants)(CSquirrelVM* s);
+
+// Weapon-slot codeconst. Runs after GRX; post-orig detour installs S21 indices.
+inline void (*v_Script_RegisterServerWeaponSlotConstants)(CSquirrelVM* s);
+
+// S3 has ScriptTraceHull but no HighDetail. Force ray.m_detailLevel=HIGH (2) via TLS
+// + TraceRayFiltered vtable patch (covers entity and array ignore paths).
+inline SQInteger (*v_EngineScriptTraceHull)(HSQUIRRELVM v);
+
+// S3 ScriptTraceLine / HighDetail wrappers lack the 7th entitiesOnly script arg.
+// Re-registered after engine registration with bool entitiesOnly = false as arg 7.
+inline SQInteger (*v_EngineScriptTraceLine)(HSQUIRRELVM v);
+inline SQInteger (*v_EngineScriptTraceLineHighDetail)(HSQUIRRELVM v);
+
+// Script_Server_StartParticleEffectInWorld. S3 has the whole server particle
+// family EXCEPT the realm-scoped variant S21 scripts call, so
+// StartParticleEffectInWorldForRealms forwards here; realm entity in arg 4 unread.
+inline SQRESULT (*v_Script_Server_StartParticleEffectInWorld)(HSQUIRRELVM v);
+
+// Ray_t::Init_StartEndMinsMaxsUp. Correct way to build a swept hull ray: derives
+// m_Extents.w and picks m_Start/m_StartOffset branch off the up axis. BreachTrace
+// needs it because it sweeps along the breach direction rather than world up.
+struct Ray_t;
+inline bool (*v_Ray_t_InitStartEndMinsMaxsUp)(Ray_t* pRay, const Vector3D* pStart,
+	const Vector3D* pEnd, const Vector3D* pMins, const Vector3D* pMaxs, const Vector3D* pUp);
+
+// Script struct is read by field index, not name. sq_newstruct is (nFields+9)*16.
+inline void (*v_sq_newstruct)(HSQUIRRELVM v, int nFields);
+inline void (*v_sq_setstructfield)(HSQUIRRELVM v, int nIndex);
+
+// CBaseEntity::EntityToWorldTransform: dirty-flag check @ +0x230 bit 0x800,
+// CalcAbsolutePosition, return m_rgflCoordinateFrame @ +0x450.
+class CBaseEntity;
+struct matrix3x4_t;
+inline matrix3x4_t* (*v_CBaseEntity_EntityToWorldTransform)(CBaseEntity* pEnt);
+
+inline void (*v_Script_RegisterServerEntityClassFuncs)();
+inline void (*v_Script_RegisterServerPlayerClassFuncs)();
+inline void (*v_Script_RegisterServerCombatCharacterClassFuncs)();
+inline void (*v_Script_RegisterServerAIClassFuncs)();
+inline void (*v_Script_RegisterServerWeaponClassFuncs)();
+inline void (*v_Script_RegisterServerProjectileClassFuncs)();
+inline void (*v_Script_RegisterServerTitanSoulClassFuncs)();
+inline void (*v_Script_RegisterServerPlayerDecoyClassFuncs)();
+inline void (*v_Script_RegisterServerSpawnpointClassFuncs)();
+inline void (*v_Script_RegisterServerFirstPersonProxyClassFuncs)();
+
+inline ScriptClassDescriptor_t* g_serverScriptEntityStruct;
+inline ScriptClassDescriptor_t* g_serverScriptPlayerStruct;
+inline ScriptClassDescriptor_t* g_serverScriptCombatCharacterStruct;
+inline ScriptClassDescriptor_t* g_serverScriptAIStruct;
+inline ScriptClassDescriptor_t* g_serverScriptWeaponStruct;
+inline ScriptClassDescriptor_t* g_serverScriptProjectileStruct;
+inline ScriptClassDescriptor_t* g_serverScriptTitanSoulStruct;
+inline ScriptClassDescriptor_t* g_serverScriptPlayerDecoyStruct;
+inline ScriptClassDescriptor_t* g_serverScriptSpawnpointStruct;
+inline ScriptClassDescriptor_t* g_serverScriptFirstPersonProxyStruct;
+
+///////////////////////////////////////////////////////////////////////////////
+class VScriptServer : public IDetour
+{
+	virtual void GetAdr(void) const
+	{
+		LogFunAdr("ServerScript_DebugScreenText", v_ServerScript_DebugScreenText);
+		LogFunAdr("ServerScript_DebugScreenTextWithColor", v_ServerScript_DebugScreenTextWithColor);
+		LogFunAdr("ServerScript_GetRecordedAnimationFromCurrentStack", v_ServerScript_GetRecordedAnimationFromCurrentStack);
+
+		LogFunAdr("Script_RegisterServerCodeConstants", v_Script_RegisterServerCodeConstants);
+		LogFunAdr("Script_RegisterServerWeaponSlotConstants", v_Script_RegisterServerWeaponSlotConstants);
+		LogFunAdr("EngineScriptTraceHull", v_EngineScriptTraceHull);
+		LogFunAdr("EngineScriptTraceLine", v_EngineScriptTraceLine);
+		LogFunAdr("EngineScriptTraceLineHighDetail", v_EngineScriptTraceLineHighDetail);
+		LogFunAdr("Script_Server_StartParticleEffectInWorld", v_Script_Server_StartParticleEffectInWorld);
+		LogFunAdr("Ray_t::Init_StartEndMinsMaxsUp", v_Ray_t_InitStartEndMinsMaxsUp);
+		LogFunAdr("sq_newstruct", v_sq_newstruct);
+		LogFunAdr("sq_setstructfield", v_sq_setstructfield);
+		LogFunAdr("CBaseEntity::EntityToWorldTransform", v_CBaseEntity_EntityToWorldTransform);
+
+		LogFunAdr("Script_RegisterServerEntityClassFuncs", v_Script_RegisterServerEntityClassFuncs);
+		LogFunAdr("Script_RegisterServerPlayerClassFuncs", v_Script_RegisterServerPlayerClassFuncs);
+		LogFunAdr("Script_RegisterServerCombatCharacterClassFuncs", v_Script_RegisterServerCombatCharacterClassFuncs);
+		LogFunAdr("Script_RegisterServerAIClassFuncs", v_Script_RegisterServerAIClassFuncs);
+		LogFunAdr("Script_RegisterServerWeaponClassFuncs", v_Script_RegisterServerWeaponClassFuncs);
+		LogFunAdr("Script_RegisterServerProjectileClassFuncs", v_Script_RegisterServerProjectileClassFuncs);
+		LogFunAdr("Script_RegisterServerTitanSoulClassFuncs", v_Script_RegisterServerTitanSoulClassFuncs);
+		LogFunAdr("Script_RegisterServerPlayerDecoyClassFuncs", v_Script_RegisterServerPlayerDecoyClassFuncs);
+		LogFunAdr("Script_RegisterServerSpawnpointClassFuncs", v_Script_RegisterServerSpawnpointClassFuncs);
+		LogFunAdr("Script_RegisterServerFirstPersonProxyClassFuncs", v_Script_RegisterServerFirstPersonProxyClassFuncs);
+
+		LogVarAdr("g_serverScriptEntityStruct", g_serverScriptEntityStruct);
+		LogVarAdr("g_serverScriptPlayerStruct", g_serverScriptPlayerStruct);
+		LogVarAdr("g_serverScriptCombatCharacterStruct", g_serverScriptCombatCharacterStruct);
+		LogVarAdr("g_serverScriptAIStruct", g_serverScriptAIStruct);
+		LogVarAdr("g_serverScriptWeaponStruct", g_serverScriptWeaponStruct);
+		LogVarAdr("g_serverScriptProjectileStruct", g_serverScriptProjectileStruct);
+		LogVarAdr("g_serverScriptTitanSoulStruct", g_serverScriptTitanSoulStruct);
+		LogVarAdr("g_serverScriptPlayerDecoyStruct", g_serverScriptPlayerDecoyStruct);
+		LogVarAdr("g_serverScriptSpawnpointStruct", g_serverScriptSpawnpointStruct);
+		LogVarAdr("g_serverScriptFirstPersonProxyStruct", g_serverScriptFirstPersonProxyStruct);
+	}
+	virtual void GetFun(void) const
+	{
+		Module_FindPattern(g_GameDll, "40 53 48 83 EC ? 4C 8B 41 ? 48 8B D9 41 81 78 ? ? ? ? ? 75 ? F3 41 0F 10 48 ? EB ? 66 41 0F 6E 48 ? 0F 5B C9 41 81 78 ? ? ? ? ? 75 ? F3 41 0F 10 40 ? EB ? 66 41 0F 6E 40 ? 0F 5B C0 4D 8B 40")
+			.GetPtr(v_ServerScript_DebugScreenText);
+
+		Module_FindPattern(g_GameDll, "40 53 48 83 EC ? 4C 8B 41 ? 48 8B D9 41 81 78 ? ? ? ? ? 75 ? F3 41 0F 10 48 ? EB ? 66 41 0F 6E 48 ? 0F 5B C9 41 81 78 ? ? ? ? ? 75 ? F3 41 0F 10 40 ? EB ? 66 41 0F 6E 40 ? 0F 5B C0 4D 8D 48 ? 4D 8B 40 ? 49 83 C0 ? E8 ? ? ? ? 48 8B 4B ? 83 B9 ? ? ? ? ? 75 ? 33 C0 48 83 C4 ? 5B C3 48 8B 89 ? ? ? ? 48 8B D3 E8 ? ? ? ? B8 ? ? ? ? 48 83 C4 ? 5B C3 CC CC CC CC CC CC CC CC CC CC CC CC CC 40 53 48 83 EC ? 4C 8B 41")
+			.GetPtr(v_ServerScript_DebugScreenTextWithColor);
+
+		Module_FindPattern(g_GameDll, "40 53 48 83 EC ?? 33 DB 4C 8D 4C 24")
+			.GetPtr(v_ServerScript_GetRecordedAnimationFromCurrentStack);
+
+		// Server-VM codeconst registration. Verified unique at file offset 0xC687F0
+		// in both r5apex.exe and r5apex_ds.exe (LIVE). Owns GRX_CURRENCY_*,
+		// GRX_HTTPQUERYGOAL_*, GRX_ITEMFLAVORMODE_* and the surrounding family.
+		Module_FindPattern(g_GameDll, "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 54 41 55 41 56 41 57 48 83 EC 20 33 F6 48 8B D9 89 35")
+			.GetPtr(v_Script_RegisterServerCodeConstants);
+
+		// Weapon-slot codeconst registrar: prologues collide with the client-VM copy,
+		// so anchor on WEAPON_INVENTORY_SLOT_ANTI_TITAN string reg (unique rip-disp),
+		// walk back fixed 0x35B, re-check prologue before use.
+		const CMemory slotConstAnchor = Module_FindPattern(g_GameDll,
+			"41 B8 04 00 00 00 48 8D 15 A8 1F 80 00 48 8B CB E8 ?? ?? ?? ?? 41 B8 05 00 00 00");
+
+		if (slotConstAnchor)
+		{
+			const CMemory slotConstEntry = slotConstAnchor.Offset(-0x35B);
+
+			if (slotConstEntry.CheckOpCodes({ 0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0x1D }))
+				slotConstEntry.GetPtr(v_Script_RegisterServerWeaponSlotConstants);
+		}
+
+		if (!v_Script_RegisterServerWeaponSlotConstants)
+			Warning(eDLL_T::SERVER, "[WEAP-SLOT] Script_RegisterServerWeaponSlotConstants "
+				"unresolved -- dedi keeps the S3 slot schema (ordnance and sling share slot 4)\n");
+
+		// ScriptTraceHull wrapper: exact near-call pins the server-VM entry.
+		Module_FindPattern(g_GameDll,
+			"40 53 48 83 EC 20 48 8B D9 E8 A2 CB FC FF 48 8B 4B 60 83 B9 38 44 00 00 00 74 14")
+			.GetPtr(v_EngineScriptTraceHull);
+
+		// ScriptTraceLine / HighDetail: unique E8 tails pin server entries
+		// (wildcard prolog multi-hits client copies).
+		Module_FindPattern(g_GameDll,
+			"40 53 48 83 EC 20 33 D2 48 8B D9 E8 10 B6 FC FF "
+			"48 8B 4B 60 83 B9 38 44 00 00 00 74 14")
+			.GetPtr(v_EngineScriptTraceLine);
+		Module_FindPattern(g_GameDll,
+			"40 53 48 83 EC 20 BA 02 00 00 00 48 8B D9 E8 CD B5 FC FF "
+			"48 8B 4B 60 83 B9 38 44 00 00 00 74 14")
+			.GetPtr(v_EngineScriptTraceLineHighDetail);
+
+		if (!v_EngineScriptTraceLine)
+			Warning(eDLL_T::SERVER, "[TRACE] ScriptTraceLine pattern unresolved -- "
+				"entitiesOnly TraceLine arity will not register\n");
+		if (!v_EngineScriptTraceLineHighDetail)
+			Warning(eDLL_T::SERVER, "[TRACE] ScriptTraceLineHighDetail pattern unresolved\n");
+
+		// Ray_t::Init_StartEndMinsMaxsUp. Signature from leading delta math
+		// (m_Delta writes at ray+0x10/0x14/0x18) -- no usable prologue.
+		Module_FindPattern(g_GameDll,
+			"F3 41 0F 10 00 45 33 DB F3 0F 5C 02 0F 57 ED F3 0F 11 41 10 "
+			"F3 41 0F 10 48 04 F3 0F 5C 4A 04 F3 0F 11 49 14")
+			.GetPtr(v_Ray_t_InitStartEndMinsMaxsUp);
+
+		// Script_Server_StartParticleEffectInWorld. ReturnEntity sibling is
+		// byte-identical through the near call; trailing `mov rcx,[rbx+60]` separates.
+		Module_FindPattern(g_GameDll,
+			"40 53 48 83 EC 20 48 8B 51 58 48 8B D9 81 7A 10 02 00 00 05 75 05 "
+			"8B 4A 18 EB 05 F3 0F 2C 4A 18 4C 8D 42 34 48 83 C2 24 E8 ?? ?? ?? ?? "
+			"48 8B 4B 60 83 B9")
+			.GetPtr(v_Script_Server_StartParticleEffectInWorld);
+
+		if (!v_Script_Server_StartParticleEffectInWorld)
+			Warning(eDLL_T::SERVER, "[FX-REALMS] Script_Server_StartParticleEffectInWorld pattern "
+				"unresolved -- server script particles disabled\n");
+
+		// sq_newstruct. The 0x08200000 struct-type immediate in the temp SQObject pins it.
+		Module_FindPattern(g_GameDll,
+			"48 89 5C 24 08 57 48 83 EC 30 48 8B D9 48 C7 44 24 20 00 00 20 08 48 8B 49 60 E8")
+			.GetPtr(v_sq_newstruct);
+
+		// sq_setstructfield. Pinned by stack-top-minus-2 index math
+		// (lea r8d,[rax-2] / dec / shl 4) that locates the struct below the value.
+		Module_FindPattern(g_GameDll,
+			"40 53 48 83 EC 20 44 8B 41 78 48 8B D9 4C 8B 89 88 00 00 00 "
+			"45 8D 50 FE 41 FF C8 4D 03 D2 49 C1 E0 04")
+			.GetPtr(v_sq_setstructfield);
+
+		// CBaseEntity::EntityToWorldTransform. Dirty bit 0x800 at +0x230 + matrix
+		// at +0x450 pin the server entry.
+		Module_FindPattern(g_GameDll,
+			"40 53 48 83 EC 20 8B 81 30 02 00 00 48 8B D9 C1 E8 0B A8 01 74 12 "
+			"E8 ?? ?? ?? ?? 48 8D 83 50 04 00 00 48 83 C4 20 5B C3 "
+			"48 8D 81 50 04 00 00")
+			.GetPtr(v_CBaseEntity_EntityToWorldTransform);
+
+		Module_FindPattern(g_GameDll, "48 83 EC ?? 80 3D ?? ?? ?? ?? ?? 0F 85 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 48 89 5C 24 ?? 48 89 05 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? C6 05 ?? ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 33 D2 48 8D 05 ?? ?? ?? ?? 48 C7 05")
+			.GetPtr(v_Script_RegisterServerEntityClassFuncs);
+
+		Module_FindPattern(g_GameDll, "48 83 EC ?? 80 3D ?? ?? ?? ?? ?? 0F 85 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 48 89 5C 24 ?? 48 89 05 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? C6 05 ?? ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 33 D2 48 8D 05 ?? ?? ?? ?? 48 89 05")
+			.GetPtr(v_Script_RegisterServerPlayerClassFuncs);
+
+		Module_FindPattern(g_GameDll, "48 83 EC ?? 80 3D ?? ?? ?? ?? ?? 0F 85 ?? ?? ?? ?? 48 89 5C 24 ?? 48 8D 05 ?? ?? ?? ?? 48 89 6C 24 ?? 48 8D 15 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 48 8D 05")
+			.GetPtr(v_Script_RegisterServerCombatCharacterClassFuncs);
+
+		Module_FindPattern(g_GameDll, "40 55 48 8B EC 48 83 EC ?? 80 3D ?? ?? ?? ?? ?? 0F 85 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 48 89 5C 24 ?? 48 89 05 ?? ?? ?? ?? 48 8D 15 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? C6 05")
+			.GetPtr(v_Script_RegisterServerAIClassFuncs);
+
+		Module_FindPattern(g_GameDll, "48 83 EC ?? 80 3D ?? ?? ?? ?? ?? 0F 85 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 48 89 5C 24 ?? 48 89 05 ?? ?? ?? ?? 48 8D 15 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? C6 05 ?? ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 33 C9 48 8D 05 ?? ?? ?? ?? 48 89 15 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? B0 ?? 48 89 15 ?? ?? ?? ?? 48 0F BE C0 48 8D 52 ?? 48 03 C1 48 69 C8 ?? ?? ?? ?? 48 8B C1 48 C1 E8 ?? 48 33 C8 0F B6 02 84 C0 75 ?? 48 8D 15 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 63 C8 48 6B C1 ?? 48 8D 0D ?? ?? ?? ?? 48 03 05 ?? ?? ?? ?? 48 89 48 ?? 48 8D 0D ?? ?? ?? ?? 48 89 08 48 8D 0D ?? ?? ?? ?? 48 89 48 ?? 48 8D 0D ?? ?? ?? ?? 48 89 48 ?? 48 8D 0D ?? ?? ?? ?? 48 C7 40 ?? ?? ?? ?? ?? C7 40 ?? ?? ?? ?? ?? C6 40 ?? ?? 48 C7 40 ?? ?? ?? ?? ?? 48 C7 40 ?? ?? ?? ?? ?? C7 40 ?? ?? ?? ?? ?? C7 40 ?? ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 63 C8 48 6B C1")
+			.GetPtr(v_Script_RegisterServerWeaponClassFuncs);
+
+		Module_FindPattern(g_GameDll, "48 8B C4 48 83 EC ?? 80 3D ?? ?? ?? ?? ?? 0F 85 ?? ?? ?? ?? 48 89 58 ?? 48 8D 15 ?? ?? ?? ?? 48 89 68 ?? 33 ED 48 89 70 ?? 8B CD 48 89 78 ?? 4C 89 60 ?? 4C 89 68 ?? 4C 89 70 ?? 4C 89 78 ?? 48 8D 05 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? B0 ?? C6 05 ?? ?? ?? ?? ?? 48 89 15 ?? ?? ?? ?? 48 89 15 ?? ?? ?? ?? 48 0F BE C0 48 8D 52 ?? 48 03 C1 48 69 C8 ?? ?? ?? ?? 48 8B C1 48 C1 E8 ?? 48 33 C8 0F B6 02 84 C0 75 ?? 48 8D 15 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 63 1D ?? ?? ?? ?? 41 BE ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? 8D 43 ?? 4C 63 C8")
+			.GetPtr(v_Script_RegisterServerProjectileClassFuncs);
+
+		Module_FindPattern(g_GameDll, "48 83 EC ?? 80 3D ?? ?? ?? ?? ?? 0F 85 ?? ?? ?? ?? 48 89 5C 24 ?? 48 8D 05 ?? ?? ?? ?? 48 89 6C 24 ?? 48 8D 15 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 33 ED 48 89 74 24 ?? 48 8D 05 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 8B CD 48 8D 05 ?? ?? ?? ?? 48 89 7C 24 ?? 48 89 05 ?? ?? ?? ?? B0 ?? 4C 89 74 24 ?? 4C 89 7C 24 ?? C6 05 ?? ?? ?? ?? ?? 48 89 15 ?? ?? ?? ?? 48 89 15 ?? ?? ?? ?? 0F 1F 44 00 ?? 48 0F BE C0 48 8D 52 ?? 48 03 C1 48 69 C8 ?? ?? ?? ?? 48 8B C1 48 C1 E8 ?? 48 33 C8 0F B6 02 84 C0 75 ?? 48 8D 15 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 63 1D")
+			.GetPtr(v_Script_RegisterServerTitanSoulClassFuncs);
+
+		Module_FindPattern(g_GameDll, "48 83 EC ?? 80 3D ?? ?? ?? ?? ?? 0F 85 ?? ?? ?? ?? 48 89 5C 24 ?? 48 8D 05 ?? ?? ?? ?? 48 89 6C 24 ?? 48 8D 15 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 33 ED 48 8D 05 ?? ?? ?? ?? 48 89 74 24 ?? 48 89 05 ?? ?? ?? ?? 8B CD 48 8D 05 ?? ?? ?? ?? 48 89 7C 24 ?? 48 89 05 ?? ?? ?? ?? B0 ?? 4C 89 74 24 ?? C6 05 ?? ?? ?? ?? ?? 48 89 15 ?? ?? ?? ?? 48 89 15 ?? ?? ?? ?? 66 66 0F 1F 84 00 ?? ?? ?? ?? 48 0F BE C0 48 8D 52 ?? 48 03 C1 48 69 C8 ?? ?? ?? ?? 48 8B C1 48 C1 E8 ?? 48 33 C8 0F B6 02 84 C0 75 ?? 48 8D 15 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 63 3D ?? ?? ?? ?? 41 BE ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? 8D 47 ?? 4C 63 C8 49 8B C1 48 2B C1 48 85 C0 0F 8E ?? ?? ?? ?? 4C 8B 05 ?? ?? ?? ?? 4D 85 C0 0F 88 ?? ?? ?? ?? 74 ?? 49 8D 49 ?? 48 8B C1 48 99 49 F7 F8 4C 2B C2 4C 03 C1 EB ?? 48 85 C9 4C 8B C1 4D 0F 44 C6 4D 3B C1 7D ?? 0F 1F 00 4D 03 C0 4D 3B C1 7C ?? 4D 3B C1 7D ?? 4D 85 C0 75 ?? 4D 85 C9 79 ?? 49 C7 C0 ?? ?? ?? ?? EB ?? 4B 8D 04 08 48 99 48 2B C2 48 D1 F8 4C 8B C0 49 3B C1 7C ?? 48 8B 15 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 4C 89 05 ?? ?? ?? ?? 48 85 D2 74 ?? 48 85 C0 75 ?? E8 ?? ?? ?? ?? 4C 8B 05 ?? ?? ?? ?? 48 8B 15 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 4C 8B 08 48 8B C8 4D 6B C0 ?? 41 FF 51 ?? 48 8B D0 48 89 05 ?? ?? ?? ?? EB ?? 49 6B D8 ?? 48 85 C0 75 ?? E8 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 4C 8B 00 48 8B D3 48 8B C8 41 FF 50 ?? 48 8B D0 48 89 05 ?? ?? ?? ?? EB ?? 48 8B 15 ?? ?? ?? ?? FF 05 ?? ?? ?? ?? 48 6B CF ?? 48 89 6C 11 ?? 48 89 6C 11 ?? 48 89 6C 11 ?? 89 6C 11 ?? 48 89 6C 11 ?? 48 89 6C 11 ?? 48 89 6C 11 ?? 48 89 6C 11 ?? 66 44 89 74 11 ?? C7 44 11 ?? ?? ?? ?? ?? 48 89 6C 11 ?? 89 6C 11 ?? 48 8D 15 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 89 54 01 ?? 48 8D 15 ?? ?? ?? ?? 48 89 14 01 48 8D 15 ?? ?? ?? ?? 48 89 54 01 ?? 48 8D 15 ?? ?? ?? ?? 48 89 54 01 ?? 48 89 6C 01 ?? 48 89 6C 01 ?? 40 88 6C 01 ?? 48 89 6C 01 ?? 48 89 6C 01 ?? 89 6C 01 ?? 48 63 3D ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? 8D 47 ?? 4C 63 C8 49 8B C1 48 2B C1 48 85 C0 0F 8E ?? ?? ?? ?? 4C 8B 05 ?? ?? ?? ?? 4D 85 C0 0F 88 ?? ?? ?? ?? 74 ?? 49 8D 49 ?? 48 8B C1 48 99 49 F7 F8 4C 2B C2 4C 03 C1 EB ?? 48 85 C9 4C 8B C1 4D 0F 44 C6 4D 3B C1 7D ?? 90 4D 03 C0 4D 3B C1 7C ?? 4D 3B C1 7D ?? 4D 85 C0 75 ?? 4D 85 C9 79 ?? 49 C7 C0 ?? ?? ?? ?? EB ?? 4B 8D 04 08 48 99 48 2B C2 48 D1 F8 4C 8B C0 49 3B C1 7C ?? 48 8B 15 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 4C 89 05 ?? ?? ?? ?? 48 85 D2 74 ?? 48 85 C0 75 ?? E8 ?? ?? ?? ?? 4C 8B 05 ?? ?? ?? ?? 48 8B 15 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 4C 8B 08 48 8B C8 4D 6B C0 ?? 41 FF 51 ?? 48 8B D0 48 89 05 ?? ?? ?? ?? EB ?? 49 6B D8 ?? 48 85 C0 75 ?? E8 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 4C 8B 00 48 8B D3 48 8B C8 41 FF 50 ?? 48 8B D0 48 89 05 ?? ?? ?? ?? EB ?? 48 8B 15 ?? ?? ?? ?? FF 05 ?? ?? ?? ?? 48 6B CF ?? 48 89 6C 11")
+			.GetPtr(v_Script_RegisterServerPlayerDecoyClassFuncs);
+
+		Module_FindPattern(g_GameDll, "48 83 EC ?? 80 3D ?? ?? ?? ?? ?? 0F 85 ?? ?? ?? ?? 48 89 5C 24 ?? 48 8D 05 ?? ?? ?? ?? 48 89 6C 24 ?? 48 8D 15 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 33 ED 48 8D 05 ?? ?? ?? ?? 48 89 74 24 ?? 48 89 05 ?? ?? ?? ?? 8B CD 48 8D 05 ?? ?? ?? ?? 48 89 7C 24 ?? 48 89 05 ?? ?? ?? ?? B0 ?? 4C 89 74 24 ?? C6 05 ?? ?? ?? ?? ?? 48 89 15 ?? ?? ?? ?? 48 89 15 ?? ?? ?? ?? 66 66 0F 1F 84 00 ?? ?? ?? ?? 48 0F BE C0 48 8D 52 ?? 48 03 C1 48 69 C8 ?? ?? ?? ?? 48 8B C1 48 C1 E8 ?? 48 33 C8 0F B6 02 84 C0 75 ?? 48 8D 15 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 63 3D ?? ?? ?? ?? 41 BE ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? 8D 47 ?? 4C 63 C8 49 8B C1 48 2B C1 48 85 C0 0F 8E ?? ?? ?? ?? 4C 8B 05 ?? ?? ?? ?? 4D 85 C0 0F 88 ?? ?? ?? ?? 74 ?? 49 8D 49 ?? 48 8B C1 48 99 49 F7 F8 4C 2B C2 4C 03 C1 EB ?? 48 85 C9 4C 8B C1 4D 0F 44 C6 4D 3B C1 7D ?? 0F 1F 00 4D 03 C0 4D 3B C1 7C ?? 4D 3B C1 7D ?? 4D 85 C0 75 ?? 4D 85 C9 79 ?? 49 C7 C0 ?? ?? ?? ?? EB ?? 4B 8D 04 08 48 99 48 2B C2 48 D1 F8 4C 8B C0 49 3B C1 7C ?? 48 8B 15 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 4C 89 05 ?? ?? ?? ?? 48 85 D2 74 ?? 48 85 C0 75 ?? E8 ?? ?? ?? ?? 4C 8B 05 ?? ?? ?? ?? 48 8B 15 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 4C 8B 08 48 8B C8 4D 6B C0 ?? 41 FF 51 ?? 48 8B D0 48 89 05 ?? ?? ?? ?? EB ?? 49 6B D8 ?? 48 85 C0 75 ?? E8 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 4C 8B 00 48 8B D3 48 8B C8 41 FF 50 ?? 48 8B D0 48 89 05 ?? ?? ?? ?? EB ?? 48 8B 15 ?? ?? ?? ?? FF 05 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 48 6B CF ?? 48 89 6C 11 ?? 48 89 6C 11 ?? 48 89 6C 11 ?? 89 6C 11 ?? 48 89 6C 11 ?? 48 89 6C 11 ?? 48 89 6C 11 ?? 48 89 6C 11 ?? 66 44 89 74 11 ?? C7 44 11 ?? ?? ?? ?? ?? 48 89 6C 11 ?? 89 6C 11 ?? 49 8B D6 48 8B 1D ?? ?? ?? ?? 48 03 D9 48 89 43 ?? 48 8D 4B ?? 48 89 6B ?? 48 8D 05 ?? ?? ?? ?? 48 89 03 48 8D 05 ?? ?? ?? ?? 48 89 43 ?? 89 6B ?? 40 88 6B ?? 48 89 6B ?? 48 89 6B ?? 89 6B ?? C7 43 ?? ?? ?? ?? ?? 4C 89 73 ?? E8 ?? ?? ?? ?? 48 63 73 ?? 8D 46 ?? 48 63 D0 8B C6 48 2B 53 ?? 48 85 D2 7E ?? 48 8D 4B ?? E8 ?? ?? ?? ?? 8B 43 ?? FF C0 89 43 ?? 48 8B 43 ?? C7 04 B0 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 48 89 43 ?? 48 63 3D ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? 8D 47 ?? 4C 63 C8 49 8B C1 48 2B C1 48 85 C0 0F 8E ?? ?? ?? ?? 4C 8B 05 ?? ?? ?? ?? 4D 85 C0 0F 88 ?? ?? ?? ?? 74 ?? 49 8D 49 ?? 48 8B C1 48 99 49 F7 F8 4C 2B C2 4C 03 C1 EB ?? 48 85 C9 4C 8B C1 4D 0F 44 C6 4D 3B C1 7D ?? 90 4D 03 C0 4D 3B C1 7C ?? 4D 3B C1 7D ?? 4D 85 C0 75 ?? 4D 85 C9 79 ?? 49 C7 C0 ?? ?? ?? ?? EB ?? 4B 8D 04 08 48 99 48 2B C2 48 D1 F8 4C 8B C0 49 3B C1 7C ?? 48 8B 15 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 4C 89 05 ?? ?? ?? ?? 48 85 D2 74 ?? 48 85 C0 75 ?? E8 ?? ?? ?? ?? 4C 8B 05 ?? ?? ?? ?? 48 8B 15 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 4C 8B 08 48 8B C8 4D 6B C0 ?? 41 FF 51 ?? 48 8B D0 48 89 05 ?? ?? ?? ?? EB ?? 49 6B D8 ?? 48 85 C0 75 ?? E8 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 4C 8B 00 48 8B D3 48 8B C8 41 FF 50 ?? 48 8B D0 48 89 05 ?? ?? ?? ?? EB ?? 48 8B 15 ?? ?? ?? ?? FF 05 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 48 6B CF ?? 48 89 6C 11 ?? 48 89 6C 11 ?? 48 89 6C 11 ?? 89 6C 11 ?? 48 89 6C 11 ?? 48 89 6C 11 ?? 48 89 6C 11 ?? 48 89 6C 11 ?? 66 44 89 74 11 ?? C7 44 11 ?? ?? ?? ?? ?? 48 89 6C 11 ?? 89 6C 11 ?? BA ?? ?? ?? ?? 48 8B 3D ?? ?? ?? ?? 48 03 F9 48 89 47 ?? 48 8D 4F ?? 48 89 6F ?? 48 8D 05 ?? ?? ?? ?? 48 89 07 48 8D 05 ?? ?? ?? ?? 48 89 47 ?? 89 6F ?? 40 88 6F ?? 48 89 6F ?? 48 89 6F ?? 89 6F ?? 44 89 77")
+			.GetPtr(v_Script_RegisterServerSpawnpointClassFuncs);
+
+		Module_FindPattern(g_GameDll, "48 83 EC ?? 80 3D ?? ?? ?? ?? ?? 0F 85 ?? ?? ?? ?? 48 89 6C 24 ?? 48 8D 05 ?? ?? ?? ?? 48 89 74 24 ?? 48 8D 15 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 33 F6 48 8D 05 ?? ?? ?? ?? 48 89 7C 24 ?? 4C 89 74 24 ?? 8B CE 4C 8D 35 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 4C 89 35 ?? ?? ?? ?? B0 ?? C6 05 ?? ?? ?? ?? ?? 48 89 15 ?? ?? ?? ?? 48 89 15 ?? ?? ?? ?? 48 0F BE C0 48 8D 52 ?? 48 03 C1 48 69 C8 ?? ?? ?? ?? 48 8B C1 48 C1 E8 ?? 48 33 C8 0F B6 02 84 C0 75 ?? 48 8D 15 ?? ?? ?? ?? 48 89 5C 24 ?? E8 ?? ?? ?? ?? 48 63 3D ?? ?? ?? ?? BD ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? 8D 47 ?? 4C 63 C0")
+			.GetPtr(v_Script_RegisterServerFirstPersonProxyClassFuncs);
+
+	}
+	virtual void GetVar(void) const
+	{
+		CMemory(v_Script_RegisterServerEntityClassFuncs).Offset(0x50).FindPatternSelf("48 8D 15", CMemory::Direction::DOWN, 150).ResolveRelativeAddressSelf(0x3, 0x7).GetPtr(g_serverScriptEntityStruct);
+		CMemory(v_Script_RegisterServerPlayerClassFuncs).Offset(0x50).FindPatternSelf("48 8D 15", CMemory::Direction::DOWN, 150).ResolveRelativeAddressSelf(0x3, 0x7).GetPtr(g_serverScriptPlayerStruct);
+		CMemory(v_Script_RegisterServerCombatCharacterClassFuncs).Offset(0x50).FindPatternSelf("48 8D 15", CMemory::Direction::DOWN, 150).ResolveRelativeAddressSelf(0x3, 0x7).GetPtr(g_serverScriptCombatCharacterStruct);
+		CMemory(v_Script_RegisterServerAIClassFuncs).Offset(0x50).FindPatternSelf("48 8D 15", CMemory::Direction::DOWN, 150).ResolveRelativeAddressSelf(0x3, 0x7).GetPtr(g_serverScriptAIStruct);
+		CMemory(v_Script_RegisterServerWeaponClassFuncs).Offset(0x50).FindPatternSelf("48 8D 15", CMemory::Direction::DOWN, 150).ResolveRelativeAddressSelf(0x3, 0x7).GetPtr(g_serverScriptWeaponStruct);
+		CMemory(v_Script_RegisterServerProjectileClassFuncs).Offset(0x50).FindPatternSelf("48 8D 15", CMemory::Direction::DOWN, 150).ResolveRelativeAddressSelf(0x3, 0x7).GetPtr(g_serverScriptProjectileStruct);
+		CMemory(v_Script_RegisterServerTitanSoulClassFuncs).Offset(0x50).FindPatternSelf("48 8D 15", CMemory::Direction::DOWN, 150).ResolveRelativeAddressSelf(0x3, 0x7).GetPtr(g_serverScriptTitanSoulStruct);
+		CMemory(v_Script_RegisterServerPlayerDecoyClassFuncs).Offset(0x50).FindPatternSelf("48 8D 15", CMemory::Direction::DOWN, 150).ResolveRelativeAddressSelf(0x3, 0x7).GetPtr(g_serverScriptPlayerDecoyStruct);
+		CMemory(v_Script_RegisterServerSpawnpointClassFuncs).Offset(0x50).FindPatternSelf("48 8D 15", CMemory::Direction::DOWN, 150).ResolveRelativeAddressSelf(0x3, 0x7).GetPtr(g_serverScriptSpawnpointStruct);
+		CMemory(v_Script_RegisterServerFirstPersonProxyClassFuncs).Offset(0x50).FindPatternSelf("48 8D 15", CMemory::Direction::DOWN, 150).ResolveRelativeAddressSelf(0x3, 0x7).GetPtr(g_serverScriptFirstPersonProxyStruct);
+	}
+	virtual void GetCon(void) const { }
+	virtual void Detour(const bool bAttach) const;
+};
+///////////////////////////////////////////////////////////////////////////////
+
+#endif // VSCRIPT_SERVER_H
+#endif // CLIENT_DLL

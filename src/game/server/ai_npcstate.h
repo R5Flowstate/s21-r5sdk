@@ -1,6 +1,6 @@
 //====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
-// Purpose:
+// Purpose
 //
 // $NoKeywords: $
 //=============================================================================//
@@ -23,7 +23,7 @@ enum NPC_STATE
 	//NPC_STATE_COMBAT,
 	//NPC_STATE_SCRIPT,
 	//NPC_STATE_PLAYDEAD,
-	//NPC_STATE_PRONE,				// When in clutches of barnacle
+	//NPC_STATE_PRONE, // When in clutches of barnacle
 	//NPC_STATE_DEAD
 
 };

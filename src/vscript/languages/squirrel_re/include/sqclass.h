@@ -29,7 +29,7 @@ typedef sqvector<SQClassMember> SQClassMemberVec;
 
 struct SQClass : public CHAINABLE_OBJ
 {
-	// NOTE: when rebuilding NewSlot, implement the patch from commit:
+	// NOTE: when rebuilding NewSlot, implement the patch from commit
 	// https://github.com/albertodemichelis/squirrel/commit/23a0620658714b996d20da3d4dd1a0dcf9b0bd98
 
 	bool Get(const SQObjectPtr& key, SQObjectPtr& val) { // TODO: untested

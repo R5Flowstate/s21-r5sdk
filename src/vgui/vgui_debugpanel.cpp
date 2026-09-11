@@ -15,9 +15,6 @@
 #include <vguimatsurface/MatSystemSurface.h>
 #include <materialsystem/cmaterialsystem.h>
 #include <materialsystem/texturestreaming.h>
-#ifndef CLIENT_DLL
-#include <engine/server/server.h>
-#endif // !CLIENT_DLL
 #include <engine/sys_engine.h>
 #include <engine/sys_mainwind.h>
 #include <engine/gl_rmain.h>
@@ -163,6 +160,9 @@ void CTextOverlay::DrawNotify(void)
 //-----------------------------------------------------------------------------
 void CTextOverlay::DrawDebugOverlay(void)
 {
+	if (!g_pDebugOverlay || !g_pMatSystemSurface)
+		return;
+
 	const OverlayText_t* pCurrText = g_pDebugOverlay->GetFirstText();
 
 	for (; pCurrText; pCurrText = g_pDebugOverlay->GetNextText(pCurrText))
@@ -171,7 +171,12 @@ void CTextOverlay::DrawDebugOverlay(void)
 		Assert(pCurrText->textBuf);
 		Assert(pCurrText->textLen > 0);
 
+		if (!g_pViewRender)
+			continue;
+
 		const CViewSetup* const viewSetup = g_pViewRender->GetMainView();
+		if (!viewSetup)
+			continue;
 
 		Vector2D screenPos;
 		bool onScreen = false;
@@ -199,7 +204,7 @@ void CTextOverlay::DrawDebugOverlay(void)
 
 //-----------------------------------------------------------------------------
 // Purpose: checks if the notify text is expired
-// Input  : flFrameTime - 
+// Input: flFrameTime - 
 //-----------------------------------------------------------------------------
 void CTextOverlay::ShouldDraw(const float flFrameTime)
 {
@@ -231,7 +236,7 @@ void CTextOverlay::ShouldDraw(const float flFrameTime)
 //-----------------------------------------------------------------------------
 void CTextOverlay::Con_NPrintf(void)
 {
-	if (!m_szCon_NPrintf_Buf[0])
+	if (!m_szCon_NPrintf_Buf[0] || !g_pViewRender)
 	{
 		return;
 	}
@@ -307,8 +312,8 @@ u16 CTextOverlay::GetFontFace()
 
 //-----------------------------------------------------------------------------
 // Purpose: gets the log color for context.
-// Input  : context - 
-// Output : Color
+// Input: context - 
+// Output: Color
 //-----------------------------------------------------------------------------
 Color CTextOverlay::GetLogColorForType(const eDLL_T context) const
 {

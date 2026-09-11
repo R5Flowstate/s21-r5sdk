@@ -82,8 +82,13 @@ class VSys_Dll : public IDetour
 	}
 	virtual void GetVar(void) const
 	{
-		gfExtendedError = CMemory(v_COM_ExplainDisconnection).Offset(0x0)
-			.FindPatternSelf("C6 05", CMemory::Direction::DOWN, 300).ResolveRelativeAddressSelf(0x2, 0x7).RCast<bool*>();
+#ifndef DEDICATED
+		if (v_COM_ExplainDisconnection)
+		{
+			gfExtendedError = CMemory(v_COM_ExplainDisconnection).Offset(0x0)
+				.FindPatternSelf("C6 05", CMemory::Direction::DOWN, 300).ResolveRelativeAddressSelf(0x2, 0x7).RCast<bool*>();
+		}
+#endif // !DEDICATED
 	}
 	virtual void GetCon(void) const { }
 	virtual void Detour(const bool bAttach) const;

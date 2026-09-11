@@ -1,4 +1,4 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: Math primitives.
 //
@@ -33,12 +33,12 @@
 #include "mathlib/ssemath.h"
 #include "mathlib/ssequaternion.h"
 
-// memdbgon must be the last include file in a .cpp file!!!
+// memdbgon must be the last include file in a.cpp file!!!
 #include "tier0/memdbgon.h"
 
 bool s_bMathlibInitialized = false;
 #ifdef PARANOID
-// User must provide an implementation of Sys_Error()
+// User must provide an implementation of Sys_Error
 void Sys_Error(char* error, ...);
 #endif
 
@@ -56,7 +56,7 @@ const matrix3x4a_t g_MatrixIdentity(
 
 #if !defined(__SPU__)
 //-----------------------------------------------------------------------------
-// Standard C implementations of optimized routines:
+// Standard C implementations of optimized routines
 //-----------------------------------------------------------------------------
 float _sqrtf(float _X)
 {
@@ -142,10 +142,10 @@ qboolean VectorsEqual(const float* v1, const float* v2)
 
 //-----------------------------------------------------------------------------
 // Purpose: Generates Euler angles given a left-handed orientation matrix. The
-//			columns of the matrix contain the forward, left, and up vectors.
-// Input  : matrix - Left-handed orientation matrix.
-//			angles[PITCH, YAW, ROLL]. Receives right-handed counterclockwise
-//				rotations in degrees around Y, Z, and X respectively.
+// columns of the matrix contain the forward, left, and up vectors.
+// Input: matrix - Left-handed orientation matrix.
+// angles[PITCH, YAW, ROLL]. Receives right-handed counterclockwise
+// rotations in degrees around Y, Z, and X respectively.
 //-----------------------------------------------------------------------------
 
 void MatrixAngles(const matrix3x4_t& matrix, RadianEuler& angles, Vector3D& position)
@@ -199,15 +199,6 @@ void MatrixAngles(const matrix3x4_t& matrix, Quaternion& q, Vector3D& pos)
 
 	QuaternionNormalize(q);
 
-#if 0
-	// check against the angle version
-	RadianEuler ang;
-	MatrixAngles(matrix, ang);
-	Quaternion test;
-	AngleQuaternion(ang, test);
-	float d = QuaternionDotProduct(q, test);
-	Assert(fabs(d) > 0.99 && fabs(d) < 1.01);
-#endif
 
 	MatrixGetColumn(matrix, 3, pos);
 }
@@ -239,7 +230,7 @@ void MatrixAngles(const matrix3x4_t& matrix, float* angles)
 	// enough here to get angles?
 	if (xyDist > 0.001f)
 	{
-		// (yaw)	y = ATAN( forward.y, forward.x );		-- in our space, forward is the X axis
+		// (yaw)	y = ATAN( forward.y, forward.x ); -- in our space, forward is the X axis
 		angles[1] = RAD2DEG(atan2f(forward[1], forward[0]));
 
 		// (pitch)	x = ATAN( -forward.z, sqrt(forward.x*forward.x+forward.y*forward.y) );
@@ -250,7 +241,7 @@ void MatrixAngles(const matrix3x4_t& matrix, float* angles)
 	}
 	else	// forward is mostly Z, gimbal lock-
 	{
-		// (yaw)	y = ATAN( -left.x, left.y );			-- forward is mostly z, so use right for yaw
+		// (yaw)	y = ATAN( -left.x, left.y ); -- forward is mostly z, so use right for yaw
 		angles[1] = RAD2DEG(atan2f(-left[0], left[1]));
 
 		// (pitch)	x = ATAN( -forward.z, sqrt(forward.x*forward.x+forward.y*forward.y) );
@@ -347,7 +338,7 @@ void VectorRotate(const Vector3D& in1, const Quaternion& in2, Vector3D& out)
 	QuaternionMatrix(in2, matRotate);
 	VectorRotate(in1, matRotate, out);
 #else
-	// rotation is  q * v * q^-1
+	// rotation is q * v * q^-1
 
 	Quaternion conjugate = in2.Conjugate();
 
@@ -360,7 +351,7 @@ void VectorRotate(const Vector3D& in1, const Quaternion& in2, Vector3D& out)
 	temp.z = in2.x * in1.y - in2.y * in1.x + in2.w * in1.z;
 	temp.w = -in2.x * in1.x - in2.y * in1.y - in2.z * in1.z;
 
-	// now  (qv)(q*)
+	// now (qv)(q*)
 	out.x = temp.x * conjugate.w + temp.y * conjugate.z - temp.z * conjugate.y + temp.w * conjugate.x;
 	out.y = -temp.x * conjugate.z + temp.y * conjugate.w + temp.z * conjugate.x + temp.w * conjugate.y;
 	out.z = temp.x * conjugate.y - temp.y * conjugate.x + temp.z * conjugate.w + temp.w * conjugate.z;
@@ -475,6 +466,49 @@ void MatrixInvert(const matrix3x4_t& in, matrix3x4_t& out)
 	out[2][3] = -DotProduct(tmp, out[2]);
 }
 
+// Adjugate/determinant inverse -- unlike MatrixInvert above this stays correct
+// when the basis carries a scale (an attachment matrix carries the model scale,
+// so a transpose there yields s*R^T where the inverse is (1/s)*R^T).
+// A singular input falls through with a scale of 1 rather than producing NaNs,
+// matching the engine's own general inverse.
+void MatrixInvertGeneral(const matrix3x4_t& in, matrix3x4_t& out)
+{
+	Assert(s_bMathlibInitialized);
+
+	const float flCof00 = in[1][1] * in[2][2] - in[1][2] * in[2][1];
+	const float flCof01 = in[0][2] * in[2][1] - in[0][1] * in[2][2];
+	const float flCof02 = in[0][1] * in[1][2] - in[0][2] * in[1][1];
+	const float flCof10 = in[2][0] * in[1][2] - in[1][0] * in[2][2];
+	const float flCof11 = in[0][0] * in[2][2] - in[2][0] * in[0][2];
+	const float flCof12 = in[1][0] * in[0][2] - in[0][0] * in[1][2];
+	const float flCof20 = in[1][0] * in[2][1] - in[2][0] * in[1][1];
+	const float flCof21 = in[2][0] * in[0][1] - in[0][0] * in[2][1];
+	const float flCof22 = in[0][0] * in[1][1] - in[1][0] * in[0][1];
+
+	const float flDet = flCof00 * in[0][0] + flCof01 * in[1][0] + flCof02 * in[2][0];
+	const float flInvDet = (flDet == 0.0f) ? 1.0f : 1.0f / flDet;
+
+	// The translation is read up front so in and out may alias.
+	float tmp[3];
+	tmp[0] = in[0][3];
+	tmp[1] = in[1][3];
+	tmp[2] = in[2][3];
+
+	out[0][0] = flCof00 * flInvDet;
+	out[0][1] = flCof01 * flInvDet;
+	out[0][2] = flCof02 * flInvDet;
+	out[1][0] = flCof10 * flInvDet;
+	out[1][1] = flCof11 * flInvDet;
+	out[1][2] = flCof12 * flInvDet;
+	out[2][0] = flCof20 * flInvDet;
+	out[2][1] = flCof21 * flInvDet;
+	out[2][2] = flCof22 * flInvDet;
+
+	out[0][3] = -DotProduct(tmp, out[0]);
+	out[1][3] = -DotProduct(tmp, out[1]);
+	out[2][3] = -DotProduct(tmp, out[2]);
+}
+
 void MatrixGetColumn(const matrix3x4_t& in, int column, Vector3D& out)
 {
 	out.x = in[0][column];
@@ -525,7 +559,7 @@ size_t Q_log2(unsigned int val)
 #endif
 }
 
-// Matrix is right-handed x=forward, y=left, z=up.  We a left-handed convention for vectors in the game code (forward, right, up)
+// Matrix is right-handed x=forward, y=left, z=up. We a left-handed convention for vectors in the game code (forward, right, up)
 void MatrixVectorsFLU(const matrix3x4_t& matrix, Vector3D* pForward, Vector3D* pLeft, Vector3D* pUp)
 {
 	MatrixGetColumn(matrix, FORWARD_AXIS, *pForward);
@@ -533,7 +567,7 @@ void MatrixVectorsFLU(const matrix3x4_t& matrix, Vector3D* pForward, Vector3D* p
 	MatrixGetColumn(matrix, UP_AXIS, *pUp);
 }
 
-// Matrix is right-handed x=forward, y=left, z=up.  We a left-handed convention for vectors in the game code (forward, right, up)
+// Matrix is right-handed x=forward, y=left, z=up. We a left-handed convention for vectors in the game code (forward, right, up)
 void MatrixVectors(const matrix3x4_t& matrix, Vector3D* pForward, Vector3D* pRight, Vector3D* pUp)
 {
 	MatrixGetColumn(matrix, 0, *pForward);
@@ -592,7 +626,7 @@ void VectorPerpendicularToVector(Vector3D const& in, Vector3D* pvecOut)
 }
 
 //-----------------------------------------------------------------------------
-// Euler QAngle -> Basis Vectors.  Each vector is optional
+// Euler QAngle -> Basis Vectors. Each vector is optional
 //-----------------------------------------------------------------------------
 void AngleVectorsFLU(const QAngle& angles, Vector3D* pForward, Vector3D* pLeft, Vector3D* pUp)
 {
@@ -763,14 +797,6 @@ R_ConcatTransforms
 
 void ConcatTransforms(const matrix3x4_t& in1, const matrix3x4_t& in2, matrix3x4_t& out)
 {
-#if 0
-	// test for ones that'll be 2x faster
-	if ((((size_t)&in1) % 16) == 0 && (((size_t)&in2) % 16) == 0 && (((size_t)&out) % 16) == 0)
-	{
-		ConcatTransforms_Aligned(in1, in2, out);
-		return;
-	}
-#endif
 
 	fltx4 lastMask = *(fltx4*)(&g_SIMD_ComponentMask[3]);
 	fltx4 rowA0 = LoadUnalignedSIMD(in1.m_flMatVal[0]);
@@ -846,8 +872,8 @@ void FloorDivMod(double numer, double denom, int* quotient,
 		Sys_Error("FloorDivMod: bad denominator %d\n", denom);
 
 	//	if ((floor(numer) != numer) || (floor(denom) != denom))
-	//		Sys_Error ("FloorDivMod: non-integer numer or denom %f %f\n",
-	//				numer, denom);
+	// Sys_Error ("FloorDivMod: non-integer numer or denom %f %f\n",
+	// numer, denom);
 #endif
 
 	if (numer >= 0.0)
@@ -1064,7 +1090,7 @@ void AngleVectors(const QAngle& angles, Vector3D* forward)
 }
 
 //-----------------------------------------------------------------------------
-// Euler QAngle -> Basis Vectors.  Each vector is optional
+// Euler QAngle -> Basis Vectors. Each vector is optional
 //-----------------------------------------------------------------------------
 void AngleVectors(const QAngle& angles, Vector3D* forward, Vector3D* right, Vector3D* up)
 {
@@ -1195,7 +1221,7 @@ void VectorAngles(const Vector3D& forward, const Vector3D& pseudoup, QAngle& ang
 	// enough here to get angles?
 	if (xyDist > 0.001f)
 	{
-		// (yaw)	y = ATAN( forward.y, forward.x );		-- in our space, forward is the X axis
+		// (yaw)	y = ATAN( forward.y, forward.x ); -- in our space, forward is the X axis
 		angles[1] = RAD2DEG(atan2f(forward[1], forward[0]));
 
 		// The engine does pitch inverted from this, but we always end up negating it in the DLL
@@ -1210,7 +1236,7 @@ void VectorAngles(const Vector3D& forward, const Vector3D& pseudoup, QAngle& ang
 	}
 	else	// forward is mostly Z, gimbal lock-
 	{
-		// (yaw)	y = ATAN( -left.x, left.y );			-- forward is mostly z, so use right for yaw
+		// (yaw)	y = ATAN( -left.x, left.y ); -- forward is mostly z, so use right for yaw
 		angles[1] = RAD2DEG(atan2f(-left[0], left[1])); //This was originally copied from the "void MatrixAngles( const matrix3x4_t& matrix, float *angles )" code, and it's 180 degrees off, negated the values and it all works now (Dave Kircher)
 
 		// The engine does pitch inverted from this, but we always end up negating it in the DLL
@@ -1249,13 +1275,13 @@ void SetScaleMatrix(float x, float y, float z, matrix3x4_t& dst)
 //-----------------------------------------------------------------------------
 // Purpose: Builds the matrix for a counterclockwise rotation about an arbitrary axis.
 //
-//		   | ax2 + (1 - ax2)cosQ		axay(1 - cosQ) - azsinQ		azax(1 - cosQ) + aysinQ |
-// Ra(Q) = | axay(1 - cosQ) + azsinQ	ay2 + (1 - ay2)cosQ			ayaz(1 - cosQ) - axsinQ |
-//		   | azax(1 - cosQ) - aysinQ	ayaz(1 - cosQ) + axsinQ		az2 + (1 - az2)cosQ     |
+// | ax2 + (1 - ax2)cosQ axay(1 - cosQ) - azsinQ azax(1 - cosQ) + aysinQ |
+// Ra(Q) = | axay(1 - cosQ) + azsinQ	ay2 + (1 - ay2)cosQ ayaz(1 - cosQ) - axsinQ |
+// | azax(1 - cosQ) - aysinQ	ayaz(1 - cosQ) + axsinQ az2 + (1 - az2)cosQ |
 //          
-// Input  : mat - 
-//			vAxisOrRot - 
-//			angle - 
+// Input: mat - 
+// vAxisOrRot - 
+// angle - 
 //-----------------------------------------------------------------------------
 void MatrixBuildRotationAboutAxis(const Vector3D& vAxisOfRot, float angleDegrees, matrix3x4_t& dst)
 {
@@ -1274,22 +1300,22 @@ void MatrixBuildRotationAboutAxis(const Vector3D& vAxisOfRot, float angleDegrees
 	axisYSquared = vAxisOfRot[1] * vAxisOfRot[1];
 	axisZSquared = vAxisOfRot[2] * vAxisOfRot[2];
 
-	// Column 0:
+	// Column 0
 	dst[0][0] = axisXSquared + (1 - axisXSquared) * fCos;
 	dst[1][0] = vAxisOfRot[0] * vAxisOfRot[1] * (1 - fCos) + vAxisOfRot[2] * fSin;
 	dst[2][0] = vAxisOfRot[2] * vAxisOfRot[0] * (1 - fCos) - vAxisOfRot[1] * fSin;
 
-	// Column 1:
+	// Column 1
 	dst[0][1] = vAxisOfRot[0] * vAxisOfRot[1] * (1 - fCos) - vAxisOfRot[2] * fSin;
 	dst[1][1] = axisYSquared + (1 - axisYSquared) * fCos;
 	dst[2][1] = vAxisOfRot[1] * vAxisOfRot[2] * (1 - fCos) + vAxisOfRot[0] * fSin;
 
-	// Column 2:
+	// Column 2
 	dst[0][2] = vAxisOfRot[2] * vAxisOfRot[0] * (1 - fCos) + vAxisOfRot[1] * fSin;
 	dst[1][2] = vAxisOfRot[1] * vAxisOfRot[2] * (1 - fCos) - vAxisOfRot[0] * fSin;
 	dst[2][2] = axisZSquared + (1 - axisZSquared) * fCos;
 
-	// Column 3:
+	// Column 3
 	dst[0][3] = 0;
 	dst[1][3] = 0;
 	dst[2][3] = 0;
@@ -1317,12 +1343,12 @@ void MatrixTranspose(const matrix3x4_t& src, matrix3x4_t& dst)
 
 //-----------------------------------------------------------------------------
 // Purpose: converts engine euler angles into a matrix
-// Input  : vec3_t angles - PITCH, YAW, ROLL
-// Output : *matrix - left-handed column matrix
-//			the basis vectors for the rotations will be in the columns as follows:
-//			matrix[][0] is forward
-//			matrix[][1] is left
-//			matrix[][2] is up
+// Input: vec3_t angles - PITCH, YAW, ROLL
+// Output: *matrix - left-handed column matrix
+// the basis vectors for the rotations will be in the columns as follows
+// matrix[0] is forward
+// matrix[1] is left
+// matrix[2] is up
 //-----------------------------------------------------------------------------
 void AngleMatrix(RadianEuler const& angles, const Vector3D& position, matrix3x4_t& matrix)
 {
@@ -1838,40 +1864,20 @@ void QuaternionSlerpNoAlign(const Quaternion& p, const Quaternion& q, float t, Q
 //-----------------------------------------------------------------------------
 float QuaternionAngleDiff(const Quaternion& p, const Quaternion& q)
 {
-#if 1
-	// this code path is here for 2 reasons:
+	// this code path is here for 2 reasons
 	// 1 - acos maps 1-epsilon to values much larger than epsilon (vs asin, which maps epsilon to itself)
-	//     this means that in floats, anything below ~0.05 degrees truncates to 0
+	// this means that in floats, anything below ~0.05 degrees truncates to 0
 	// 2 - normalized quaternions are frequently slightly non-normalized due to float precision issues,
-	//     and the epsilon off of normalized can be several percents of a degree
+	// and the epsilon off of normalized can be several percents of a degree
 	Quaternion qInv, diff;
 	QuaternionConjugate(q, qInv);
 	QuaternionMult(p, qInv, diff);
 
 	// Note if the quaternion is slightly non-normalized the square root below may be more than 1,
-	// the value is clamped to one otherwise it may result in asin() returning an undefined result.
+	// the value is clamped to one otherwise it may result in asin returning an undefined result.
 	float sinang = MIN(1.0f, sqrt(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z));
 	float angle = RAD2DEG(2 * asin(sinang));
 	return angle;
-#else
-	Quaternion q2;
-	QuaternionAlign(p, q, q2);
-
-	Assert(s_bMathlibInitialized);
-	float cosom = p.x * q2.x + p.y * q2.y + p.z * q2.z + p.w * q2.w;
-
-	if (cosom > -1.0f)
-	{
-		if (cosom < 1.0f)
-		{
-			float omega = 2 * fabs(acos(cosom));
-			return RAD2DEG(omega);
-		}
-		return 0.0f;
-	}
-
-	return 180.0f;
-#endif
 }
 
 void QuaternionConjugate(const Quaternion& p, Quaternion& q)
@@ -1945,18 +1951,6 @@ void QuaternionScale(const Quaternion& p, float t, Quaternion& q)
 {
 	Assert(s_bMathlibInitialized);
 
-#if 0
-	Quaternion p0;
-	Quaternion q;
-	p0.Init(0.0, 0.0, 0.0, 1.0);
-
-	// slerp in "reverse order" so that p doesn't get realigned
-	QuaternionSlerp(p, p0, 1.0 - fabs(t), q);
-	if (t < 0.0)
-	{
-		q.w = -q.w;
-	}
-#else
 	float r;
 
 	// FIXME: nick, this isn't overly sensitive to accuracy, and it may be faster to 
@@ -1982,7 +1976,6 @@ void QuaternionScale(const Quaternion& p, float t, Quaternion& q)
 		q.w = -r;
 	else
 		q.w = r;
-#endif
 
 	Assert(q.IsValid());
 
@@ -2064,7 +2057,7 @@ void QuaternionLn(const Quaternion& p, Quaternion& q)
 }
 
 // Average using exponential method
-// Qave = exp( 1 / n * log( Q1 ) + ... + 1 / n * log( Qn ) ) where
+// Qave = exp( 1 / n * log( Q1 ) +... + 1 / n * log( Qn ) ) where
 // if pflWeights passed in 1/n is replaced by normalized weighting
 void QuaternionAverageExponential(Quaternion& q, int nCount, const Quaternion* pQuaternions, const float* pflWeights /*=NULL*/)
 {
@@ -2125,8 +2118,8 @@ void QuaternionAverageExponential(Quaternion& q, int nCount, const Quaternion* p
 }
 
 // Given a vector and a pseudo-up reference vector, create a quaternion which represents
-//  the orientation of the forward vector.  Note, will be unstable if vecForward is close
-//  to referenceUp
+// the orientation of the forward vector. Note, will be unstable if vecForward is close
+// to referenceUp
 void QuaternionLookAt(const Vector3D& vecForward, const Vector3D& referenceUp, Quaternion& q)
 {
 	Vector3D forward = vecForward;
@@ -2148,14 +2141,14 @@ void QuaternionLookAt(const Vector3D& vecForward, const Vector3D& referenceUp, Q
 
 	/*
 	Vector z = vecForward;
-	z.NormalizeInPlace();
+	z.NormalizeInPlace;
 	Vector x = referenceUp.Cross( z );
-	x.NormalizeInPlace();
+	x.NormalizeInPlace;
 	Vector y = z.Cross( x );
-	y.NormalizeInPlace();
+	y.NormalizeInPlace;
 
 	float tr = x.x + y.y + z.z;
-	q.Init( y.z - z.y , z.x - x.z, x.y - y.x, tr + 1.0f );
+	q.Init( y.z - z.y, z.x - x.z, x.y - y.x, tr + 1.0f );
 	QuaternionNormalize( q );
 	*/
 }
@@ -2199,8 +2192,7 @@ void QuaternionMatrix(const Quaternion& q, matrix3x4_t& matrix)
 
 	// Original code
 	// This should produce the same code as below with optimization, but looking at the assembly,
-	// it doesn't.  There are 7 extra multiplies in the release build of this, go figure.
-#if 1
+	// it doesn't. There are 7 extra multiplies in the release build of this, go figure.
 	matrix[0][0] = 1.0 - 2.0 * q.y * q.y - 2.0 * q.z * q.z;
 	matrix[1][0] = 2.0 * q.x * q.y + 2.0 * q.w * q.z;
 	matrix[2][0] = 2.0 * q.x * q.z - 2.0 * q.w * q.y;
@@ -2216,38 +2208,6 @@ void QuaternionMatrix(const Quaternion& q, matrix3x4_t& matrix)
 	matrix[0][3] = 0.0f;
 	matrix[1][3] = 0.0f;
 	matrix[2][3] = 0.0f;
-#else
-	float wx, wy, wz, xx, yy, yz, xy, xz, zz, x2, y2, z2;
-
-	// precalculate common multiplitcations
-	x2 = q.x + q.x;
-	y2 = q.y + q.y;
-	z2 = q.z + q.z;
-	xx = q.x * x2;
-	xy = q.x * y2;
-	xz = q.x * z2;
-	yy = q.y * y2;
-	yz = q.y * z2;
-	zz = q.z * z2;
-	wx = q.w * x2;
-	wy = q.w * y2;
-	wz = q.w * z2;
-
-	matrix[0][0] = 1.0 - (yy + zz);
-	matrix[0][1] = xy - wz;
-	matrix[0][2] = xz + wy;
-	matrix[0][3] = 0.0f;
-
-	matrix[1][0] = xy + wz;
-	matrix[1][1] = 1.0 - (xx + zz);
-	matrix[1][2] = yz - wx;
-	matrix[1][3] = 0.0f;
-
-	matrix[2][0] = xz - wy;
-	matrix[2][1] = yz + wx;
-	matrix[2][2] = 1.0 - (xx + yy);
-	matrix[2][3] = 0.0f;
-#endif
 }
 
 
@@ -2357,8 +2317,8 @@ void UnitTestRotateBetween()
 
 //-----------------------------------------------------------------------------
 // Purpose: Converts a quaternion into engine angles
-// Input  : *quaternion - q3 + q0.i + q1.j + q2.k
-//			*outAngles - PITCH, YAW, ROLL
+// Input: *quaternion - q3 + q0.i + q1.j + q2.k
+// *outAngles - PITCH, YAW, ROLL
 //-----------------------------------------------------------------------------
 void QuaternionAngles(const Quaternion& q, QAngle& angles)
 {
@@ -2369,25 +2329,10 @@ void QuaternionAngles(const Quaternion& q, QAngle& angles)
 	VPROF_BUDGET("QuaternionAngles", "Mathlib");
 #endif
 
-#if 1
 	// FIXME: doing it this way calculates too much data, needs to do an optimized version...
 	matrix3x4_t matrix;
 	QuaternionMatrix(q, matrix);
 	MatrixAngles(matrix, angles);
-#else
-	float m11, m12, m13, m23, m33;
-
-	m11 = (2.0f * q.w * q.w) + (2.0f * q.x * q.x) - 1.0f;
-	m12 = (2.0f * q.x * q.y) + (2.0f * q.w * q.z);
-	m13 = (2.0f * q.x * q.z) - (2.0f * q.w * q.y);
-	m23 = (2.0f * q.y * q.z) + (2.0f * q.w * q.x);
-	m33 = (2.0f * q.w * q.w) + (2.0f * q.z * q.z) - 1.0f;
-
-	// FIXME: this code has a singularity near PITCH +-90
-	angles[YAW] = RAD2DEG(atan2(m12, m11));
-	angles[PITCH] = RAD2DEG(asin(-m13));
-	angles[ROLL] = RAD2DEG(atan2(m23, m33));
-#endif
 
 	Assert(angles.IsValid());
 }
@@ -2426,8 +2371,8 @@ float QuaternionionGetRoll(const Quaternion& q)
 
 //-----------------------------------------------------------------------------
 // Purpose: Converts a quaternion into FLU vectors
-// Input  : *quaternion - q3 + q0.i + q1.j + q2.k
-//			basis vectors, each vector is optional
+// Input: *quaternion - q3 + q0.i + q1.j + q2.k
+// basis vectors, each vector is optional
 //-----------------------------------------------------------------------------
 void QuaternionVectorsFLU(Quaternion const& q, Vector3D* pForward, Vector3D* pLeft, Vector3D* pUp)
 {
@@ -2485,7 +2430,7 @@ void UnitTestVectorFLU()
 #if !defined(__SPU__)
 //-----------------------------------------------------------------------------
 // Purpose: Converts a quaternion to an axis / angle in degrees
-//			(exponential map)
+// (exponential map)
 //-----------------------------------------------------------------------------
 void QuaternionAxisAngle(const Quaternion& q, Vector3D& axis, float& angle)
 {
@@ -2518,13 +2463,13 @@ void AxisAngleQuaternion(const Vector3D& axis, float angle, Quaternion& q)
 
 //-----------------------------------------------------------------------------
 // Purpose: Converts radian-euler axis aligned angles to a quaternion
-// Input  : *pfAngles - Right-handed Euler angles in radians
-//			*outQuat - quaternion of form (i,j,k,real)
+// Input: *pfAngles - Right-handed Euler angles in radians
+// *outQuat - quaternion of form (i,j,k,real)
 //-----------------------------------------------------------------------------
 void AngleQuaternion(const RadianEuler& angles, Quaternion& outQuat)
 {
 	Assert(s_bMathlibInitialized);
-	//	Assert( angles.IsValid() );
+	//	Assert( angles.IsValid );
 
 #ifdef _VPROF_MATHLIB
 	VPROF_BUDGET("AngleQuaternion", "Mathlib");
@@ -2549,30 +2494,30 @@ void AngleQuaternion(const RadianEuler& angles, Quaternion& outQuat)
 	SinCos(angles.x * 0.5f, &sr, &cr);
 #endif
 
-	// NJS: for some reason VC6 wasn't recognizing the common subexpressions:
+	// NJS: for some reason VC6 wasn't recognizing the common subexpressions
 	float srXcp = sr * cp, crXsp = cr * sp;
-	outQuat.x = srXcp * cy - crXsp * sy; // X
-	outQuat.y = crXsp * cy + srXcp * sy; // Y
+	outQuat.x = srXcp * cy - crXsp * sy;
+	outQuat.y = crXsp * cy + srXcp * sy;
 
 	float crXcp = cr * cp, srXsp = sr * sp;
-	outQuat.z = crXcp * sy - srXsp * cy; // Z
+	outQuat.z = crXcp * sy - srXsp * cy;
 	outQuat.w = crXcp * cy + srXsp * sy; // W (real component)
 }
 
 #ifdef _X360
 //-----------------------------------------------------------------------------
 // Purpose: Converts radian-euler axis aligned angles to a quaternion, returning
-//			it on a vector register.
-// Input  : *vAngles - Right-handed Euler angles in radians (roll pitch yaw)
+// it on a vector register.
+// Input: *vAngles - Right-handed Euler angles in radians (roll pitch yaw)
 //
 // Algorithm based on that found in the XDK (which really uses RPY order, as
-//  opposed to this which takes the parameters in RPY order but catenates them
-//  in PYR order).
+// opposed to this which takes the parameters in RPY order but catenates them
+// in PYR order).
 //-----------------------------------------------------------------------------
 fltx4 AngleQuaternionSIMD(FLTX4 vAngles)
 {
 	Assert(s_bMathlibInitialized);
-	//	Assert( angles.IsValid() );
+	//	Assert( angles.IsValid );
 
 #ifdef _VPROF_MATHLIB
 	VPROF_BUDGET("AngleQuaternion", "Mathlib");
@@ -2611,10 +2556,10 @@ fltx4 AngleQuaternionSIMD(FLTX4 vAngles)
 	Ys = __vrlimi(Ys, cosine, 0x2, 0);	// sy sy cy sy
 
 	retsum = __vxor(Rs, SignMask);	// -cr sr -sr sr
-	retval = __vmulfp(Pc, Yc);		//  cp*cy  sp*cy  cp*sy  cp*cy
-	retsum = __vmulfp(retsum, Ys);	// -cr*sy  sr*sy -sr*cy  sr*sy
-	retval = __vmulfp(retval, Rc);	//  cp*cy*sr  sp*cy*cr  cp*sy*cr  cp*cy*cr
-	retval = __vmaddfp(retsum, Ps, retval); //  cp*cy*sr + -cr*sy*sp ...
+	retval = __vmulfp(Pc, Yc);		// cp*cy sp*cy cp*sy cp*cy
+	retsum = __vmulfp(retsum, Ys);	// -cr*sy sr*sy -sr*cy sr*sy
+	retval = __vmulfp(retval, Rc);	// cp*cy*sr sp*cy*cr cp*sy*cr cp*cy*cr
+	retval = __vmaddfp(retsum, Ps, retval); // cp*cy*sr + -cr*sy*sp...
 
 	return retval;
 }
@@ -2628,11 +2573,11 @@ inline fltx4 AngleQuaternionSIMD(const RadianEuler& angles)
 
 //-----------------------------------------------------------------------------
 // Purpose: Converts engine-format euler angles to a quaternion
-// Input  : angles - Right-handed Euler angles in degrees as follows:
-//				[0]: PITCH: Clockwise rotation around the Y axis.
-//				[1]: YAW:	Counterclockwise rotation around the Z axis.
-//				[2]: ROLL:	Counterclockwise rotation around the X axis.
-//			*outQuat - quaternion of form (i,j,k,real)
+// Input: angles - Right-handed Euler angles in degrees as follows
+// [0]: PITCH: Clockwise rotation around the Y axis.
+// [1]: YAW:	Counterclockwise rotation around the Z axis.
+// [2]: ROLL:	Counterclockwise rotation around the X axis.
+// *outQuat - quaternion of form (i,j,k,real)
 //-----------------------------------------------------------------------------
 void AngleQuaternion(const QAngle& angles, Quaternion& outQuat)
 {
@@ -2659,13 +2604,13 @@ void AngleQuaternion(const QAngle& angles, Quaternion& outQuat)
 	SinCos(DEG2RAD(angles.z) * 0.5f, &sr, &cr);
 #endif
 
-	// NJS: for some reason VC6 wasn't recognizing the common subexpressions:
+	// NJS: for some reason VC6 wasn't recognizing the common subexpressions
 	float srXcp = sr * cp, crXsp = cr * sp;
-	outQuat.x = srXcp * cy - crXsp * sy; // X
-	outQuat.y = crXsp * cy + srXcp * sy; // Y
+	outQuat.x = srXcp * cy - crXsp * sy;
+	outQuat.y = crXsp * cy + srXcp * sy;
 
 	float crXcp = cr * cp, srXsp = sr * sp;
-	outQuat.z = crXcp * sy - srXsp * cy; // Z
+	outQuat.z = crXcp * sy - srXsp * cy;
 	outQuat.w = crXcp * cy + srXsp * sy; // W (real component)
 }
 
@@ -2685,7 +2630,7 @@ void BasisToQuaternion(const Vector3D& vecForward, const Vector3D& vecRight, con
 	// FIXME: Don't know why, but this doesn't match at all with other result
 	// so we can't use this super-fast way.
 	/*
-	// Find the trace of the matrix:
+	// Find the trace of the matrix
 	float flTrace = vecForward.x + vecLeft.y + vecUp.z + 1.0f;
 	if ( flTrace > 1e-6 )
 	{
@@ -2868,8 +2813,8 @@ float MatrixQuaternionTest2(uint nCount)
 
 //-----------------------------------------------------------------------------
 // Purpose: Converts a quaternion into engine angles
-// Input  : *quaternion - q3 + q0.i + q1.j + q2.k
-//			*outAngles - PITCH, YAW, ROLL
+// Input: *quaternion - q3 + q0.i + q1.j + q2.k
+// *outAngles - PITCH, YAW, ROLL
 //-----------------------------------------------------------------------------
 void QuaternionAngles(const Quaternion& q, RadianEuler& angles)
 {
@@ -2887,10 +2832,10 @@ void QuaternionAngles(const Quaternion& q, RadianEuler& angles)
 #if !defined(__SPU__)
 //-----------------------------------------------------------------------------
 // Purpose: A helper function to normalize p2.x->p1.x and p3.x->p4.x to 
-//  be the same length as p2.x->p3.x
-// Input  : &p2 - 
-//			&p4 - 
-//			p4n - 
+// be the same length as p2.x->p3.x
+// Input: &p2 - 
+// &p4 - 
+// p4n - 
 //-----------------------------------------------------------------------------
 void Spline_Normalize(
 	const Vector3D& p1,
@@ -2923,8 +2868,8 @@ void Spline_Normalize(
 
 #if !defined(__SPU__)
 //-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : 
+// Purpose
+// Input 
 //-----------------------------------------------------------------------------
 
 void Catmull_Rom_Spline(
@@ -3128,9 +3073,9 @@ void Catmull_Rom_Spline_NormalizeX(
 #endif // !defined(__SPU__)
 
 //-----------------------------------------------------------------------------
-// Purpose: basic hermite spline.  t = 0 returns p1, t = 1 returns p2, 
-//			d1 and d2 are used to entry and exit slope of curve
-// Input  : 
+// Purpose: basic hermite spline. t = 0 returns p1, t = 1 returns p2, 
+// d1 and d2 are used to entry and exit slope of curve
+// Input 
 //-----------------------------------------------------------------------------
 
 void Hermite_Spline(
@@ -3199,14 +3144,14 @@ void Hermite_SplineBasis(float t, float basis[4])
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: simple three data point hermite spline.  
-//			t = 0 returns p1, t = 1 returns p2, 
-//			slopes are generated from the p0->p1 and p1->p2 segments
-//			this is reasonable C1 method when there's no "p3" data yet.
-// Input  : 
+// Purpose: simple three data point hermite spline. 
+// t = 0 returns p1, t = 1 returns p2, 
+// slopes are generated from the p0->p1 and p1->p2 segments
+// this is reasonable C1 method when there's no "p3" data yet.
+// Input 
 //-----------------------------------------------------------------------------
 
-// BUG: the VectorSubtract()'s calls go away if the global optimizer is enabled
+// BUG: the VectorSubtract's calls go away if the global optimizer is enabled
 #if !defined(__SPU__)
 #pragma optimize( "g", off )
 #endif
@@ -3250,8 +3195,8 @@ void Hermite_Spline(const Quaternion& q0, const Quaternion& q1, const Quaternion
 #if !defined(__SPU__)
 // See http://en.wikipedia.org/wiki/Kochanek-Bartels_curves
 // 
-// Tension:  -1 = Round -> 1 = Tight
-// Bias:     -1 = Pre-shoot (bias left) -> 1 = Post-shoot (bias right)
+// Tension: -1 = Round -> 1 = Tight
+// Bias: -1 = Pre-shoot (bias left) -> 1 = Post-shoot (bias right)
 // Continuity: -1 = Box corners -> 1 = Inverted corners
 //
 // If T=B=C=0 it's the same matrix as Catmull-Rom.
@@ -3973,14 +3918,14 @@ float CalcDistanceSqrToLineSegment2D(const Vector2D& P, const Vector2D& vLineA, 
 
 //-----------------------------------------------------------------------------
 // Purpose: Given lines p1->p2 and p3->p4, computes a line segment (pa->pb) and returns the parameters 0->1 multipliers
-//  along each segment for the returned points
-// Input  : p1 - 
-//			p2 - 
-//			p3 - 
-//			p4 - 
-//			*s1 - 
-//			*s2 - 
-// Output : Returns true on success, false on failure.
+// along each segment for the returned points
+// Input: p1 - 
+// p2 - 
+// p3 - 
+// p4 - 
+// *s1 - 
+// *s2 - 
+// Output: Returns true on success, false on failure.
 //-----------------------------------------------------------------------------
 bool CalcLineToLineIntersectionSegment(
 	const Vector3D& p1, const Vector3D& p2, const Vector3D& p3, const Vector3D& p4, Vector3D* s1, Vector3D* s2,
@@ -4254,11 +4199,11 @@ void ComputeTrianglePlane(const Vector3D& v1, const Vector3D& v2, const Vector3D
 
 //-----------------------------------------------------------------------------
 // Purpose: Calculate the volume of a tetrahedron with these vertices
-// Input  : p0 - points of tetrahedron
-//			p1 - 
-//			p2 - 
-//			p3 - 
-// Output : float (volume in units^3)
+// Input: p0 - points of tetrahedron
+// p1 - 
+// p2 - 
+// p3 - 
+// Output: float (volume in units^3)
 //-----------------------------------------------------------------------------
 float TetrahedronVolume(const Vector3D& p0, const Vector3D& p1, const Vector3D& p2, const Vector3D& p3)
 {
@@ -4288,11 +4233,11 @@ float TriangleArea(const Vector3D& v0, const Vector3D& v1, const Vector3D& v2)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: This is a clone of BaseWindingForPlane()
-// Input  : *pOutVerts - an array of preallocated verts to build the polygon in
-//			normal - the plane normal
-//			dist - the plane constant
-// Output : int - vert count (always 4)
+// Purpose: This is a clone of BaseWindingForPlane
+// Input: *pOutVerts - an array of preallocated verts to build the polygon in
+// normal - the plane normal
+// dist - the plane constant
+// Output: int - vert count (always 4)
 //-----------------------------------------------------------------------------
 int PolyFromPlane(Vector3D* pOutVerts, const Vector3D& normal, float dist, float fHalfScale)
 {
@@ -4414,12 +4359,12 @@ void PolyFromPlane_SIMD(fltx4* pOutVerts, const fltx4& plane, float fHalfScale)
 
 //-----------------------------------------------------------------------------
 // Purpose: clip a poly to the plane and return the poly on the front side of the plane
-// Input  : *inVerts - input polygon
-//			vertCount - # verts in input poly
-//			*outVerts - destination poly
-//			normal - plane normal
-//			dist - plane constant
-// Output : int - # verts in output poly
+// Input: *inVerts - input polygon
+// vertCount - # verts in input poly
+// *outVerts - destination poly
+// normal - plane normal
+// dist - plane constant
+// Output: int - # verts in output poly
 //-----------------------------------------------------------------------------
 
 int ClipPolyToPlane(Vector3D* inVerts, int vertCount, Vector3D* outVerts, const Vector3D& normal, float dist, float fOnPlaneEpsilon)
@@ -4521,8 +4466,8 @@ int ClipPolyToPlane_SIMD(fltx4* pInVerts, int nVertCount, fltx4* pOutVerts, cons
 	 * It seems something could be done here... Especially in relation with the code below i, i + 1, etc...
 		fltx4 f4OnPlaneEpsilonP = ReplicateX4( fOnPlaneEpsilon );
 		fltx4 f4OnPlaneEpsilonM = -f4OnPlaneEpsilonP;
-		Also we could store the full fltx4 instead of a single float. It would avoid doing a SubFloat() here,
-		and a ReplicateX4() later. Trading off potential LHS against L2 cache misses?
+		Also we could store the full fltx4 instead of a single float. It would avoid doing a SubFloat here,
+		and a ReplicateX4 later. Trading off potential LHS against L2 cache misses?
 	*/
 	// determine sides for each point
 	int nAllSides = 0;
@@ -4615,7 +4560,7 @@ int ClipPolyToPlane_SIMD(fltx4* pInVerts, int nVertCount, fltx4* pOutVerts, cons
 		float fDot = dists[i] / (dists[i] - dists[i + 1]);
 		fltx4 f4Dot = ReplicateX4(fDot);
 
-		// mid[j] = v1[j] + dot*(v2[j]-v1[j]);		- For j=0...2
+		// mid[j] = v1[j] + dot*(v2[j]-v1[j]); - For j=0...2
 		fltx4 f4Result = MaddSIMD(f4Dot, SubSIMD(p2, p1), p1);
 		// If normal.* is 1, it should be dist, if -1, it should be -dist, otherwise it should be mid[j] = v1[j] + dot*(v2[j]-v1[j]);
 		fltx4 mid = MaskedAssign((bi32x4)f4AllMask, f4AllValue, f4Result);
@@ -4987,7 +4932,7 @@ bool Frustum_t::CullBox(const Vector3D& mins, const Vector3D& maxs) const
 	fltx4 maxz = SplatZSIMD(maxs4);
 
 	// compute the dot product of the normal and the farthest corner
-	// dotBack0 = DotProduct( normal, normals.x < 0 ? mins.x : maxs.x );
+	// dotBack0 = DotProduct( normal, normals.x < 0 ? mins.x: maxs.x );
 	for (int i = 0; i < 2; i++)
 	{
 		fltx4 xTotalBack = MulSIMD(planes[i].nX, MaskedAssign(planes[i].xSign, minx, maxx));
@@ -5011,7 +4956,7 @@ bool Frustum_t::CullBox(const fltx4& mins4, const fltx4& maxs4) const
 	fltx4 maxz = SplatZSIMD(maxs4);
 
 	// compute the dot product of the normal and the farthest corner
-	// dotBack0 = DotProduct( normal, normals.x < 0 ? mins.x : maxs.x );
+	// dotBack0 = DotProduct( normal, normals.x < 0 ? mins.x: maxs.x );
 	for (int i = 0; i < 2; i++)
 	{
 		fltx4 xTotalBack = MulSIMD(planes[i].nX, MaskedAssign(planes[i].xSign, minx, maxx));
@@ -5191,7 +5136,7 @@ bool Frustum_t::Intersects(const Vector3D& mins, const Vector3D& maxs) const
 	fltx4 maxz = SplatZSIMD(maxs4);
 
 	// compute the dot product of the normal and the farthest corner
-	// dotBack0 = DotProduct( normal, normals.x < 0 ? mins.x : maxs.x );
+	// dotBack0 = DotProduct( normal, normals.x < 0 ? mins.x: maxs.x );
 	for (int i = 0; i < 2; i++)
 	{
 		fltx4 xTotalBack = MulSIMD(planes[i].nX, MaskedAssign(planes[i].xSign, minx, maxx));
@@ -5225,7 +5170,7 @@ bool Frustum_t::Intersects(const fltx4& mins4, const fltx4& maxs4) const
 	fltx4 maxz = SplatZSIMD(maxs4);
 
 	// compute the dot product of the normal and the farthest corner
-	// dotBack0 = DotProduct( normal, normals.x < 0 ? mins.x : maxs.x );
+	// dotBack0 = DotProduct( normal, normals.x < 0 ? mins.x: maxs.x );
 	for (int i = 0; i < 2; i++)
 	{
 		fltx4 xTotalBack = MulSIMD(planes[i].nX, MaskedAssign(planes[i].xSign, minx, maxx));
@@ -5323,7 +5268,7 @@ bool Frustum_t::IntersectsCenterExtents(const fltx4& fl4Center, const fltx4& fl4
 //-----------------------------------------------------------------------------
 void GenerateOrthoFrustumFLU(const Vector3D& origin, const Vector3D& forward, const Vector3D& vLeft, const Vector3D& up, float flLeft, float flRight, float flBottom, float flTop, float flZNear, float flZFar, VPlane* pPlanesOut)
 {
-	// YUP_ACTIVE: FIXME : This is actually producing incorrect planes (see the VectorMA below)
+	// YUP_ACTIVE: FIXME: This is actually producing incorrect planes (see the VectorMA below)
 	Vector3D vRight = vLeft;
 	vRight *= -1.0f;
 
@@ -5350,7 +5295,7 @@ void GeneratePerspectiveFrustumFLU(const Vector3D& origin, const Vector3D& forwa
 	const Vector3D& vLeft, const Vector3D& up, float flZNear, float flZFar,
 	float flFovX, float flAspect, VPlane* pPlanesOut)
 {
-	// YUP_ACTIVE: FIXME : This is actually producing incorrect planes (see the VectorMA below)
+	// YUP_ACTIVE: FIXME: This is actually producing incorrect planes (see the VectorMA below)
 	Vector3D vRight = vLeft;
 	vRight *= -1.0f;
 
@@ -5439,8 +5384,8 @@ void Frustum_t::CreateOrthoFrustum(const Vector3D& origin, const Vector3D& forwa
 // The points returned correspond to the corners of the frustum faces 
 // Points 0 to 3 correspond to the near face 
 // Points 4 to 7 correspond to the far face 
-// Returns points in a face in this order:
-//  2--3
+// Returns points in a face in this order
+// 2--3
 //	|  |
 //	0--1
 bool Frustum_t::GetCorners(Vector3D* pPoints) const
@@ -5811,18 +5756,18 @@ const Quaternion RandomQuaternion(IUniformRandomStream* pRnd)
 
 // Originally from hammer_mathlib.cpp
 //
-// Generate the corner points of a box:
-// +y       _+z
-// ^        /|
+// Generate the corner points of a box
+// +y _+z
+// ^ /|
 // |       /
-// |  3---7   
+// | 3---7 
 //   /|  /|
 //  / | / |
-// 2---6  |
-// |  1|--5
+// 2---6 |
+// | 1|--5
 // | / | /
 // |/  |/
-// 0---4   --> +x
+// 0---4 --> +x
 void PointsFromBox(const Vector3D& mins, const Vector3D& maxs, Vector3D* points)
 {
 	points[0][0] = mins[0];
@@ -5873,18 +5818,18 @@ void BuildTransformedBox(Vector3D* v2, Vector3D const& bbmin, Vector3D const& bb
 	VectorTransform(v[7], m, v2[7]);
 }
 
-// Generate the corner points of a angled box:
-// +y*r     _+z*u
-// ^        /|
+// Generate the corner points of a angled box
+// +y*r _+z*u
+// ^ /|
 // |       /
-// |  3---7   
+// | 3---7 
 //   /|  /|
 //  / | / |
-// 2---6  |
-// |  1|--5
+// 2---6 |
+// | 1|--5
 // | / | /
 // |/  |/
-// 0---4   --> +x*f
+// 0---4 --> +x*f
 void PointsFromAngledBox(const QAngle& angles, const Vector3D& mins, const Vector3D& maxs, Vector3D* points)
 {
 	Vector3D forward;

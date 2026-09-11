@@ -12,7 +12,7 @@ class CKeyValuesSystem;
 extern CKeyValuesSystem* g_pKeyValuesSystem;
 extern void* g_pKeyValuesMemPool;
 
-class CKeyValuesSystem : public IKeyValuesSystem// VTABLE @ 0x1413AA1E8 in R5pc_r5launch_N1094_CL456479_2019_10_30_05_20_PM
+class CKeyValuesSystem : public IKeyValuesSystem// VTABLE @ in R5pc_r5launch_N1094_CL456479_2019_10_30_05_20_PM
 {
 public:
 	CKeyValuesSystem();
@@ -51,8 +51,8 @@ private:
 
 	// string hash table
 	/*
-	Here's the way key values system data structures are laid out:
-	hash table with 2047 hash buckets:
+	Here's the way key values system data structures are laid out
+	hash table with 2047 hash buckets
 	[0] { hash_item_t }
 	[1]
 	[2]
@@ -68,7 +68,7 @@ private:
 	Getting a string value by HKeySymbol : constant time access at the
 	string memory represented by stringIndex
 
-	Getting a symbol for a string value:
+	Getting a symbol for a string value
 	1)	compute the hash
 	2)	start walking the hash-bucket using special version of stricmp
 		until a case insensitive match is found

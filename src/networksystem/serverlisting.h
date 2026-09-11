@@ -44,6 +44,15 @@ struct NetGameServer_t
 	// required mod ids for clients to join this server
 	vector<string> requiredMods;
 
+	// additional mod ids a client may have when sv_modPolicy is 2
+	vector<string> allowedMods;
+
 	// the mods profile identifier for this server
 	string modsProfile;
+
+	// Region the master server reports for this listing, shown in the browser.
+	// A host never sets it, so it stays last: the struct is built by positional
+	// aggregate initialization in several places, and a field inserted higher up
+	// silently shifts every value after it.
+	string region;
 };

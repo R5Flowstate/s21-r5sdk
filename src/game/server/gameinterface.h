@@ -48,6 +48,7 @@ public: // Hook statics
 	static bool DLLInit(CServerGameDLL* thisptr, CreateInterfaceFn appSystemFactory, CreateInterfaceFn physicsFactory,
 		CreateInterfaceFn fileSystemFactory, CGlobalVars* pGlobals);
 	static void OnReceivedSayTextMessage(CServerGameDLL* thisptr, int senderId, const char* text, bool isTeamChat);
+	static __int64 GameFrame(void* thisptr, unsigned char simulating);
 };
 
 //-----------------------------------------------------------------------------
@@ -125,6 +126,7 @@ private:
 inline bool(*CServerGameDLL__DLLInit)(CServerGameDLL* thisptr, CreateInterfaceFn appSystemFactory, CreateInterfaceFn physicsFactory, CreateInterfaceFn fileSystemFactory, CGlobalVars* pGlobals);
 inline bool(*CServerGameDLL__GameInit)(void);
 inline void(*CServerGameDLL__OnReceivedSayTextMessage)(CServerGameDLL* thisptr, int senderId, const char* text, bool isTeamChat);
+inline __int64(*CServerGameDLL__GameFrame)(void* thisptr, unsigned char simulating);
 
 inline void(*CServerGameClients__ProcessUserCmds)(CServerGameClients* thisp, edict_t edict, bf_read* buf,
 	int numCmds, int totalCmds, int droppedPackets, bool ignore, bool paused);
@@ -145,6 +147,22 @@ extern CServerRandomStream* g_randomStream;
 
 extern CGlobalVars* gpGlobals;
 
+#if !defined(CLIENT_DLL)
+// Runs every SDK per-level reset (the non-vfunc body of
+// CServerGameDLL::LevelShutdown). Safe to call from any level-transition path.
+void ServerGameDLL_RunSdkLevelReset(const char* pszReason);
+
+// Engine level-init boundary, called from the CreateNetworkStringTables hook.
+// Runs the SDK reset if no reset ran since the previous level came up, then
+// bumps the level generation and arms for the next level. Returns the new
+// generation.
+unsigned int ServerGameDLL_OnLevelStringTablesCreated(void);
+
+// Monotonic counter, one increment per level bring-up. Cached engine pointers
+// stamp themselves with this so a cross-level stale pointer is detectable.
+unsigned int ServerGameDLL_GetLevelGeneration(void);
+#endif // !CLIENT_DLL
+
 ///////////////////////////////////////////////////////////////////////////////
 class VServerGameDLL : public IDetour
 {
@@ -152,6 +170,7 @@ class VServerGameDLL : public IDetour
 	{
 		LogFunAdr("CServerGameDLL::DLLInit", CServerGameDLL__DLLInit);
 		LogFunAdr("CServerGameDLL::GameInit", CServerGameDLL__GameInit);
+		LogFunAdr("CServerGameDLL::GameFrame", CServerGameDLL__GameFrame);
 		LogFunAdr("CServerGameDLL::OnReceivedSayTextMessage", CServerGameDLL__OnReceivedSayTextMessage);
 		LogFunAdr("CServerGameClients::ProcessUserCmds", CServerGameClients__ProcessUserCmds);
 		LogFunAdr("DispatchFrameServerJob", v_DispatchFrameServerJob);
@@ -169,6 +188,11 @@ class VServerGameDLL : public IDetour
 	{
 		Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 41 56 41 57 48 83 EC ?? 48 8B 05 ?? ?? ?? ?? 4C 8D 15").GetPtr(CServerGameDLL__DLLInit);
 		Module_FindPattern(g_GameDll, "48 83 EC 28 48 8B 0D ?? ?? ?? ?? 48 8D 15 ?? ?? ?? ?? 48 8B 01 FF 90 ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? 48 8B 01").GetPtr(CServerGameDLL__GameInit);
+		// CServerGameDLL::GameFrame. sub rsp,0B8h plus the pause-gate cmp
+		// pins the server half; the client twin does not have this frame.
+		Module_FindPattern(g_GameDll,
+			"48 8B C4 48 89 48 08 41 54 41 57 48 81 EC B8 00 00 00 80 3D ?? ?? ?? ?? 00")
+			.GetPtr(CServerGameDLL__GameFrame);
 		Module_FindPattern(g_GameDll, "85 D2 0F 8E ?? ?? ?? ?? 4C 8B DC").GetPtr(CServerGameDLL__OnReceivedSayTextMessage);
 		Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 48 89 74 24 ?? 48 89 7C 24 ?? 55 41 55 41 57").GetPtr(CServerGameClients__ProcessUserCmds);
 

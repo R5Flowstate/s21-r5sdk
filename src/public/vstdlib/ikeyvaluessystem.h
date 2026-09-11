@@ -1,6 +1,6 @@
 //====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //=============================================================================//
@@ -18,7 +18,7 @@ typedef int HKeySymbol;
 
 //-----------------------------------------------------------------------------
 // Purpose: Interface to shared data repository for KeyValues (included in vgui_controls.lib)
-//			allows for central data storage point of KeyValues symbol table
+// allows for central data storage point of KeyValues symbol table
 //-----------------------------------------------------------------------------
 class IKeyValuesSystem
 {

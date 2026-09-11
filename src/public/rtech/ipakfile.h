@@ -111,9 +111,9 @@ struct PakPageHeader_s
 	uint32_t dataSize;
 };
 
-// ptr.index  != UINT32_MAX
+// ptr.index != UINT32_MAX
 // ptr.offset != UINT32_MAX
-// ptr.index   < pak->GetPageCount()
+// ptr.index < pak->GetPageCount
 // ptr.offset <= pak->GetPageSize(ptr.index)
 #define IS_PAKPTR_VALID(pak, ptr) ((ptr)->index != UINT32_MAX && (ptr)->offset != UINT32_MAX && (ptr)->index < (pak)->GetPageCount() && (ptr)->offset <= (pak)->GetPageSize((ptr)->index))
 #define ASSERT_PAKPTR_VALID(pak, ptr) Assert(IS_PAKPTR_VALID(pak, ptr), "Invalid pak page pointer")
@@ -390,13 +390,13 @@ struct PakGlobalState_s
 	char unknown_or_unused[32];
 	void* addToMapFunc;
 	void* removeFromMapFunc;
-	__int64 qword_167ED8540;
-	int dword_167ED8548;
-	int dword_167ED854C;
-	__int64 qword_167ED8550;
-	int dword_167ED8558;
+	__int64 mapFuncCookie;
+	int reservedAfterMap0;
+	int reservedAfterMap1;
+	__int64 reservedAfterMap2;
+	int reservedAfterMap3;
 	int unknown_dword_or_nothing;
-	int dword_167ED8560;
+	int reservedAfterMap4;
 	int numPatchedPaks;
 	const char** patchedPakFiles;
 	uint8_t* patchNumbers;
@@ -471,7 +471,7 @@ struct PakFileHeader_s
 	// NOTE: this should be NULL if external streaming sets are used
 	uint64_t embeddedStreamingDataOffset[STREAMING_SET_COUNT];
 
-	// decompressed size of  this pak, this includes the header
+	// decompressed size of this pak, this includes the header
 	// NOTE: if the pak is uncompressed, this will equal compressedSize
 	uint64_t decompressedSize;
 

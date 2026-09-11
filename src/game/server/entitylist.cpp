@@ -1,6 +1,6 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright ï¿½ 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 //===========================================================================//
 #include "core/stdafx.h"
@@ -8,6 +8,6 @@
 
 //-----------------------------------------------------------------------------
 // Purpose: a global list of all the entities in the game. All iteration through
-//          entities is done through this object.
+// entities is done through this object.
 //-----------------------------------------------------------------------------
 CGlobalEntityList* g_serverEntityList = nullptr;

@@ -1,14 +1,14 @@
 //=============================================================================//
 //
-// Purpose:
+// Purpose
 //
 //=============================================================================//
 #include "tier0/tslist.h"
 
 //-----------------------------------------------------------------------------
 // Purpose: constructor
-// Input  : *pAllocCallback - 
-//          *pFreeCallback - 
+// Input: *pAllocCallback - 
+// *pFreeCallback - 
 //-----------------------------------------------------------------------------
 CAlignedMemAlloc::CAlignedMemAlloc(FnAlloc_t pAllocCallback, FnFree_t pFreeCallback)
 {

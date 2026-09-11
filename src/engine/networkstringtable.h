@@ -1,6 +1,6 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //===========================================================================//
@@ -59,7 +59,7 @@ class CNetworkStringTableContainer : public INetworkStringTableContainer
 public:
 	static void WriteUpdateMessage(CNetworkStringTableContainer* thisp, CClient* client, unsigned int tick_ack, bf_write* msg);
 
-	// Guards so game .dll can't create tables at the wrong time
+	// Guards so game.dll can't create tables at the wrong time
 	inline void AllowCreation(bool state) { m_bAllowCreation = state; }
 
 private:

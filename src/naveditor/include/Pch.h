@@ -30,6 +30,9 @@
 // Required for shared SDK code.
 #include <regex>
 #include <mutex>
+#include <shared_mutex>
+#include <thread>
+#include <atomic>
 
 #include "common/experimental.h"
 

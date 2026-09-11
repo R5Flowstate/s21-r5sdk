@@ -1,8 +1,6 @@
 #include "core/stdafx.h"
 #include "vphysics/QHull.h"
-#ifndef DEDICATED
 #include "gameui/IConsole.h"
-#endif // !DEDICATED
 
 //-----------------------------------------------------------------------------
 // Purpose: qhull error and debug prints

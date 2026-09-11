@@ -6,7 +6,7 @@ class IClientThinkable
 public:
 	// Gets at the containing class...
 	virtual IClientUnknown* GetIClientUnknown() = 0;
-	// TODO:
+	// TODO
 };
 
 #endif // ICLIENTTHINKABLE_H

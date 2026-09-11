@@ -135,27 +135,47 @@ struct MeshProcess : public dtTileCacheMeshProcess
 						 unsigned char* polyAreas, unsigned short* polyFlags)
 	{
 		// Update poly flags from areas.
-		// todo(amos): needs to be updated and/or done differently for r2 and r5.
+		// Tilecache does not fill params->surfAreas (dtTileCachePolyMesh has none),
+		// so DT_POLYFLAGS_TOO_SMALL cannot be set on this path.
 		for (int i = 0; i < params->polyCount; ++i)
 		{
 			if (polyAreas[i] == DT_TILECACHE_WALKABLE_AREA)
 				polyAreas[i] = DT_POLYAREA_GROUND;
 
-			if (polyAreas[i] == DT_POLYAREA_GROUND
+			if (polyAreas[i] == DT_POLYAREA_GROUND ||
+				polyAreas[i] == DT_POLYAREA_TRIGGER
 				//||
 				//polyAreas[i] == EDITOR_POLYAREA_GRASS ||
 				//polyAreas[i] == EDITOR_POLYAREA_ROAD
 				)
 			{
-				polyFlags[i] = DT_POLYFLAGS_WALK;
+				polyFlags[i] |= DT_POLYFLAGS_WALK;
 			}
 			//else if (polyAreas[i] == EDITOR_POLYAREA_WATER)
 			//{
 			//	polyFlags[i] = EDITOR_POLYFLAGS_SWIM;
 			//}
-			else if (polyAreas[i] == DT_POLYAREA_TRIGGER)
+
+			if (params->surfAreas &&
+				params->surfAreas[i] <= RC_POLY_SURFAREA_TOO_SMALL_THRESHOLD)
+				polyFlags[i] |= DT_POLYFLAGS_TOO_SMALL;
+
+			if (params->polys)
 			{
-				polyFlags[i] = DT_POLYFLAGS_WALK /*| EDITOR_POLYFLAGS_DOOR*/;
+				const int nvp = params->nvp;
+				const unsigned short* p = &params->polys[i*nvp*2];
+
+				for (int j = 0; j < nvp; ++j)
+				{
+					if (p[j] == RD_MESH_NULL_IDX)
+						break;
+					if ((p[nvp+j] & 0x8000) == 0)
+						continue;
+					if ((p[nvp+j] & 0xf) == 0xf)
+						continue;
+
+					polyFlags[i] |= DT_POLYFLAGS_HAS_NEIGHBOUR;
+				}
 			}
 		}
 
@@ -1148,6 +1168,7 @@ bool Editor_TempObstacles::handleBuild()
 	if (m_tool)
 		m_tool->init(this);
 	initToolStates(this);
+	invalidateNavMeshCache();
 
 	return true;
 }

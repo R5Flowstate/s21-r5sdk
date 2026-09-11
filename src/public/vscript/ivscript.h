@@ -63,6 +63,63 @@ inline const char* ScriptFieldTypeName(const int16 eType)
 
 //---------------------------------------------------------
 
+#if defined(CLIENT_DLL)
+
+// S21: no native-name / description slots; Init keeps the five-arg signature.
+struct ScriptFuncDescriptor_t
+{
+	void Init(const SQChar* scriptName, const SQChar* nativeName,
+		const SQChar* description, const SQChar* returnType,
+		const SQChar* parameters)
+	{
+		(void)nativeName;
+		(void)description;
+		m_ScriptName = scriptName;
+		m_ReturnType = returnType;
+		m_Parameters = parameters;
+	}
+
+	const SQChar* m_ScriptName;
+	const SQChar* m_ReturnType;
+	const SQChar* m_Parameters;
+};
+
+//---------------------------------------------------------
+
+struct ScriptFunctionBinding_t
+{
+	ScriptFuncDescriptor_t m_Descriptor;
+	bool m_bCheckParams;
+	bool m_bHasVariadicArgs;
+
+	const SQChar* m_pszParamMask;
+	int m_nDefaultParamCount;
+
+	ScriptDataType_t m_ReturnType;
+	CUtlVector<ScriptDataType_t> m_Parameters;
+	ScriptFunctionBindingStorageType_t m_pFunction;
+
+	void Init(
+		const SQChar* scriptName, const SQChar* nativeName,
+		const SQChar* helpString, const SQChar* returnType,
+		const SQChar* parameters, const bool isVariadic,
+		const ScriptFunctionBindingStorageType_t function)
+	{
+		m_Descriptor.Init(scriptName, nativeName, helpString, returnType, parameters);
+		m_bCheckParams = false;
+		m_bHasVariadicArgs = isVariadic;
+
+		m_pszParamMask = nullptr;
+		m_nDefaultParamCount = 0;
+
+		m_ReturnType = FIELD_NULL;
+		m_pFunction = function;
+	}
+};
+static_assert(sizeof(ScriptFunctionBinding_t) == 0x58);
+
+#else
+
 struct ScriptFuncDescriptor_t
 {
 	void Init(const SQChar* scriptName, const SQChar* nativeName,
@@ -89,11 +146,11 @@ struct ScriptFunctionBinding_t
 {
 	ScriptFuncDescriptor_t m_Descriptor;
 	bool m_bCheckParams;
-	bool m_bHasVariadicArgs; // True if we have variadic arguments (i.e. "[param1, param2, param3...]") 5th (new) parameter to 'sq_setparamscheck', see [r5apex_ds+10584F2]
+	bool m_bHasVariadicArgs; // True if we have variadic arguments (i.e. "[param1, param2, param3...]") 5th (new) parameter to 'sq_setparamscheck'
 
 	SQInteger m_nDevLevel; // TODO: confirm, this is a guess.
 	const SQChar* m_pszCodeHook;
-	int m_nCodeHookFlags; // Has a value if m_pszCodeHook != NULL, 4th (new) parameter to 'sq_setparamscheck', see [r5apex_ds+10584F2]
+	int m_nCodeHookFlags; // Has a value if m_pszCodeHook != NULL, 4th (new) parameter to 'sq_setparamscheck'
 
 	ScriptDataType_t m_ReturnType;
 	CUtlVector<ScriptDataType_t> m_Parameters;
@@ -118,6 +175,8 @@ struct ScriptFunctionBinding_t
 	}
 };
 static_assert(sizeof(ScriptFunctionBinding_t) == 0x68);
+
+#endif // CLIENT_DLL
 
 //---------------------------------------------------------
 
@@ -278,7 +337,7 @@ struct ScriptClassDescriptor_t
 
 	// Used for script functions that have their return and parameter types
 	// typed as string, these go through the type compiler in the code
-	// function CSquirrelVM::RegisterFunctionGuts().
+	// function CSquirrelVM::RegisterFunctionGuts.
 	CUtlVector<ScriptFunctionBinding_t> m_StrTypedFunctions;
 };
 

@@ -1,7 +1,8 @@
-#ifndef CLIENT_DLL
+#if defined(CLIENT_DLL)
+#else // !CLIENT_DLL
 //===========================================================================//
 //
-// Purpose:
+// Purpose
 //
 //===========================================================================//
 #include "core/stdafx.h"
@@ -9,8 +10,9 @@
 #include "tier0/frametask.h"
 #include "tier1/cvar.h"
 #include "engine/server/sv_main.h"
+#include "engine/server/zipline_validation.h"
 #include "engine/client/client.h"
-#include "networksystem/pylon.h"
+#include "networksystem/spire.h"
 #include "networksystem/bansystem.h"
 #include "server.h"
 #include "game/server/gameinterface.h"
@@ -43,14 +45,14 @@ static bool SV_GlobalCommsBansEnabled()
 	return false;
 }
 
-static void SV_HandleConnectBan(CClient* const pClient, const char* const pszReason, const char* const pszIpStr, const int nPort, const SteamID_t nSteamID)
+static void SV_HandleConnectBan(CClient* const pClient, const char* const pszReason, const char* const pszIpStr, const int nPort, const PlatformUserId_t nUserID)
 {
 	pClient->Disconnect(Reputation_t::REP_MARK_BAD, "%s", pszReason);
 	Warning(eDLL_T::SERVER, "Removed client '[%s]:%i' from slot #%i ('%llu' is banned globally!)\n",
-		pszIpStr, nPort, pClient->GetUserID(), nSteamID);
+		pszIpStr, nPort, pClient->GetUserID(), nUserID);
 }
 
-static void SV_HandleCommunicationBan(CClient* const pClient, const char* const pszReason, const char* const pszExpiry, const char* const pszIpStr, const int nPort, const SteamID_t nSteamID)
+static void SV_HandleCommunicationBan(CClient* const pClient, const char* const pszReason, const char* const pszExpiry, const char* const pszIpStr, const int nPort, const PlatformUserId_t nUserID)
 {
 	const int nUserId = pClient->GetUserID();
 	CClientExtended* const pClientExtended = pClient->GetClientExtended();
@@ -59,12 +61,12 @@ static void SV_HandleCommunicationBan(CClient* const pClient, const char* const 
 	{
 		pClient->Disconnect(Reputation_t::REP_MARK_BAD, "%s", pszReason);
 		Warning(eDLL_T::SERVER, "Removed client '[%s]:%i' from slot #%i ('%llu' is communication banned and communication bans are treated as game bans!)\n",
-			pszIpStr, nPort, nUserId, nSteamID);
+			pszIpStr, nPort, nUserId, nUserID);
 	}
 	else
 	{
 		DevMsg(eDLL_T::SERVER, "Muting client '[%s]:%i' from slot #%i ('%llu' is communication banned!)\n",
-			pszIpStr, nPort, nUserId, nSteamID);
+			pszIpStr, nPort, nUserId, nUserID);
 	}
 
 	pClientExtended->SetClientIsCommsBanned(true);
@@ -75,7 +77,7 @@ static void SV_HandleCommunicationBan(CClient* const pClient, const char* const 
 // Purpose: checks if particular client is banned on the comp server
 //-----------------------------------------------------------------------------
 void SV_CheckForBanAndDisconnect(CClient* const pClient, const string& svIPAddr,
-	const SteamID_t nSteamID, const string& svPersonaName, const int nPort)
+	const PlatformUserId_t nUserID, const string& svPersonaName, const int nPort)
 {
 	Assert(pClient != nullptr);
 
@@ -83,30 +85,30 @@ void SV_CheckForBanAndDisconnect(CClient* const pClient, const string& svIPAddr,
 	string expiry;
 	CBanSystem::Banned_t::BanType_e banType = CBanSystem::Banned_t::CONNECT;
 	
-	const bool bCompBanned = g_MasterServer.CheckForBan(svIPAddr, nSteamID, svPersonaName, svError, banType, expiry);
+	const bool bCompBanned = g_Spire.CheckForBan(svIPAddr, nUserID, svPersonaName, svError, banType, expiry);
 
 	if (bCompBanned)
 	{
-		g_TaskQueue.Dispatch([pClient, svError, svIPAddr, nSteamID, nPort, banType, expiry]
+		g_TaskQueue.Dispatch([pClient, svError, svIPAddr, nUserID, nPort, banType, expiry]
 			{
 				// Make sure client isn't already disconnected,
 				// and that if there is a valid netchannel, that
 				// it hasn't been taken by a different client by
 				// the time this task is getting executed.
 				const CNetChan* const pChan = pClient->GetNetChan();
-				if (pChan && pClient->GetSteamID() == nSteamID)
+				if (pChan && pClient->GetPlatformUserId() == nUserID)
 				{
 					switch (banType)
 					{
 					case CBanSystem::Banned_t::CONNECT:
 					{
-						SV_HandleConnectBan(pClient, svError.c_str(), svIPAddr.c_str(), nPort, nSteamID);
+						SV_HandleConnectBan(pClient, svError.c_str(), svIPAddr.c_str(), nPort, nUserID);
 						break;
 					}
 					case CBanSystem::Banned_t::COMMUNICATION:
 					{
 						if(SV_GlobalCommsBansEnabled())
-							SV_HandleCommunicationBan(pClient, svError.c_str(), expiry.c_str(), svIPAddr.c_str(), nPort, nSteamID);
+							SV_HandleCommunicationBan(pClient, svError.c_str(), expiry.c_str(), svIPAddr.c_str(), nPort, nUserID);
 						break;
 					default:
 						break;
@@ -124,7 +126,7 @@ void SV_ProcessBulkCheck(const CBanSystem::BannedList_t* const pBannedVec)
 {
 	CBanSystem::BannedList_t* outBannedVec = nullptr;
 
-	if (!g_MasterServer.GetBannedList(*pBannedVec, &outBannedVec))
+	if (!g_Spire.GetBannedList(*pBannedVec, &outBannedVec))
 		return;
 
 	g_TaskQueue.Dispatch([outBannedVec]
@@ -136,7 +138,7 @@ void SV_ProcessBulkCheck(const CBanSystem::BannedList_t* const pBannedVec)
 
 //-----------------------------------------------------------------------------
 // Purpose: creates a snapshot of the currently connected clients
-// Input  : *pBannedVec - if passed, will check for bans and kick the clients
+// Input: *pBannedVec - if passed, will check for bans and kick the clients
 //-----------------------------------------------------------------------------
 void SV_CheckClientsForBan(const CBanSystem::BannedList_t* const pBannedVec /*= nullptr*/)
 {
@@ -168,13 +170,13 @@ void SV_CheckClientsForBan(const CBanSystem::BannedList_t* const pBannedVec /*= 
 			continue;
 
 		const char* const szIPAddr = pNetChan->GetAddress(true);
-		const SteamID_t nSteamID = pClient->GetSteamID();
+		const PlatformUserId_t nUserID = pClient->GetPlatformUserId();
 
 		// If no banned list was provided, build one with all clients
 		// on the server. This will be used for bulk checking so live
 		// bans could be performed, as this function is called periodically.
 		if (bannedVec)
-			bannedVec->AddToTail(CBanSystem::Banned_t(szIPAddr, nSteamID));
+			bannedVec->AddToTail(CBanSystem::Banned_t(szIPAddr, nUserID));
 		else
 		{
 			// Check if current client is within provided banned list, and
@@ -184,7 +186,7 @@ void SV_CheckClientsForBan(const CBanSystem::BannedList_t* const pBannedVec /*= 
 				const CBanSystem::Banned_t& banned = (*pBannedVec)[i];
 
 				//If this ban isnt for this client then we check the next
-				if (banned.m_SteamID != pClient->GetSteamID())
+				if (banned.m_UserID != pClient->GetPlatformUserId())
 					continue;
 
 				const int nPort = pNetChan->GetPort();
@@ -194,14 +196,14 @@ void SV_CheckClientsForBan(const CBanSystem::BannedList_t* const pBannedVec /*= 
 				{
 				case CBanSystem::Banned_t::CONNECT:
 				{
-					SV_HandleConnectBan(pClient, banned.m_Address.String(), szIPAddr, nPort, nSteamID);
+					SV_HandleConnectBan(pClient, banned.m_Address.String(), szIPAddr, nPort, nUserID);
 					break;
 				}
 				case CBanSystem::Banned_t::COMMUNICATION:
 				{
 					//Does the host have the comms ban system on and is our client already banned, no point rebanning them if they are
 					if (SV_GlobalCommsBansEnabled() && (!pClient->GetClientExtended()->IsClientCommsBanned() || sv_commsBansAreGameBans.GetBool()))
-						SV_HandleCommunicationBan(pClient, banned.m_Address.String(), banned.m_BanExpiry.Get(), szIPAddr, nPort, nSteamID);
+						SV_HandleCommunicationBan(pClient, banned.m_Address.String(), banned.m_BanExpiry.Get(), szIPAddr, nPort, nUserID);
 					break;
 				}
 				//Unknown ban type
@@ -246,7 +248,7 @@ static string SV_HashPasswordTag(const char* const pszPassword)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: loads the game .dll
+// Purpose: loads the game.dll
 //-----------------------------------------------------------------------------
 void SV_InitGameDLL()
 {
@@ -272,11 +274,62 @@ void SV_ShutdownGameDLL()
 
 //-----------------------------------------------------------------------------
 // Purpose: activates the server
-// Output : true on success, false on failure
+// Output: true on success, false on failure
 //-----------------------------------------------------------------------------
 bool SV_ActivateServer()
 {
-	return v_SV_ActivateServer();
+	// Materialize ziprail chains before the original builds baselines.
+	ZiprailDedi_MaterializeAllPending("SV_ActivateServer");
+
+	const bool ret = v_SV_ActivateServer();
+
+	// Dump stored instance-baseline blobs after SV_CreateBaseline.
+	static bool s_ibDumpedDedi = false;
+	if (!s_ibDumpedDedi && g_pServer)
+	{
+		s_ibDumpedDedi = true;
+		__try
+		{
+			INetworkStringTable* const ib = g_pServer->GetInstanceBaselineTable();
+			if (ib)
+			{
+				const int nStrings = ib->GetNumStrings();
+				Warning(eDLL_T::SERVER, "[IB-DUMP-DEDI] instancebaseline numStrings=%d\n", nStrings);
+				for (int i = 0; i < nStrings && i < 256; ++i)
+				{
+					const char* const key = ib->GetString(i);
+					int len = 0;
+					const uint8_t* const ud = reinterpret_cast<const uint8_t*>(ib->GetStringUserData(i, &len));
+					// len units (bits vs bytes) unknown across engines; clamp the
+					// hex byte count to (len+7)/8 so a small blob is never over-read.
+					int dn = (len > 0) ? (len + 7) / 8 : 0;
+					if (dn > 32) dn = 32;
+					char hex[3 * 32 + 1] = {};
+					if (ud)
+					{
+						for (int b = 0; b < dn; ++b)
+						{
+							char t[4];
+							snprintf(t, sizeof(t), "%02X ", ud[b]);
+							strcat_s(hex, sizeof(hex), t);
+						}
+					}
+					Warning(eDLL_T::SERVER, "[IB-DUMP-DEDI] [%3d] key='%s' len=%d hex: %s\n",
+						i, key ? key : "?", len, hex);
+				}
+			}
+			else
+			{
+				Warning(eDLL_T::SERVER, "[IB-DUMP-DEDI] instancebaseline table NULL\n");
+			}
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			Warning(eDLL_T::SERVER, "[IB-DUMP-DEDI] exception dumping baselines\n");
+		}
+	}
+
+	return ret;
 }
 
 //-----------------------------------------------------------------------------
@@ -332,11 +385,9 @@ void SV_BroadcastVoiceData(CClient* const cl, const int nBytes, char* const data
 		if (pClient->GetTeamNum() != cl->GetTeamNum() && !sv_alltalk->GetBool())
 			continue;
 
-		//if (voice_noxplat->GetBool() && cl->GetXPlatID() != pClient->GetXPlatID())
-		//{
-		//	if ((cl->GetXPlatID() -1) > 1 || (pClient->GetXPlatID() -1) > 1)
-		//		continue;
-		//}
+		//if (voice_noxplat->GetBool && cl->GetXPlatID != pClient->GetXPlatID)
+		//	if ((cl->GetXPlatID -1) > 1 || (pClient->GetXPlatID -1) > 1)
+		// continue;
 
 		CNetChan* const pNetChan = pClient->GetNetChan();
 
@@ -361,7 +412,8 @@ void SV_BroadcastDurangoVoiceData(CClient* const cl, const int nBytes, char* con
 	const bool bShouldApplyGlobalMutes = SV_ShouldApplyVoiceChatGlobalMutes();
 	const bool bBannedClientsCanHearOtherClients = sv_commsBannedClientsCanReceiveComms.GetBool();
 
-	SVC_DurangoVoiceData voiceData(cl->GetUserID(), nBytes, data, unknown, useVoiceStream);
+	(void)useVoiceStream;
+	SVC_DurangoVoiceData voiceData(cl->GetUserID(), nBytes, data, unknown, true);
 
 	for (int i = 0; i < gpGlobals->maxClients; i++)
 	{
@@ -393,29 +445,22 @@ void SV_BroadcastDurangoVoiceData(CClient* const cl, const int nBytes, char* con
 			continue;
 		}
 
-		// NOTE: xplat code checks disabled; CClient::GetXPlatID() seems to be
+		// NOTE: xplat code checks disabled; CClient::GetXPlatID seems to be
 		// an enumeration of platforms, but the enum hasn't been reversed yet.
-		//if (voice_noxplat->GetBool() && cl->GetXPlatID() != pClient->GetXPlatID())
-		//{
-		//	if ((cl->GetXPlatID() - 1) > 1 || (pClient->GetXPlatID() - 1) > 1)
-		//		continue;
-		//}
+		//if (voice_noxplat->GetBool && cl->GetXPlatID != pClient->GetXPlatID)
+		//	if ((cl->GetXPlatID - 1) > 1 || (pClient->GetXPlatID - 1) > 1)
+		// continue;
 
 		CNetChan* const pNetChan = pClient->GetNetChan();
 
 		if (!pNetChan)
 			continue;
 
-		// NOTE: the game appears to have the ability to use the unreliable
-		// stream as well, but the condition to hit that code path can never
-		// evaluate to true - appears to be a compile time option that hasn't
-		// been fully optimized away? For now only switch between voice and
-		// reliable streams as that is what the original code does.
-		const bf_write& stream = useVoiceStream ? pNetChan->GetStreamVoice() : pNetChan->GetStreamReliable();
+		const bf_write& stream = pNetChan->GetStreamVoice();
 
 		// if stream has enough space for new data
 		if (stream.GetNumBitsLeft() >= 8 * nBytes + 34)
-			pClient->SendNetMsgEx(&voiceData, false, !useVoiceStream, useVoiceStream);
+			pClient->SendNetMsgEx(&voiceData, false, false, true);
 	}
 }
-#endif // !CLIENT_DLL
+#endif // CLIENT_DLL

@@ -36,22 +36,9 @@ int CAI_Manager::NumAIs()
 
 //-------------------------------------
 
-void CAI_Manager::AddAI(CAI_BaseNPC* pAI)
-{
-	AUTO_LOCK(m_Mutex);
-	m_AIs.AddToTail(pAI);
-}
 
 //-------------------------------------
 
-void CAI_Manager::RemoveAI(CAI_BaseNPC* pAI)
-{
-	AUTO_LOCK(m_Mutex);
-	const int i = m_AIs.Find(pAI);
-
-	if (i != -1)
-		m_AIs.FastRemove(i);
-}
 
 //-----------------------------------------------------------------------------
 

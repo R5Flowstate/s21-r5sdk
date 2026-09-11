@@ -10,7 +10,7 @@ typedef uint16_t edict_t;
 
 //-----------------------------------------------------------------------------
 // Purpose: Defines the ways that a map can be loaded.
-// Note   : Only seems to get set and checked on 0 and 2: [r5apex_ds.exe + d55990d] for more details.
+// Note: Only seems to get set and checked on 0 and 2: [r5apex_ds.exe + d55990d] for more details.
 //-----------------------------------------------------------------------------
 enum MapLoadType_t
 {
@@ -19,7 +19,7 @@ enum MapLoadType_t
 };
 
 //-----------------------------------------------------------------------------
-// Purpose: Global variables shared between the engine and the game .dll
+// Purpose: Global variables shared between the engine and the game.dll
 //-----------------------------------------------------------------------------
 class CGlobalVars : public CGlobalVarsBase
 {
@@ -31,9 +31,9 @@ public:
 	MapLoadType_t   eLoadType;      // How the current map was loaded.
 	bool            bMapLoadFailed; // Map has failed to load, we need to kick back to the main menu (unused?).
 
-	int64_t*        m_pEdicts;        // r5apex_ds.exe 'CBaseServer::Clear() + 0x7E'
-	void*           m_pUnk1;          // r5apex_ds.exe 'CBaseServer::Clear() + 0x93'
-	void*           m_pUnk2;          // r5apex_ds.exe 'CServer::FrameJob()  + 0x20'
+	int64_t*        m_pEdicts;        // r5apex_ds.exe 'CBaseServer::Clear + 0x7E'
+	void*           m_pUnk1;          // r5apex_ds.exe 'CBaseServer::Clear + 0x93'
+	void*           m_pUnk2;          // r5apex_ds.exe 'CServer::FrameJob + 0x20'
 	void*           m_pUnk3;
 }; // Size 0x0098
 static_assert(sizeof(CGlobalVars) == 0x98);

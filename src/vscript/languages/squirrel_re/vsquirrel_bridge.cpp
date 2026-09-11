@@ -99,7 +99,7 @@ void CSquirrelVMBridge::StackPushObject(HSQUIRRELVM v, HSQOBJECT obj)
 
 void CSquirrelVMBridge::StackPushNull(HSQUIRRELVM v)
 {
-	v->PushNull();
+	return sq_pushnull(v);
 }
 
 SQInteger CSquirrelVMBridge::StackGetTop(HSQUIRRELVM v)

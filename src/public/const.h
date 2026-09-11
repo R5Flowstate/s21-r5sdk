@@ -1,6 +1,6 @@
 //===== Copyright (c) 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -61,11 +61,11 @@ enum MoveType_t
 	MOVETYPE_NOCLIP,        // No gravity, no collisions, still do velocity/avelocity
 	MOVETYPE_OBSERVER,      // Observer movement, depends on player's observer mode
 	MOVETYPE_CUSTOM,        // Allows the entity to describe its own physics
-	MOVETYPE_TRAVERSE,      // ?
+	MOVETYPE_TRAVERSE,
 	MOVETYPE_RODEO,         // Currently rodeo'ing.
-	MOVETYPE_OPERATOR,      // ?
+	MOVETYPE_OPERATOR,
 	MOVETYPE_MELEE_LUNGE,   // Currently in melee lunge
-	MOVETYPE_ZEROG          // ?
+	MOVETYPE_ZEROG
 };
 
 inline const char* const g_GameDllTargets[] = {

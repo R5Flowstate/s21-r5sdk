@@ -1,6 +1,6 @@
-﻿//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -36,7 +36,7 @@
 
 
 //-----------------------------------------------------------------------------
-// The CUtlMemory class:
+// The CUtlMemory class
 // A growable memory class which doubles in size by default.
 //-----------------------------------------------------------------------------
 template< class T, class I = ssize_t >
@@ -123,10 +123,8 @@ public:
 	// Purge all but the given number of elements
 	void Purge(ssize_t numElements);
 
-	// is the memory externally allocated?
 	bool IsExternallyAllocated() const;
 
-	// is the memory read only?
 	bool IsReadOnly() const;
 
 	// Set the size by which the memory grows
@@ -161,7 +159,7 @@ protected:
 
 
 //-----------------------------------------------------------------------------
-// The CUtlMemory class:
+// The CUtlMemory class
 // A growable memory class which doubles in size by default.
 //-----------------------------------------------------------------------------
 template< class T, size_t SIZE, class I = ssize_t >
@@ -205,7 +203,7 @@ private:
 };
 
 //-----------------------------------------------------------------------------
-// The CUtlMemoryFixed class:
+// The CUtlMemoryFixed class
 // A fixed memory class
 //-----------------------------------------------------------------------------
 template< typename T, size_t SIZE, ssize_t nAlignment = 0 >
@@ -252,7 +250,6 @@ public:
 	// Purge all but the given number of elements (NOT IMPLEMENTED IN CUtlMemoryFixed)
 	void Purge(ssize_t numElements) { Assert(0); }
 
-	// is the memory externally allocated?
 	bool IsExternallyAllocated() const { return false; }
 
 	// Set the size by which the memory grows
@@ -282,7 +279,7 @@ private:
 #endif
 
 //-----------------------------------------------------------------------------
-// The CUtlMemoryConservative class:
+// The CUtlMemoryConservative class
 // A dynamic memory class that tries to minimize overhead (itself small, no custom grow factor)
 //-----------------------------------------------------------------------------
 template< typename T >
@@ -374,7 +371,6 @@ public:
 	// Purge all but the given number of elements
 	void Purge(ssize_t numElements) { ReAlloc(numElements * sizeof(T)); }
 
-	// is the memory externally allocated?
 	bool IsExternallyAllocated() const { return false; }
 
 	// Set the size by which the memory grows
@@ -473,7 +469,7 @@ CUtlMemory<T, I>& CUtlMemory<T, I>::operator=(CUtlMemory&& moveFrom)
 	moveFrom.m_nAllocationCount = 0;
 	moveFrom.m_nGrowSize = 0;
 
-	// If this is a self-assignment, Purge() is a no-op here
+	// If this is a self-assignment, Purge is a no-op here
 	Purge();
 
 	m_pMemory = pMemory;
@@ -633,7 +629,6 @@ inline const T& CUtlMemory<T, I>::Element(I i) const
 
 
 //-----------------------------------------------------------------------------
-// is the memory externally allocated?
 //-----------------------------------------------------------------------------
 template< class T, class I >
 bool CUtlMemory<T, I>::IsExternallyAllocated() const
@@ -643,7 +638,6 @@ bool CUtlMemory<T, I>::IsExternallyAllocated() const
 
 
 //-----------------------------------------------------------------------------
-// is the memory read only?
 //-----------------------------------------------------------------------------
 template< class T, class I >
 bool CUtlMemory<T, I>::IsReadOnly() const
@@ -872,7 +866,7 @@ void CUtlMemory<T, I>::Purge(ssize_t numElements)
 		return;
 	}
 
-	// If we have zero elements, simply do a purge:
+	// If we have zero elements, simply do a purge
 	if (numElements == 0)
 	{
 		Purge();
@@ -911,7 +905,7 @@ void CUtlMemory<T, I>::Purge(ssize_t numElements)
 }
 
 //-----------------------------------------------------------------------------
-// The CUtlMemory class:
+// The CUtlMemory class
 // A growable memory class which doubles in size by default.
 //-----------------------------------------------------------------------------
 template< class T, ssize_t nAlignment >

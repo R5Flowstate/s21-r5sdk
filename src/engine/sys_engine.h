@@ -12,7 +12,9 @@ extern IEngine::QuitState_t* gsm_Quitting;
 class CEngine : public IEngine
 {
 public:
+#ifndef CLIENT_DLL
 	static bool _Frame(CEngine* const thisp);
+#endif
 	inline IEngine::QuitState_t GetQuitting() const { return *gsm_Quitting; }
 
 private:
@@ -30,10 +32,7 @@ private:
 };
 static_assert(sizeof(CEngine) == 0x40);
 
-///////////////////////////////////////////////////////////////////////////////
-
-///////////////////////////////////////////////////////////////////////////////
-
+#ifndef CLIENT_DLL
 ///////////////////////////////////////////////////////////////////////////////
 class VEngine : public IDetour
 {
@@ -56,3 +55,4 @@ class VEngine : public IDetour
 	virtual void Detour(const bool bAttach) const;
 };
 ///////////////////////////////////////////////////////////////////////////////
+#endif // !CLIENT_DLL

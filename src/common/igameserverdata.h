@@ -38,6 +38,12 @@ struct ConnectedNetConsoleData_s
 	bool validated;        // Revalidates netconsole if false.
 	bool authorized;       // Set to true after successful netconsole auth.
 	bool inputOnly;        // If set, don't send spew to this netconsole.
+	bool peerIsServer;     // True when the remote end of this connection is the RCON server.
+	u64 sendSeqNr;         // Sequence number stamped on the next frame we send.
+	u64 recvSeqNr;         // Sequence number of the last frame accepted from the peer.
+	u64 sendSessionId;     // Random id identifying our half of this connection.
+	u64 recvSessionId;     // Peer's session id, latched from its first accepted frame.
+	bool recvSessionKnown; // False until recvSessionId has been latched.
 	NetConFrameHeader_s frameHeader; // Current frame header.
 	vector<byte> recvBuffer;
 
@@ -51,6 +57,12 @@ struct ConnectedNetConsoleData_s
 		validated = false;
 		authorized = false;
 		inputOnly = true;
+		peerIsServer = false;
+		sendSeqNr = 1;
+		recvSeqNr = 0;
+		sendSessionId = 0;
+		recvSessionId = 0;
+		recvSessionKnown = false;
 		frameHeader.magic = 0;
 		frameHeader.length = 0;
 	}
@@ -58,11 +70,11 @@ struct ConnectedNetConsoleData_s
 
 /* PACKET FORMAT **********************************
 
-REQUEST:
+REQUEST
   NetConFrameHeader_s header;
   byte* data;
 
-RESPONSE:
+RESPONSE
   NetConFrameHeader_s header;
   byte* data;
 

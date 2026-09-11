@@ -12,7 +12,6 @@ add_sources( SOURCE_GROUP "Core"
     "${ENGINE_SOURCE_DIR}/core/logger.h"
     "${ENGINE_SOURCE_DIR}/core/termutil.cpp"
     "${ENGINE_SOURCE_DIR}/core/termutil.h"
-    "${ENGINE_SOURCE_DIR}/tier0/plat_time.cpp"
 )
 
 add_sources( SOURCE_GROUP "Engine"

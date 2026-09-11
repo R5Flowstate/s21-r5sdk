@@ -1,4 +1,4 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: - defines SIMD "structure of arrays" classes and functions.
 //
@@ -563,7 +563,7 @@ public:
 		y = LoadAlignedSIMD(b);
 		z = LoadAlignedSIMD(c);
 		w = LoadAlignedSIMD(d);
-		// now, matrix is:
+		// now, matrix is
 		// x y z w
 		// x y z w
 		// x y z w
@@ -605,7 +605,7 @@ public:
 		y = LoadAlignedSIMD(qs++);
 		z = LoadAlignedSIMD(qs++);
 		w = LoadAlignedSIMD(qs++);
-		// now, matrix is:
+		// now, matrix is
 		// x y z w
 		// x y z w
 		// x y z w
@@ -961,7 +961,7 @@ void QuaternionScale( const Quaternion &p, float t, Quaternion &q )
 	else
 	q.w = r;
 
-	Assert( q.IsValid() );
+	Assert( q.IsValid );
 
 	return;
 }
@@ -1070,76 +1070,15 @@ FORCEINLINE FourQuaternions FourQuaternions::Slerp(const FourQuaternions& origin
 	// yet if we need to realign, so compute them both -- there's plenty of
 	// space in the bubbles. They're roomy, those bubbles.
 	fltx4 cosineOmega;
-#if 0 // Maybe I don't need to do alignment separately, using the xb360 technique...
-	FourQuaternions to;
-	{
-		fltx4 diffs[4], sums[4], originalToNeg[4];
-		fltx4 dotIfAligned, dotIfNotAligned;
-
-		// compute negations of the TO quaternion.
-		originalToNeg[0] = NegSIMD(originalto.x);
-		originalToNeg[1] = NegSIMD(originalto.y);
-		originalToNeg[2] = NegSIMD(originalto.z);
-		originalToNeg[3] = NegSIMD(originalto.w);
-
-		dotIfAligned = MulSIMD(x, originalto.x);
-		dotIfNotAligned = MulSIMD(x, originalToNeg[0]);
-
-		diffs[0] = SubSIMD(x, originalto.x);
-		diffs[1] = SubSIMD(y, originalto.y);
-		diffs[2] = SubSIMD(z, originalto.z);
-		diffs[3] = SubSIMD(w, originalto.w);
-
-		sums[0] = AddSIMD(x, originalto.x);
-		sums[1] = AddSIMD(y, originalto.y);
-		sums[2] = AddSIMD(z, originalto.z);
-		sums[3] = AddSIMD(w, originalto.w);
-
-		dotIfAligned = MaddSIMD(y, originalto.y, dotIfAligned);
-		dotIfNotAligned = MaddSIMD(y, originalToNeg[1], dotIfNotAligned);
-
-		fltx4 diffsDot, sumsDot;
-
-		diffsDot = MulSIMD(diffs[0], diffs[0]); // x^2
-		sumsDot = MulSIMD(sums[0], sums[0]); // x^2
-			// do some work on the dot products while letting the multiplies cook
-		dotIfAligned = MaddSIMD(z, originalto.z, dotIfAligned);
-		dotIfNotAligned = MaddSIMD(z, originalToNeg[2], dotIfNotAligned);
-
-		diffsDot = MaddSIMD(diffs[1], diffs[1], diffsDot); // x^2 + y^2 
-		sumsDot = MaddSIMD(sums[1], sums[1], sumsDot);
-		diffsDot = MaddSIMD(diffs[2], diffs[2], diffsDot); // x^2 + y^2 + z^2
-		sumsDot = MaddSIMD(sums[2], sums[2], sumsDot);
-		diffsDot = MaddSIMD(diffs[3], diffs[3], diffsDot); // x^2 + y^2 + z^2 + w^2
-		sumsDot = MaddSIMD(sums[3], sums[3], sumsDot);
-		// do some work on the dot products while letting the multiplies cook
-		dotIfAligned = MaddSIMD(w, originalto.w, dotIfAligned);
-		dotIfNotAligned = MaddSIMD(w, originalToNeg[3], dotIfNotAligned);
-
-		// are the differences greater than the sums?
-		// if so, we need to negate that quaternion
-		fltx4 mask = CmpGtSIMD(diffsDot, sumsDot); // 1 for diffs>0 and 0 elsewhere
-		to.x = MaskedAssign(mask, originalToNeg[0], originalto.x);
-		to.y = MaskedAssign(mask, originalToNeg[1], originalto.y);
-		to.z = MaskedAssign(mask, originalToNeg[2], originalto.z);
-		to.w = MaskedAssign(mask, originalToNeg[3], originalto.w);
-
-		cosineOmega = MaskedAssign(mask, dotIfNotAligned, dotIfAligned);
-	}
-
-	// right, now to is aligned to be the short way round, and we computed
-	// the dot product while we were figuring all that out.
-#else
 	const FourQuaternions& to = originalto;
 	cosineOmega = MulSIMD(x, to.x);
 	cosineOmega = MaddSIMD(y, to.y, cosineOmega);
 	cosineOmega = MaddSIMD(z, to.z, cosineOmega);
 	cosineOmega = MaddSIMD(w, to.w, cosineOmega);
-#endif
 
 	fltx4 Zero = Four_Zeros;
 	bi32x4 cosOmegaLessThanZero = CmpLtSIMD(cosineOmega, Zero);
-	// fltx4 shouldNegate = MaskedAssign(cosOmegaLessThanZero, Four_NegativeOnes , Four_Ones );
+	// fltx4 shouldNegate = MaskedAssign(cosOmegaLessThanZero, Four_NegativeOnes, Four_Ones );
 	fltx4 signMask = LoadAlignedSIMD((float*)g_SIMD_signmask); // contains a one in the sign bit -- xor against a number to negate it
 	fltx4 sinOmega = Four_Ones;
 
@@ -1154,11 +1093,11 @@ FORCEINLINE FourQuaternions FourQuaternions::Slerp(const FourQuaternions& origin
 	fltx4 invSinOmega = ReciprocalSqrtSIMD(sinOmega);  // 1/sin(t)
 	sinOmega = MulSIMD(sinOmega, invSinOmega); // = sin^2(t) / sin(t) = sin(t)
 
-	// use the arctangent technique to work out omega from  tan^-1(sin/cos)
+	// use the arctangent technique to work out omega from tan^-1(sin/cos)
 	fltx4 omega = ArcTan2SIMD(sinOmega, cosineOmega);
 
 	// alpha = sin(omega * (1-T))/sin(omega)
-	// beta  = sin(omega * T)/sin(omega)
+	// beta = sin(omega * T)/sin(omega)
 	fltx4 alpha = MulSIMD(omega, oneMinusT);  // w(1-T)
 	fltx4 beta = MulSIMD(omega, t);		  // w(T)
 	signMask = MaskedAssign(cosOmegaLessThanZero, signMask, Zero);
@@ -1222,11 +1161,11 @@ FORCEINLINE FourQuaternions FourQuaternions::SlerpNoAlign(const FourQuaternions&
 	fltx4 invSinOmega = ReciprocalSqrtSIMD(sinOmega);  // 1/sin(t)
 	sinOmega = MulSIMD(sinOmega, invSinOmega); // = sin^2(t) / sin(t) = sin(t)
 
-	// use the arctangent technique to work out omega from  tan^-1(sin/cos)
+	// use the arctangent technique to work out omega from tan^-1(sin/cos)
 	fltx4 omega = ArcTan2SIMD(sinOmega, cosineOmega);
 
 	// alpha = sin(omega * (1-T))/sin(omega)
-	// beta  = sin(omega * T)/sin(omega)
+	// beta = sin(omega * T)/sin(omega)
 	fltx4 alpha = MulSIMD(omega, oneMinusT);  // w(1-T)
 	fltx4 beta = MulSIMD(omega, t);		  // w(T)
 	alpha = SinSIMD(alpha);  // sin(w(1-T))
@@ -1251,7 +1190,7 @@ FORCEINLINE FourQuaternions FourQuaternions::SlerpNoAlign(const FourQuaternions&
 	return ret;
 }
 
-/***** removed because one of the SWIG permutations doesn't include ssequaternion.h, causing a missing symbol on this function:
+/***** removed because one of the SWIG permutations doesn't include ssequaternion.h, causing a missing symbol on this function
 inline void FourVectors::RotateBy( const FourQuaternions &quats )
 {
 	quats.RotateFourVectors( this );

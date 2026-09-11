@@ -1,8 +1,8 @@
 //===== Copyright (c) 1996-2005, Valve Corporation, All rights reserved. =====//
 //
-// Purpose: 
+// Purpose
 //
-// $Workfile:     $
+// $Workfile: $
 // $NoKeywords: $
 //===========================================================================//
 #ifndef ENGINE_MODELINFO_H

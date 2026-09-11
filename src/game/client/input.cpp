@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: 
+// Purpose
 //
 //=============================================================================//
 #include "input.h"
@@ -19,7 +19,3 @@ void CInput::VSetCustomWeaponActivity(CInput* pInput, sharedactivity_e weaponAct
 	v_CInput__SetCustomWeaponActivity(pInput, weaponActivity);
 }
 
-void VInput::Detour(const bool bAttach) const
-{
-	DetourSetup(&v_CInput__SetCustomWeaponActivity, CInput::VSetCustomWeaponActivity, bAttach);
-}

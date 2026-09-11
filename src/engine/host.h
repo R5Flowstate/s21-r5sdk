@@ -1,9 +1,8 @@
 #pragma once
 #include "engine/gl_model_private.h"
 
-inline void(*v_Host_RunFrame)(void* unused, float time);
+inline void(*v_Host_RunFrame)(double realtime, float dt);
 inline void(*v_Host_RunFrame_Render)(void);
-inline void(*v_Host_CountRealTimePackets)(void);
 inline bool(*v_Host_ShouldRun)();
 inline void(*v_Host_Error)(const char* error, ...);
 //inline void(*v_VCR_EnterPausedState)(void);
@@ -46,7 +45,7 @@ public:
 	float					interval_per_tick;
 	// 1, unless a game supports split screen, then probably 2 or 4 (4 is the max allowable)
 	int						max_splitscreen_players;
-	// This is the # the client .dll thinks is the max, it might be > max_splitscreen_players in -tools mode, etc.
+	// This is the # the client.dll thinks is the max, it might be > max_splitscreen_players in -tools mode, etc.
 	int						max_splitscreen_players_clientdll;
 	void					SetWorldModel(model_t* pModel);
 };
@@ -56,6 +55,7 @@ extern CCommonHostState* g_pCommonHostState;
 #define HOST_TIME_TO_TICKS( dt )		( (int)( 0.5f + (float)(dt) / g_pCommonHostState->interval_per_tick ) )
 #define HOST_TICKS_TO_TIME( dt )		( g_pCommonHostState->interval_per_tick * (float)(dt) )
 
+#ifndef CLIENT_DLL
 ///////////////////////////////////////////////////////////////////////////////
 class VHost : public IDetour
 {
@@ -63,10 +63,8 @@ class VHost : public IDetour
 	{
 		LogFunAdr("_Host_RunFrame", v_Host_RunFrame);
 		LogFunAdr("_Host_RunFrame_Render", v_Host_RunFrame_Render);
-		LogFunAdr("Host_CountRealTimePackets", v_Host_CountRealTimePackets);
 		LogFunAdr("Host_ShouldRun", v_Host_ShouldRun);
 		LogFunAdr("Host_Error", v_Host_Error);
-		//LogFunAdr("VCR_EnterPausedState", v_VCR_EnterPausedState);
 		LogVarAdr("g_CommonHostState", g_pCommonHostState);
 		LogVarAdr("g_bAbortServerSet", g_bAbortServerSet);
 		LogVarAdr("g_bDedicatedServerBenchmarkMode", g_bDedicatedServerBenchmarkMode);
@@ -82,10 +80,8 @@ class VHost : public IDetour
 	{
 		Module_FindPattern(g_GameDll, "48 8B C4 48 89 58 18 48 89 70 20 F3 0F 11 48 ??").GetPtr(v_Host_RunFrame);
 		Module_FindPattern(g_GameDll, "40 53 48 83 EC 20 48 8B 0D ?? ?? ?? ?? 48 85 C9 75 34").GetPtr(v_Host_RunFrame_Render);
-		Module_FindPattern(g_GameDll, "40 53 48 83 EC 30 65 48 8B 04 25 ?? ?? ?? ?? 33 DB").GetPtr(v_Host_CountRealTimePackets);
 		Module_FindPattern(g_GameDll, "48 83 EC 28 48 8B 05 ?? ?? ?? ?? 83 78 6C 00 75 07 B0 01").GetPtr(v_Host_ShouldRun);
 		Module_FindPattern(g_GameDll, "48 89 4C 24 ?? 48 89 54 24 ?? 4C 89 44 24 ?? 4C 89 4C 24 ?? 53 57 48 81 EC ?? ?? ?? ??").GetPtr(v_Host_Error);
-		//Module_FindPattern(g_GameDll, "40 53 48 83 EC 20 65 48 8B 04 25 ?? ?? ?? ?? BB ?? ?? ?? ?? C6 05 ?? ?? ?? ?? ??").GetPtr(v_VCR_EnterPausedState);
 	}
 	virtual void GetVar(void) const
 	{
@@ -111,3 +107,4 @@ class VHost : public IDetour
 	virtual void Detour(const bool bAttach) const;
 };
 ///////////////////////////////////////////////////////////////////////////////
+#endif // !CLIENT_DLL

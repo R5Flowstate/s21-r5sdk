@@ -1,4 +1,9 @@
 #pragma once
+//=============================================================================//
+//
+// Purpose: In-game top bar UI
+//
+//=============================================================================//
 #ifndef DEDICATED
 #include "common/sdkdefs.h"
 #include "imgui_surface.h"
@@ -25,7 +30,7 @@ public:
 	inline void SetUnlockMouse(const bool unlock)
 	{
 		m_unlockMouse = unlock;
-		m_activated = unlock; // drive input capture via IsSurfaceActive()
+		m_activated = unlock; // drive input capture via IsSurfaceActive
 		m_requestCloseMenus = true; // close any open sub menus on toggle
 	}
 	inline bool IsMouseUnlocked() const { return m_unlockMouse; }

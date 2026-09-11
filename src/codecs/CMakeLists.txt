@@ -1,56 +1,49 @@
 cmake_minimum_required( VERSION 3.16 )
-add_module( "lib" "codecs" "vpc" ${FOLDER_CONTEXT} TRUE TRUE )
 
-start_sources()
+# Dual product: codecs (server) + codecs_cl (client inject, CLIENT_DLL for
+# strict dual-body Miles/client audio path).
+macro( add_codecs_lib LIB_NAME )
+	add_module( "lib" ${LIB_NAME} "vpc" ${FOLDER_CONTEXT} TRUE TRUE )
 
-add_sources( SOURCE_GROUP "Bink"
-    "bink/bink_impl.cpp"
-    "bink/bink_impl.h"
-)
+	start_sources()
 
-add_sources( SOURCE_GROUP "Miles"
-    "miles/miles_impl.cpp"
-    "miles/miles_impl.h"
-    "miles/miles_shim.cpp"
-    "miles/miles_shim.h"
-    "miles/miles_types.h" # TODO[ AMOS ]: move to public!
-    "miles/radshal_wasapi.h"
-)
+	add_sources( SOURCE_GROUP "Bink"
+		"bink/bink_impl.cpp"
+		"bink/bink_impl.h"
+	)
 
-add_sources( SOURCE_GROUP "FMod"
-    "fmod/audio_backend.h"
-    "fmod/studio_backend.cpp"
-    "fmod/audio_backend_state.cpp"
-)
+	add_sources( SOURCE_GROUP "Miles"
+		"miles/miles_types.h"
+	)
 
-add_sources( SOURCE_GROUP "Public"
-    "${ENGINE_SOURCE_DIR}/public/avi/iavi.h"
-    "${ENGINE_SOURCE_DIR}/public/avi/ibik.h"
-)
+	if( ${LIB_NAME} STREQUAL "codecs_cl" )
+		add_sources( SOURCE_GROUP "Miles"
+			"miles/miles_banklist.cpp"
+			"miles/miles_banklist.h"
+		)
+	endif()
 
-end_sources()
+	# FMOD disabled for S21 -- Miles only (fmodstudio.dll LoadLibrary 0x7E trap).
 
-target_include_directories( ${PROJECT_NAME} PRIVATE "${ENGINE_SOURCE_DIR}/tier0/" "${ENGINE_SOURCE_DIR}/tier1/" )
-target_link_libraries( ${PROJECT_NAME} PRIVATE "winmm.lib" )
+	add_sources( SOURCE_GROUP "Public"
+		"${ENGINE_SOURCE_DIR}/public/avi/iavi.h"
+		"${ENGINE_SOURCE_DIR}/public/avi/ibik.h"
+	)
 
-target_include_directories( ${PROJECT_NAME} PRIVATE "${ENGINE_SOURCE_DIR}/thirdparty/fmod/inc" )
+	end_sources()
 
-if (CMAKE_SIZEOF_VOID_P EQUAL 8)
-    set(FMOD_ARCH_DIR "x64")
-elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
-    set(FMOD_ARCH_DIR "x86")
-else()
-    set(FMOD_ARCH_DIR "x64")
-endif()
+	target_include_directories( ${PROJECT_NAME} PRIVATE
+		"${ENGINE_SOURCE_DIR}/tier0/"
+		"${ENGINE_SOURCE_DIR}/tier1/"
+	)
+	target_link_libraries( ${PROJECT_NAME} PRIVATE "winmm.lib" )
 
-set(FMOD_LIB_DIR "${ENGINE_SOURCE_DIR}/thirdparty/fmod/libs/${FMOD_ARCH_DIR}")
-find_library(FMOD_LIB NAMES fmod_vc PATHS ${FMOD_LIB_DIR} NO_DEFAULT_PATH)
-if (FMOD_LIB)
-    target_link_libraries(${PROJECT_NAME} PRIVATE ${FMOD_LIB})
-endif()
+	if( ${LIB_NAME} STREQUAL "codecs_cl" )
+		target_compile_definitions( ${PROJECT_NAME} PRIVATE
+			"CLIENT_DLL"
+			"GAMEDLL_S21"
+		)
+	endif()
+endmacro()
 
-# Try to link FMOD Studio if present
-find_library(FMOD_STUDIO_LIB NAMES fmodstudio_vc PATHS ${FMOD_LIB_DIR} NO_DEFAULT_PATH)
-if (FMOD_STUDIO_LIB)
-    target_link_libraries(${PROJECT_NAME} PRIVATE ${FMOD_STUDIO_LIB})
-endif()
+add_codecs_lib( "codecs_cl" )

@@ -28,6 +28,13 @@ inline void(*v_Host_Shutdown)();
 inline bool(*v_Host_NewGame)(char* pszMapName, char* pszMapGroup, bool bLoadGame, char bBackground, LARGE_INTEGER PerformanceCount);
 inline void(*v_Host_Disconnect)(bool bShowMainMenu);
 inline bool(*v_Host_ChangeLevel)(bool bLoadFromSavedGame, const char* pszMapName, const char* pszMapGroup);
+#ifndef CLIENT_DLL
+// Builds + queues NET_SignonState from CClient+0x3B0 (m_nSignonState). Unique on r5apex_ds.
+inline char(*v_CClient_SendSignonState)(CClient* pClient);
+// Resets frames/netchan, sets signon=CONNECTED and reliably sends
+// NET_SignonState(2,-1) so the client restarts the signon walk.
+inline void(*v_CClient_Reconnect)(CClient* pClient);
+#endif // !CLIENT_DLL
 inline void (*v_Host_Status_PrintClient)(CClient* client, bool bShowAddress, void (*print) (const char* fmt, ...));
 
 inline int(*v_SetLaunchOptions)(const CCommand& args);
@@ -50,6 +57,10 @@ class VHostCmd : public IDetour
 		LogFunAdr("Host_Disconnect", v_Host_Disconnect);
 		LogFunAdr("Host_NewGame", v_Host_NewGame);
 		LogFunAdr("Host_ChangeLevel", v_Host_ChangeLevel);
+#ifndef CLIENT_DLL
+		LogFunAdr("CClient_SendSignonState", v_CClient_SendSignonState);
+		LogFunAdr("CClient_Reconnect", v_CClient_Reconnect);
+#endif // !CLIENT_DLL
 		LogFunAdr("Host_Status_PrintClient", v_Host_Status_PrintClient);
 		LogFunAdr("SetLaunchOptions", v_SetLaunchOptions);
 
@@ -67,6 +78,18 @@ class VHostCmd : public IDetour
 		Module_FindPattern(g_GameDll, "48 8B C4 ?? 41 54 41 55 48 81 EC 70 04 ?? ?? F2 0F 10 05 ?? ?? ?? 0B").GetPtr(v_Host_NewGame);
 		Module_FindPattern(g_GameDll, "40 53 48 83 EC 30 0F B6 D9").GetPtr(v_Host_Disconnect);
 		Module_FindPattern(g_GameDll, "40 56 57 41 56 48 81 EC ?? ?? ?? ??").GetPtr(v_Host_ChangeLevel);
+#ifndef CLIENT_DLL
+		Module_FindPattern(g_GameDll,
+			"4C 8B DC 53 48 81 EC ?? ?? ?? ?? 48 8B 81 ?? ?? ?? ?? 48 8B D9")
+			.GetPtr(v_CClient_SendSignonState);
+		if (!v_CClient_SendSignonState)
+			Warning(eDLL_T::ENGINE, "[CHANGELEVEL] CClient send-signon pattern unresolved\n");
+		Module_FindPattern(g_GameDll,
+			"48 89 5C 24 ?? 57 48 81 EC ?? ?? ?? ?? 0F B7 51")
+			.GetPtr(v_CClient_Reconnect);
+		if (!v_CClient_Reconnect)
+			Warning(eDLL_T::ENGINE, "[CHANGELEVEL] CClient reconnect pattern unresolved\n");
+#endif // !CLIENT_DLL
 		Module_FindPattern(g_GameDll, "48 8B C4 48 83 EC ?? 80 3D ?? ?? ?? ?? ?? 0F 85 ?? ?? ?? ?? 8B 15 ?? ?? ?? ??").GetPtr(v_Host_Shutdown);
 		Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 48 89 6C 24 ?? 56 57 41 56 48 83 EC 60 48 8B A9 ?? ?? ?? ??").GetPtr(v_Host_Status_PrintClient);
 

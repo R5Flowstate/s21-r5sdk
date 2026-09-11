@@ -20,7 +20,7 @@
 // CAI_LocalNavigator
 //
 // Purpose: Handles all the immediate tasks of navigation, independent of
-//			path. Implements steering.
+// path. Implements steering.
 //-----------------------------------------------------------------------------
 class CAI_LocalNavigator : public CAI_Component,
                            public CAI_ProxyMovementSink

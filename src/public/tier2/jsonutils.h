@@ -118,10 +118,10 @@ inline const char* JSON_TypeToString(const T& data)
 
 //-----------------------------------------------------------------------------
 // Purpose: checks if the member's value is of type provided
-// NOTE   : the switch case was done intentionally instead of JSON_ExtractType
-//          on the object as this function gets used in most accessors that
-//          check on types, and this approach is faster as we already know the
-//          type beforehand
+// NOTE: the switch case was done intentionally instead of JSON_ExtractType
+// on the object as this function gets used in most accessors that
+// check on types, and this approach is faster as we already know the
+// type beforehand
 //-----------------------------------------------------------------------------
 template <class T>
 inline bool JSON_IsOfType(const T& data, const JSONFieldType_e type)
@@ -209,7 +209,7 @@ inline bool JSON_HasMemberAndIsOfType(const T& data, typename T::StringRefType m
 
 //-----------------------------------------------------------------------------
 // Purpose: checks if the member exists, and sets 'out' to its iterator if the
-//          aforementioned condition is met
+// aforementioned condition is met
 //-----------------------------------------------------------------------------
 template <class T>
 inline bool JSON_GetIterator(const T& data, typename T::StringRefType member, typename T::ConstMemberIterator& out)
@@ -228,8 +228,8 @@ inline bool JSON_GetIterator(const T& data, typename T::StringRefType member, ty
 
 //-----------------------------------------------------------------------------
 // Purpose: checks if the member exists and if its value is of type provided,
-//          and sets 'out' to its iterator if all aforementioned conditions
-//          are met
+// and sets 'out' to its iterator if all aforementioned conditions
+// are met
 //-----------------------------------------------------------------------------
 template <class T>
 inline bool JSON_GetIterator(const T& data, typename T::StringRefType member,
@@ -252,8 +252,8 @@ inline bool JSON_GetIterator(const T& data, typename T::StringRefType member,
 
 //-----------------------------------------------------------------------------
 // Purpose: checks if the member exists and if its value is of specified type,
-//          and sets 'out' to its value if all aforementioned conditions
-//          are met
+// and sets 'out' to its value if all aforementioned conditions
+// are met
 //-----------------------------------------------------------------------------
 template <class T, class V>
 inline bool JSON_GetValue(const T& data, typename T::StringRefType member, const JSONFieldType_e type, V& out)
@@ -272,7 +272,7 @@ inline bool JSON_GetValue(const T& data, typename T::StringRefType member, const
 
 //-----------------------------------------------------------------------------
 // Purpose: checks if the member exists and if its value is of classified type,
-//          and sets 'out' to its value if all aforementioned conditions are met
+// and sets 'out' to its value if all aforementioned conditions are met
 //-----------------------------------------------------------------------------
 template <class T, class V>
 inline bool JSON_GetValue(const T& data, typename T::StringRefType member, V& out)
@@ -306,8 +306,8 @@ inline bool JSON_GetValue(const T& data, typename T::StringRefType member, std::
 
 //-----------------------------------------------------------------------------
 // Purpose: checks if the member exists and if its value is of classified type,
-//          and returns the value if all aforementioned conditions are met.
-//          else the provided default gets returned
+// and returns the value if all aforementioned conditions are met.
+// else the provided default gets returned
 //-----------------------------------------------------------------------------
 template <class T, class V>
 inline V JSON_GetValueOrDefault(const T& data, typename T::StringRefType member, const V def)
@@ -369,14 +369,14 @@ inline bool JSON_StringToNumber(const char* const str, const size_t len, V& num)
 
 //-----------------------------------------------------------------------------
 // Purpose: parses json number out of provided integer, float or string. string
-//          can be a hex (0x<num>), octal (0<num>) or decimal (<num>)
+// can be a hex (0x<num>), octal (0<num>) or decimal (<num>)
 //-----------------------------------------------------------------------------
 template <class T, class V>
 inline bool JSON_ParseNumber(const T& data, V& num)
 {
     if (JSON_IsOfType(data, JSONFieldType_e::kNumber))
     {
-        num = data.Get<V>();
+        num = data.template Get<V>();
         return true;
     }
     else if (JSON_IsOfType(data, JSONFieldType_e::kString))
@@ -401,8 +401,8 @@ inline bool JSON_ParseNumber(const T& data, typename T::StringRefType member, V&
 
 //-----------------------------------------------------------------------------
 // Purpose: checks if the member exists and if its value is of classified type,
-//          and returns the number if all aforementioned conditions are met.
-//          else the provided default gets returned
+// and returns the number if all aforementioned conditions are met.
+// else the provided default gets returned
 //-----------------------------------------------------------------------------
 template <class T, class V>
 inline V JSON_GetNumberOrDefault(const T& data, typename T::StringRefType member, V def)

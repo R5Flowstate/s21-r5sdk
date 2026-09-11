@@ -1,9 +1,9 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: command buffer class implementation
 //
-// $Workfile:     $
-// $Date:         $
+// $Workfile: $
+// $Date: $
 // $NoKeywords: $
 //===========================================================================//
 
@@ -11,7 +11,7 @@
 #include "tier1/utlbuffer.h"
 #include "tier1/strtools.h"
 
-// memdbgon must be the last include file in a .cpp file!!!
+// memdbgon must be the last include file in a.cpp file!!!
 #include "tier0/memdbgon.h"
 
 //-----------------------------------------------------------------------------
@@ -35,7 +35,7 @@ CCommandBuffer::~CCommandBuffer()
 
 //-----------------------------------------------------------------------------
 // Purpose: indicates how long to delay when encountering a 'wait' command
-// Input  : nTickDelay - 
+// Input: nTickDelay - 
 //-----------------------------------------------------------------------------
 void CCommandBuffer::SetWaitDelayTime( const int nTickDelay )
 {
@@ -46,7 +46,7 @@ void CCommandBuffer::SetWaitDelayTime( const int nTickDelay )
 	
 //-----------------------------------------------------------------------------
 // Purpose: specifies a max limit of the args buffer. For unit testing. Size == 0 means use default
-// Input  : nSize - 
+// Input: nSize - 
 //-----------------------------------------------------------------------------
 void CCommandBuffer::LimitArgumentBufferSize( ssize_t nSize )
 {
@@ -61,11 +61,11 @@ void CCommandBuffer::LimitArgumentBufferSize( ssize_t nSize )
 
 //-----------------------------------------------------------------------------
 // Purpose: parses argv0 out of the buffer
-// Input  : &buf    - 
-//          *pArgV0 - 
-//          nMaxLen - 
-//          **pArgS - 
-// Output : true on success, false otherwise
+// Input: &buf - 
+// *pArgV0 - 
+// nMaxLen - 
+// **pArgS - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CCommandBuffer::ParseArgV0( CUtlBuffer &buf, char *const pArgV0,
 	const ssize_t nMaxLen, const char **const pArgS ) const
@@ -87,8 +87,8 @@ bool CCommandBuffer::ParseArgV0( CUtlBuffer &buf, char *const pArgV0,
 
 
 //-----------------------------------------------------------------------------
-// Purpose : insert a command into the command queue
-// Inpur   : hCommand - 
+// Purpose: insert a command into the command queue
+// Inpur: hCommand - 
 //-----------------------------------------------------------------------------
 void CCommandBuffer::InsertCommandAtAppropriateTime( const intptr_t hCommand )
 {
@@ -105,7 +105,7 @@ void CCommandBuffer::InsertCommandAtAppropriateTime( const intptr_t hCommand )
 
 //-----------------------------------------------------------------------------
 // Purpose: insert a command into the command queue at the appropriate time
-// Input  : hCommand - 
+// Input: hCommand - 
 //-----------------------------------------------------------------------------
 void CCommandBuffer::InsertImmediateCommand( const intptr_t hCommand )
 {
@@ -115,11 +115,11 @@ void CCommandBuffer::InsertImmediateCommand( const intptr_t hCommand )
 
 //-----------------------------------------------------------------------------
 // Purpose: insert a command into the command queue
-// Input  : *pArgS       - 
-//          nCommandSize - 
-//          nTick        - 
-//          cmdSource    - 
-// Output : true on success, false otherwise
+// Input: *pArgS - 
+// nCommandSize - 
+// nTick - 
+// cmdSource - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CCommandBuffer::InsertCommand( const char *const pArgS, ssize_t nCommandSize,
 	const int nTick, const cmd_source_t cmdSource )
@@ -165,10 +165,10 @@ bool CCommandBuffer::InsertCommand( const char *const pArgS, ssize_t nCommandSiz
 
 //-----------------------------------------------------------------------------
 // Purpose: returns the length of the next command
-// Input  : *pText              - 
-//          nMaxLen             - 
-//          *pCommandLength     - 
-//          *pNextCommandOffset - 
+// Input: *pText - 
+// nMaxLen - 
+// *pCommandLength - 
+// *pNextCommandOffset - 
 //-----------------------------------------------------------------------------
 void CCommandBuffer::GetNextCommandLength( const char *const pText, const ssize_t nMaxLen,
 	ssize_t *const pCommandLength, ssize_t *const pNextCommandOffset ) const
@@ -217,10 +217,10 @@ void CCommandBuffer::GetNextCommandLength( const char *const pText, const ssize_
 
 //-----------------------------------------------------------------------------
 // Purpose: add text to command buffer, return false if it couldn't owing to overflow
-// Input  : *pText     - 
-//          nTickDelay - 
-//          cmdSource  - 
-// Output : true on success, false otherwise
+// Input: *pText - 
+// nTickDelay - 
+// cmdSource - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CCommandBuffer::AddText( const char *const pText, const int nTickDelay, const cmd_source_t cmdSource )
 {
@@ -235,7 +235,7 @@ bool CCommandBuffer::AddText( const char *const pText, const int nTickDelay, con
 
 	for( ; nLen > 0; nLen -= nOffsetToNextCommand+1, pCurrentCommand += nOffsetToNextCommand+1 )
 	{
-		// Find a \n or ; line break.
+		// Find a \n or; line break.
 		ssize_t nCommandLength;
 		GetNextCommandLength( pCurrentCommand, nLen, &nCommandLength, &nOffsetToNextCommand );
 
@@ -276,7 +276,7 @@ bool CCommandBuffer::IsProcessingCommands() const
 
 //-----------------------------------------------------------------------------
 // Purpose: delays all queued commands to execute at a later time
-// Input  : nDelay - 
+// Input: nDelay - 
 //-----------------------------------------------------------------------------
 void CCommandBuffer::DelayAllQueuedCommands( const int nDelay )
 {
@@ -292,7 +292,7 @@ void CCommandBuffer::DelayAllQueuedCommands( const int nDelay )
 	
 //-----------------------------------------------------------------------------
 // Purpose: begin iterating over all commands up to flCurrentTime
-// Input  : nDeltaTicks - 
+// Input: nDeltaTicks - 
 //-----------------------------------------------------------------------------
 void CCommandBuffer::BeginProcessingCommands( const int nDeltaTicks )
 {
@@ -339,11 +339,9 @@ bool CCommandBuffer::DequeueNextCommand()
 	// Necessary to insert commands while commands are being processed.
 	m_hNextCommand = m_Commands.Head();
 
-//	Msg("Dequeue : ");
+//	Msg("Dequeue: ");
 //	for ( int i = 0; i < nArgc; ++i )
-//	{
-//		Msg("%s ", m_pCurrentArgv[i] ); 
-//	}
+// Msg("%s ", m_pCurrentArgv[i] ); 
 //	Msg("\n");
 	return true;
 }
@@ -351,7 +349,7 @@ bool CCommandBuffer::DequeueNextCommand()
 
 //-----------------------------------------------------------------------------
 // Purpose: returns the next command
-// Input  : **&ppArgv - 
+// Input: **&ppArgv - 
 //-----------------------------------------------------------------------------
 int CCommandBuffer::DequeueNextCommand( const char **& ppArgv )
 {
@@ -415,7 +413,7 @@ void CCommandBuffer::EndProcessingCommands()
 		if ( m_Commands[ i ].m_nTick >= m_nCurrentTick )
 			break;
 
-		//AssertMsgOnce( false, "CCommandBuffer::EndProcessingCommands() called before all appropriate commands were dequeued.\n" );
+		//AssertMsgOnce( false, "CCommandBuffer::EndProcessingCommands called before all appropriate commands were dequeued.\n" );
 		intptr_t nNext = i;
 		Msg( eDLL_T::COMMON, "Warning: Skipping command \"%s\"\n", &m_pArgSBuffer[ m_Commands[ i ].m_nFirstArgS ] );
 		m_Commands.Remove( i );

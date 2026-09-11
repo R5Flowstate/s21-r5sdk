@@ -1,4 +1,4 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: A fast stack memory allocator that uses virtual memory if available
 //
@@ -57,11 +57,11 @@ private:
 	void RegisterAllocation();
 	void RegisterDeallocation( bool bShouldSpew );
 
-	//const char* GetMemoryName() const OVERRIDE; // User friendly name for this stack or pool
-	//size_t GetAllocatedBytes() const OVERRIDE; // Number of bytes currently allocated
-	//size_t GetCommittedBytes() const OVERRIDE; // Bytes committed -- may be greater than allocated.
-	//size_t GetReservedBytes() const OVERRIDE; // Bytes reserved -- may be greater than committed.
-	//size_t GetHighestBytes() const OVERRIDE; // The maximum number of bytes allocated or committed.	
+	//const char* GetMemoryName const OVERRIDE; // User friendly name for this stack or pool
+	//size_t GetAllocatedBytes const OVERRIDE; // Number of bytes currently allocated
+	//size_t GetCommittedBytes const OVERRIDE; // Bytes committed -- may be greater than allocated.
+	//size_t GetReservedBytes const OVERRIDE; // Bytes reserved -- may be greater than committed.
+	//size_t GetHighestBytes const OVERRIDE; // The maximum number of bytes allocated or committed.	
 
 	byte *m_pNextAlloc; // Current alloc point (m_pNextAlloc - m_pBase == allocated bytes)
 	byte *m_pCommitLimit; // The current end of the committed memory. On systems without dynamic commit/decommit this is always m_pAllocLimit
@@ -170,7 +170,7 @@ inline MemoryStackMark_t CMemoryStack::GetCurrentAllocPoint() const
 
 
 //-----------------------------------------------------------------------------
-// The CUtlMemoryStack class:
+// The CUtlMemoryStack class
 // A fixed memory class
 //-----------------------------------------------------------------------------
 template< typename T, typename I, size_t MAX_SIZE, size_t COMMIT_SIZE = 0, size_t INITIAL_COMMIT = 0 >
@@ -230,7 +230,6 @@ public:
 	// Memory deallocation
 	void Purge()											{ m_MemoryStack.FreeAll(); m_nAllocated = 0; }
 
-	// is the memory externally allocated?
 	bool IsExternallyAllocated() const						{ return false; }
 
 	// Set the size by which the memory grows

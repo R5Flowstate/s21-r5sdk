@@ -27,7 +27,7 @@ CFrameLimit::CFrameLimit(void)
 
 //-----------------------------------------------------------------------------
 // Purpose: initializer
-// Input  : targetFps - 
+// Input: targetFps - 
 //-----------------------------------------------------------------------------
 void CFrameLimit::Reset(double targetFps)
 {

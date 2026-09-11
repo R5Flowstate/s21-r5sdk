@@ -7,6 +7,7 @@
 #include "rtech/pak/pakstate.h"
 #include "rtech/pak/paktools.h"
 #include "pluginsystem/modsystem.h"
+#include "rtech/pak/pak_opt_stream_drop.h"
 #include "asyncio.h"
 
 static ConVar async_debugchannel("async_debugchannel", "0", FCVAR_DEVELOPMENTONLY | FCVAR_ACCESSIBLE_FROM_THREADS, "Log async read handles created or destroyed with this channel ID", false, 0.f, false, 0.f, "0 = disabled, -1 = all");
@@ -26,6 +27,18 @@ static HANDLE FS_Internal_OpenFile(const char* const fileToOpen)
 //----------------------------------------------------------------------------------
 int FS_OpenAsyncFile(const char* const filePath, const int logChannel, size_t* const fileSizeOut, char* const actualOpenPathOut, const size_t openPathSize)
 {
+    if (!g_pAsyncFileSlotMgr || !g_pAsyncFileSlots)
+    {
+        static bool s_warnedOpen = false;
+        if (!s_warnedOpen)
+        {
+            s_warnedOpen = true;
+            Warning(eDLL_T::RTECH, "FS_OpenAsyncFile: async slot tables null (async detour class not registered for this product); path='%s'\n",
+                filePath ? filePath : "(null)");
+        }
+        return FS_ASYNC_FILE_INVALID;
+    }
+
     const CHAR* fileToLoad = filePath;
     HANDLE hFile = FS_Internal_OpenFile(fileToLoad);
 
@@ -127,6 +140,17 @@ static int FS_Internal_OpenAsyncFile(const char* const filePath, const int logCh
 //----------------------------------------------------------------------------------
 void FS_CloseAsyncFile(const int fileHandle)
 {
+    if (!g_pAsyncFileSlots || !g_pAsyncFileSlotMgr)
+    {
+        static bool s_warnedClose = false;
+        if (!s_warnedClose)
+        {
+            s_warnedClose = true;
+            Warning(eDLL_T::RTECH, "FS_CloseAsyncFile: async slot tables null (async detour class not registered for this product)\n");
+        }
+        return;
+    }
+
     const int slotNum = fileHandle & ASYNC_MAX_FILE_HANDLES_MASK;
     AsyncHandleTracker_s& tracker = g_pAsyncFileSlots[slotNum];
 
@@ -147,8 +171,77 @@ void FS_CloseAsyncFile(const int fileHandle)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+#if defined(CLIENT_DLL)
+static int __fastcall FS_OpenAsyncFile_S21(const char* const filePath, const int logChannel,
+    size_t* const fileSizeOut, const unsigned char flags)
+{
+    if (!v_FS_OpenAsyncFile_S21)
+        return FS_ASYNC_FILE_INVALID;
+
+    int guarded = FS_ASYNC_FILE_INVALID;
+    if (PakOptStreamDrop_GuardOpen(filePath, logChannel, fileSizeOut, flags,
+            v_FS_OpenAsyncFile_S21, &guarded))
+        return guarded;
+
+    const int native = v_FS_OpenAsyncFile_S21(filePath, logChannel, fileSizeOut, flags);
+    if (native != FS_ASYNC_FILE_INVALID)
+        return native;
+
+    if (!ModSystem()->IsEnabled() || !filePath || !filePath[0])
+        return FS_ASYNC_FILE_INVALID;
+
+    if (V_IsAbsolutePath(filePath))
+        return FS_ASYNC_FILE_INVALID;
+
+    char rel[MAX_PATH];
+    const size_t nPath = strlen(filePath);
+    if (nPath >= sizeof(rel))
+        return FS_ASYNC_FILE_INVALID;
+    memcpy(rel, filePath, nPath + 1);
+    for (char* q = rel; *q; ++q)
+    {
+        if (*q == '\\')
+            *q = '/';
+    }
+    if (!ModSystem_IsSafeRelativePath(rel))
+        return FS_ASYNC_FILE_INVALID;
+
+    int found = FS_ASYNC_FILE_INVALID;
+    ModSystem()->LockModList();
+    FOR_EACH_VEC(ModSystem()->GetModList(), i)
+    {
+        const CModSystem::ModInstance_t* const mod = ModSystem()->GetModList()[i];
+        if (!mod->IsEnabled())
+            continue;
+
+        CUtlString modLookupPath = mod->GetBasePath() + rel;
+        modLookupPath.FixSlashes();
+        found = v_FS_OpenAsyncFile_S21(modLookupPath.String(), logChannel, fileSizeOut, flags);
+        if (found != FS_ASYNC_FILE_INVALID)
+            break;
+    }
+    ModSystem()->UnlockModList();
+    return found;
+}
+
+void V_AsyncIO_S21::Detour(const bool bAttach) const
+{
+    if (!v_FS_OpenAsyncFile_S21)
+    {
+        if (bAttach)
+        {
+            Warning(eDLL_T::RTECH,
+                "[MOD-ASYNC] FS_OpenAsyncFile pattern unresolved -- mod pak/starpak fallback disabled\n");
+        }
+        return;
+    }
+    DetourSetup(&v_FS_OpenAsyncFile_S21, &FS_OpenAsyncFile_S21, bAttach);
+}
+#else // CLIENT_DLL
 void V_AsyncIO::Detour(const bool bAttach) const
 {
     DetourSetup(&v_FS_OpenAsyncFile, &FS_Internal_OpenAsyncFile, bAttach);
     DetourSetup(&v_FS_CloseAsyncFile, &FS_CloseAsyncFile, bAttach);
 }
+#endif // !CLIENT_DLL

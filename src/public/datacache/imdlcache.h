@@ -22,12 +22,12 @@ enum MDLCacheDataType_t
 {
 	MDLCACHE_NONE = -1,
 
-	// Callbacks to get called when data is loaded or unloaded for these:
+	// Callbacks to get called when data is loaded or unloaded for these
 	MDLCACHE_STUDIOHDR = 0,
 	MDLCACHE_STUDIOHWDATA,
 	MDLCACHE_VCOLLIDE,
 
-	// Callbacks NOT called when data is loaded or unloaded for these:
+	// Callbacks NOT called when data is loaded or unloaded for these
 	MDLCACHE_ANIMBLOCK,
 	MDLCACHE_VIRTUALMODEL,
 	MDLCACHE_VERTEXES,

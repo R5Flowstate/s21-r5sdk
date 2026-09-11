@@ -68,8 +68,6 @@ struct SQSharedState
 	}
 };
 
-//static_assert(offsetof(SQSharedState, _compiler) == 0x4238);
-//static_assert(offsetof(SQSharedState, _printfunc) == 0x4388);
 
 struct SQBufState
 {

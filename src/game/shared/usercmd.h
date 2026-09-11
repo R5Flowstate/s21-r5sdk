@@ -1,6 +1,6 @@
-﻿//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -116,6 +116,7 @@ class CUserCmdExtended : public CUserCmd
 	char unknown_extended[164];
 };
 
+void ClampUserCmd(CUserCmd* ucmd);
 int ReadUserCmd(bf_read* buf, CUserCmd* move, CUserCmd* from);
 int ReadUserCmdExtended(bf_read* buf, CUserCmdExtended* move, CUserCmdExtended* from);
 

@@ -22,9 +22,9 @@
 
 //-----------------------------------------------------------------------------
 // Purpose: Show error in the console
-// Input  : *error - 
+// Input: *error - 
 //			... - 
-// Output : void _Error
+// Output: void _Error
 //-----------------------------------------------------------------------------
 void _Error(const char* fmt, ...)
 {
@@ -45,14 +45,26 @@ void _Error(const char* fmt, ...)
 	}/////////////////////////////
 
 	Error(eDLL_T::ENGINE, NO_ERROR, shouldNewline ? "%s\n" : "%s", buf);
+
+	// Pattern may be unresolved on this build; the SDK log above already ran.
+	if (!v_Error)
+	{
+		static bool s_warned = false;
+		if (!s_warned)
+		{
+			s_warned = true;
+			Warning(eDLL_T::ENGINE, "[SYS_UTILS] engine Error unresolved -- not forwarding\n");
+		}
+		return;
+	}
 	v_Error("%s", buf);
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: Show warning in the console, exit engine with error when level 5
-// Input  : level -
-//			*error - ... - 
-// Output : void* _Warning
+// Input: level -
+// *error -... - 
+// Output: void* _Warning
 //-----------------------------------------------------------------------------
 void _Warning(int level, const char* fmt, ...)
 {
@@ -77,15 +89,26 @@ void _Warning(int level, const char* fmt, ...)
 		Warning(eDLL_T::ENGINE, shouldNewline ? "Warning(%d):%s\n" : "Warning(%d):%s", level, buf);
 	}
 
+	// Pattern may be unresolved on this build; the SDK log above already ran.
+	if (!v_Warning)
+	{
+		static bool s_warned = false;
+		if (!s_warned)
+		{
+			s_warned = true;
+			Warning(eDLL_T::ENGINE, "[SYS_UTILS] engine Warning unresolved -- not forwarding\n");
+		}
+		return;
+	}
 	v_Warning(level, "%s", buf);
 }
 
 #ifndef DEDICATED
 //-----------------------------------------------------------------------------
 // Purpose: Builds log to be displayed on the screen
-// Input  : pos - 
-//			*fmt - ... - 
-// Output : void NPrintf
+// Input: pos - 
+// *fmt -... - 
+// Output: void NPrintf
 //-----------------------------------------------------------------------------
 void _Con_NPrintf(int pos, const char* fmt, ...)
 {
@@ -110,8 +133,8 @@ void _Con_NPrintf(int pos, const char* fmt, ...)
 
 //-----------------------------------------------------------------------------
 // Purpose: Gets the process up time (input buffer should be at least 4096 bytes in size)
-// Input  : *szBuffer - 
-// Output : snprintf_s ret val
+// Input: *szBuffer - 
+// Output: snprintf_s ret val
 //-----------------------------------------------------------------------------
 int Sys_GetProcessUpTime(char* szBuffer)
 {
@@ -135,11 +158,10 @@ const char* Sys_GetPlatformString(void)
 	return "PC";
 }
 
+#ifndef CLIENT_DLL
 void VSys_Utils::Detour(const bool bAttach) const
 {
 	DetourSetup(&v_Error, &_Error, bAttach);
 	DetourSetup(&v_Warning, &_Warning, bAttach);
-#ifndef DEDICATED
-	DetourSetup(&v_Con_NPrintf, &_Con_NPrintf, bAttach);
-#endif // !DEDICATED
 }
+#endif // !CLIENT_DLL

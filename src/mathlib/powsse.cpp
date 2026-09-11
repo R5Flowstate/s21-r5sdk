@@ -1,6 +1,6 @@
-﻿//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose
 //
 //=====================================================================================//
 
@@ -17,13 +17,13 @@ fltx4 Pow_FixedPoint_Exponent_SIMD(const fltx4& x, int exponent)
 	if (xp & 3)												// fraction present?
 	{
 		fltx4 sq_rt = SqrtEstSIMD(x);
-		if (xp & 1)											// .25?
+		if (xp & 1)											//.25?
 			rslt = SqrtEstSIMD(sq_rt);						// x^.25
 		if (xp & 2)
 			rslt = MulSIMD(rslt, sq_rt);
 	}
 	xp >>= 2;													// strip fraction
-	fltx4 curpower = x;										// curpower iterates through  x,x^2,x^4,x^8,x^16...
+	fltx4 curpower = x;										// curpower iterates through x,x^2,x^4,x^8,x^16...
 
 	while (1)
 	{
@@ -50,7 +50,7 @@ fltx4 Pow_FixedPoint_Exponent_SIMD(const fltx4& x, int exponent)
  *
  * ian@dctsystems.co.uk
  *
- * Fast pow() reference implementation
+ * Fast pow reference implementation
  */
 
 

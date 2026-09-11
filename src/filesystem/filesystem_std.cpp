@@ -204,11 +204,9 @@ bool CBaseFileSystem::ReadToBuffer(FileHandle_t hFile, CUtlBuffer& buf, ssize_t 
 			buf.EnsureCapacity(nBytesDestBuffer + buf.TellPut());
 		}
 		//else
-		//{
 		//	// caller provided allocator
 		//	void* pMemory = (*pfnAlloc)(g_pszReadFilename, nBytesDestBuffer);
-		//	buf.SetExternalBuffer(pMemory, nBytesDestBuffer, 0, buf.GetFlags() & ~CUtlBuffer::EXTERNAL_GROWABLE);
-		//}
+		//	buf.SetExternalBuffer(pMemory, nBytesDestBuffer, 0, buf.GetFlags & ~CUtlBuffer::EXTERNAL_GROWABLE);
 
 		ssize_t seekGet = -1;
 		if (nBytesDestBuffer != nBytesToRead)
@@ -255,9 +253,7 @@ bool CBaseFileSystem::ReadFile(const char* pFileName, const char* pPath, CUtlBuf
 	AssertMsg(!pfnAlloc, "Custom allocators not yet supported!");
 
 	//if (pfnAlloc)
-	//{
 	//	g_pszReadFilename = (char*)pFileName;
-	//}
 
 	bool bSuccess = ReadToBuffer(fp, buf, nMaxBytes, pfnAlloc);
 
@@ -322,15 +318,19 @@ CUtlString CBaseFileSystem::ReadString(FileHandle_t pFile)
 {
 	CUtlString result;
 	char c = '\0';
+	constexpr ssize_t kMaxLen = 4096;
 
-	do
+	for (;;)
 	{
-		Read(&c, sizeof(char), pFile);
+		if (Read(&c, sizeof(char), pFile) != sizeof(char))
+			return CUtlString();
 
-		if (c)
-			result += c;
+		if (!c)
+			return result;
 
-	} while (c);
+		if (result.Length() >= kMaxLen)
+			return CUtlString();
 
-	return result;
+		result += c;
+	}
 }

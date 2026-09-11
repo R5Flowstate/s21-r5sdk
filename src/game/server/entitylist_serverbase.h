@@ -25,7 +25,7 @@ public:
 	// then the ehandle will be invalid and produce NULL).
 	CBaseHandle GetNetworkableHandle(const int iEntity) const;
 
-	// ehandles use this in their Get() function to produce a pointer to the entity.
+	// ehandles use this in their Get function to produce a pointer to the entity.
 	IHandleEntity* LookupEntity(const CBaseHandle& handle) const;
 	IHandleEntity* LookupEntityByNetworkIndex(const int edictIndex) const;
 
@@ -67,8 +67,8 @@ private:
 		const CEntInfo* Tail() const { return m_pTail; }
 		CEntInfo* Head() { return m_pHead; }
 		CEntInfo* Tail() { return m_pTail; }
-		//void			AddToHead( CEntInfo *pElement ) { LinkAfter( NULL, pElement ); }
-		//void			AddToTail( CEntInfo *pElement ) { LinkBefore( NULL, pElement ); }
+		//void AddToHead( CEntInfo *pElement ) { LinkAfter( NULL, pElement ); }
+		//void AddToTail( CEntInfo *pElement ) { LinkBefore( NULL, pElement ); }
 
 		//void LinkBefore( CEntInfo *pBefore, CEntInfo *pElement );
 		//void LinkAfter( CEntInfo *pBefore, CEntInfo *pElement );

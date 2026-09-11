@@ -1,6 +1,6 @@
 //========== Copyright (c) Valve Corporation, All rights reserved. ==========//
 //
-// Purpose:  
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -28,25 +28,25 @@ enum class eDLL_T : int
 	//-------------------------------------------------------------------------
 	// Native enumerants
 	//-------------------------------------------------------------------------
-	SERVER = 0, // server.dll                (GameDLL)
-	CLIENT = 1, // client.dll                (GameDLL)
-	UI     = 2, // ui.dll                    (GameDLL)
-	ENGINE = 3, // engine.dll                (Wrapper)
-	FS     = 4, // filesystem_stdio.dll      (FileSystem API)
-	RTECH  = 5, // rtech_game.dll            (RTech API)
-	MS     = 6, // materialsystem_dx11.dll   (MaterialSystem API)
+	SERVER = 0, // server.dll (GameDLL)
+	CLIENT = 1, // client.dll (GameDLL)
+	UI     = 2, // ui.dll (GameDLL)
+	ENGINE = 3, // engine.dll (Wrapper)
+	FS     = 4, // filesystem_stdio.dll (FileSystem API)
+	RTECH  = 5, // rtech_game.dll (RTech API)
+	MS     = 6, // materialsystem_dx11.dll (MaterialSystem API)
 	AUDIO  = 7, // binkawin64/mileswin64.dll (AudioSystem API)
-	VIDEO  = 8, // bink2w64                  (VideoSystem API)
-	NETCON = 9, // netconsole impl           (RCON wire)
-	MODSYSTEM = 10, // modsystem impl          (ModSystem API)
-	STEAM    = 11, // steam integration        (Steam API)
+	VIDEO  = 8, // bink2w64 (VideoSystem API)
+	NETCON = 9, // netconsole impl (RCON wire)
+	MODSYSTEM = 10, // modsystem impl (ModSystem API)
+	STEAM    = 11, // steam integration (Steam API)
 
 	//-------------------------------------------------------------------------
 	// Common enumerants
 	//-------------------------------------------------------------------------
-	COMMON         = 12, // general         (No specific subsystem)
+	COMMON         = 12, // general (No specific subsystem)
 	SYSTEM_WARNING = 13, // general warning (No specific subsystem)
-	SYSTEM_ERROR   = 14, // general error   (No specific subsystem)
+	SYSTEM_ERROR   = 14, // general error (No specific subsystem)
 	NONE           = 15  // no context
 };
 //-----------------------------------------------------------------------------
@@ -131,7 +131,7 @@ DLL_EXPORT void DevWarning(eDLL_T context, const char* fmt, ...) FMTFUNCTION(2, 
 
 // You can use this macro like a runtime assert macro.
 // If the condition fails, then Error is called with the message. This macro is called
-// like AssertMsg, where msg must be enclosed in parenthesis:
+// like AssertMsg, where msg must be enclosed in parenthesis
 //
 // ErrorIfNot( bCondition, ("a b c %d %d %d", 1, 2, 3) );
 #define ErrorIfNot( condition, msg ) \
@@ -143,7 +143,7 @@ DLL_EXPORT void DevWarning(eDLL_T context, const char* fmt, ...) FMTFUNCTION(2, 
 	}
 
 //-----------------------------------------------------------------------------
-// Templates to assist in validating pointers:
+// Templates to assist in validating pointers
 
 // Have to use these stubs so we don't have to include windows.h here.
 /*PLATFORM_INTERFACE*/ void _AssertValidReadPtr(void* ptr, int count = 1);

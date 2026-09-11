@@ -1,3 +1,8 @@
+//=============================================================================//
+//
+// Purpose: Constant buffer helpers for the material system
+//
+//=============================================================================//
 #include "constbuffer.h"
 #include "rtech/rstdlib.h"
 #include "windows/id3dx.h"
@@ -48,7 +53,3 @@ static void Gfx_InitShared()
 	Gfx_RemapCbufCollection();
 }
 
-void VConstBuffer::Detour(const bool bAttach) const
-{
-	DetourSetup(&v_Gfx_InitShared, &Gfx_InitShared, bAttach);
-}

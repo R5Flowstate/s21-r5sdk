@@ -13,9 +13,9 @@
 
 //-----------------------------------------------------------------------------
 // Purpose: sets the encryption key, a key will always be set, either random or
-//			the default key on failure
-// Input  : *pBase64NetKey - 
-//			bUseDefaultOnFailure - 
+// the default key on failure
+// Input: *pBase64NetKey - 
+// bUseDefaultOnFailure - 
 //-----------------------------------------------------------------------------
 void CNetConBase::SetKey(const char* pBase64NetKey, const bool bUseDefaultOnFailure/* = false*/)
 {
@@ -124,22 +124,39 @@ const char* CNetConBase::GetKey(void) const
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: true if the active key is the public demo constant
+//-----------------------------------------------------------------------------
+bool CNetConBase::IsUsingDefaultEncryptionKey(void) const
+{
+	const char* const pKey = m_Base64NetKey.String();
+	if (!pKey || !pKey[0])
+		return false;
+
+	return strcmp(pKey, DEFAULT_NET_ENCRYPTION_KEY) == 0;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: connect to remote
-// Input  : *pHostName - 
-//			nPort - 
-// Output : true on success, false otherwise
+// Input: *pHostName - 
+// nPort - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CNetConBase::Connect(const char* pHostName, const int nPort)
 {
 	return NetconClient_Connect(this, pHostName, nPort);
 }
 
+bool CNetConBase::ConnectTimeout(const char* pHostName, const int nPort, float flTimeoutSec)
+{
+	return NetconClient_Connect(this, pHostName, nPort, flTimeoutSec);
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: parses input response buffer using length-prefix framing
-// Input  : &data - 
-//			*pRecvBuf - 
-//			nRecvLen - 
-//			nMaxLen - 
+// Input: &data - 
+// *pRecvBuf - 
+// nRecvLen - 
+// nMaxLen - 
 // Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CNetConBase::ProcessBuffer(ConnectedNetConsoleData_s& data, const byte* pRecvBuf, u32 nRecvLen, const u32 nMaxLen)
@@ -159,7 +176,7 @@ bool CNetConBase::ProcessBuffer(ConnectedNetConsoleData_s& data, const byte* pRe
 
 			if (data.payloadRead == data.payloadLen)
 			{
-				if (!ProcessMessage(data.recvBuffer.data(), data.payloadLen, nMaxLen))
+				if (!ProcessMessage(data, nMaxLen))
 					return false;
 
 				// Reset state.
@@ -227,16 +244,19 @@ bool CNetConBase::ProcessBuffer(ConnectedNetConsoleData_s& data, const byte* pRe
 
 //-----------------------------------------------------------------------------
 // Purpose: encrypt message to buffer
-// Input  : &ctx - 
-//			*pInBuf - 
-//			*pOutBuf - 
-//			nDataLen - 
-// Output : true on success, false otherwise
+// Input: &ctx - 
+// *pInBuf - 
+// *pOutBuf - 
+// nDataLen - 
+// *pAad - 
+// nAadLen - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
-bool CNetConBase::Encrypt(CryptoContext_s& ctx, const byte* pInBuf, byte* pOutBuf, const u32 nDataLen) const
+bool CNetConBase::Encrypt(CryptoContext_s& ctx, const byte* pInBuf, byte* pOutBuf,
+	const u32 nDataLen, const u8* pAad, const size_t nAadLen) const
 {
 	if (Crypto_GenerateIV(ctx, pInBuf, nDataLen))
-		return Crypto_CTREncrypt(ctx, pInBuf, pOutBuf, m_NetKey, nDataLen);
+		return Crypto_SealAEAD(ctx, pInBuf, pOutBuf, m_NetKey, nDataLen, pAad, nAadLen);
 
 	Assert(0);
 	return false; // failure
@@ -244,23 +264,26 @@ bool CNetConBase::Encrypt(CryptoContext_s& ctx, const byte* pInBuf, byte* pOutBu
 
 //-----------------------------------------------------------------------------
 // Purpose: decrypt message to buffer
-// Input  : &ctx - 
-//			*pInBuf - 
-//			*pOutBuf - 
-//			nDataLen - 
-// Output : true on success, false otherwise
+// Input: &ctx - 
+// *pInBuf - 
+// *pOutBuf - 
+// nDataLen - 
+// *pAad - 
+// nAadLen - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
-bool CNetConBase::Decrypt(CryptoContext_s& ctx, const byte* pInBuf, byte* pOutBuf, const u32 nDataLen) const
+bool CNetConBase::Decrypt(CryptoContext_s& ctx, const byte* pInBuf, byte* pOutBuf,
+	const u32 nDataLen, const u8* pAad, const size_t nAadLen) const
 {
-	return Crypto_CTRDecrypt(ctx, pInBuf, pOutBuf, m_NetKey, nDataLen);
+	return Crypto_OpenAEAD(ctx, pInBuf, pOutBuf, m_NetKey, nDataLen, pAad, nAadLen);
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: encode message to buffer
-// Input  : *pMsg - 
-//			*pMsgBuf - 
-//			nMsgLen - 
-// Output : true on success, false otherwise
+// Input: *pMsg - 
+// *pMsgBuf - 
+// nMsgLen - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CNetConBase::Encode(google::protobuf::MessageLite* pMsg, byte* pMsgBuf, const u32 nMsgLen) const
 {
@@ -269,10 +292,10 @@ bool CNetConBase::Encode(google::protobuf::MessageLite* pMsg, byte* pMsgBuf, con
 
 //-----------------------------------------------------------------------------
 // Purpose: decode message from buffer
-// Input  : *pMsg - 
-//			*pMsgBuf - 
-//			nMsgLen - 
-// Output : true on success, false otherwise
+// Input: *pMsg - 
+// *pMsgBuf - 
+// nMsgLen - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CNetConBase::Decode(google::protobuf::MessageLite* pMsg, const byte* pMsgBuf, const u32 nMsgLen) const
 {
@@ -281,9 +304,9 @@ bool CNetConBase::Decode(google::protobuf::MessageLite* pMsg, const byte* pMsgBu
 
 //-----------------------------------------------------------------------------
 // Purpose: send message to specific connected socket
-// Input  : hSocket - 
-//			*pMsgBuf - 
-//			nMsgLen - 
+// Input: hSocket - 
+// *pMsgBuf - 
+// nMsgLen - 
 // Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CNetConBase::Send(const SocketHandle_t hSocket, const byte* pMsgBuf, const u32 nMsgLen) const
@@ -294,8 +317,8 @@ bool CNetConBase::Send(const SocketHandle_t hSocket, const byte* pMsgBuf, const 
 
 //-----------------------------------------------------------------------------
 // Purpose: receive message
-// Input  : &data - 
-//			nMaxLen - 
+// Input: &data - 
+// nMaxLen - 
 // Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 void CNetConBase::Recv(ConnectedNetConsoleData_s& data, const u32 nMaxLen)

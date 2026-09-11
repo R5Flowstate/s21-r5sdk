@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright ï¿½ 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: Defines the entry point for the application.
 //
@@ -15,7 +15,7 @@
 
 // Remove all but the last -game parameter.
 // This is for mods based off something other than Half-Life 2 (like HL2MP mods).
-// The Steam UI does 'steam -applaunch 320 -game c:\steam\steamapps\sourcemods\modname', but applaunch inserts
+// The store UI does 'app -applaunch 320 -game c:\...\sourcemods\modname', but applaunch inserts
 // its own -game parameter, which would supersede the one we really want if we didn't intercede here.
 void RemoveSpuriousGameParameters()
 {
@@ -56,8 +56,10 @@ LONG WINAPI TopLevelExceptionFilter(EXCEPTION_POINTERS* pExceptionPointers)
 	return v_TopLevelExceptionFilter(pExceptionPointers);
 }
 
+#ifndef CLIENT_DLL
 void VLauncher::Detour(const bool bAttach) const
 {
 	DetourSetup(&v_TopLevelExceptionFilter, &TopLevelExceptionFilter, bAttach);
 	DetourSetup(&v_RemoveSpuriousGameParameters, &RemoveSpuriousGameParameters, bAttach);
 }
+#endif // !CLIENT_DLL

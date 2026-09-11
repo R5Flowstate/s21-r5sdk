@@ -1,10 +1,10 @@
 // $Id$
 
-// halton.h - classes, etc for generating numbers using the Halton pseudo-random sequence.  See
+// halton.h - classes, etc for generating numbers using the Halton pseudo-random sequence. See
 // http://halton-sequences.wikiverse.org/.
 //
 // what this function is useful for is any sort of sampling/integration problem where
-// you want to solve it by random sampling. Each call the NextValue() generates
+// you want to solve it by random sampling. Each call the NextValue generates
 // a random number between 0 and 1, in an unclumped manner, so that the space can be more
 // or less evenly sampled with a minimum number of samples.
 //
@@ -69,11 +69,11 @@ public:
 #endif // halton_h
 // $Id$
 
-// halton.h - classes, etc for generating numbers using the Halton pseudo-random sequence.  See
+// halton.h - classes, etc for generating numbers using the Halton pseudo-random sequence. See
 // http://halton-sequences.wikiverse.org/.
 //
 // what this function is useful for is any sort of sampling/integration problem where
-// you want to solve it by random sampling. Each call the NextValue() generates
+// you want to solve it by random sampling. Each call the NextValue generates
 // a random number between 0 and 1, in an unclumped manner, so that the space can be more
 // or less evenly sampled with a minimum number of samples.
 //

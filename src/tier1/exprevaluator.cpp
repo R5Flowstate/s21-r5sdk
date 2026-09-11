@@ -1,10 +1,10 @@
 //===== Copyright © 1996-2006, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 	ExprSimplifier builds a binary tree from an infix expression (in the
-//				form of a character array). Evaluates C style infix parenthetic logical
-//				expressions. Supports !, ||, &&, (). Symbols are resolved via callback.
-//				Syntax is $<name>. $0 evaluates to false. $<number> evaluates to true.
-//				e.g: ( $1 || ( $FOO || $WHATEVER ) && !$BAR )
+// Purpose: ExprSimplifier builds a binary tree from an infix expression (in the
+// form of a character array). Evaluates C style infix parenthetic logical
+// expressions. Supports !, ||, &&,. Symbols are resolved via callback.
+// Syntax is $<name>. $0 evaluates to false. $<number> evaluates to true.
+// e.g: ( $1 || ( $FOO || $WHATEVER ) && !$BAR )
 //===========================================================================//
 
 #include "vstdlib/ikeyvaluessystem.h"
@@ -14,7 +14,7 @@
 #include "tier1/strtools.h"
 #include "tier0/dbg.h"
 
-// memdbgon must be the last include file in a .cpp file!!!
+// memdbgon must be the last include file in a.cpp file!!!
 #include "tier0/memdbgon.h"
 
 //-----------------------------------------------------------------------------
@@ -263,7 +263,7 @@ bool CExpressionEvaluator::MakeExprNode( ExprTree &tree, char token, Kind kind, 
 }
 
 //-----------------------------------------------------------------------------
-//	Makes a factor :: { <expression> } | <identifier>.
+//	Makes a factor:: { <expression> } | <identifier>.
 //-----------------------------------------------------------------------------
 bool CExpressionEvaluator::MakeFactor( ExprTree &tree )
 {
@@ -307,7 +307,7 @@ bool CExpressionEvaluator::MakeFactor( ExprTree &tree )
 }
 
 //-----------------------------------------------------------------------------
-//	Makes a term :: <factor> { <not> }.
+//	Makes a term:: <factor> { <not> }.
 //-----------------------------------------------------------------------------
 bool CExpressionEvaluator::MakeTerm( ExprTree &tree )
 {
@@ -341,7 +341,7 @@ bool CExpressionEvaluator::MakeTerm( ExprTree &tree )
 
 
 //-----------------------------------------------------------------------------
-//	Makes a complete expression :: <term> { <cond> <term> }.
+//	Makes a complete expression:: <term> { <cond> <term> }.
 //-----------------------------------------------------------------------------
 bool CExpressionEvaluator::MakeExpression( ExprTree &tree )
 {
@@ -447,7 +447,7 @@ bool CExpressionEvaluator::Evaluate( bool &bResult, const char *pInfixExpression
 	}
 
 	// for caller simplicity, we strip of any enclosing braces
-	// strip the bracketing [] if present
+	// strip the bracketing if present
 	char szCleanToken[512];
 	if ( pInfixExpression[0] == '[' )
 	{

@@ -25,8 +25,8 @@ enum class OverlayType_t
 	OVERLAY_SPLINE,
 	OVERLAY_TRIANGLE,
 	OVERLAY_SWEPT_BOX,
-	OVERLAY_CAPSULE, // see 0x140209440, possibly a tetrahedron or quadrilateral? Never used. Now replaced with capsule.
-	OVERLAY_DESTROYED, // see 0x140208230, DestroyOverlay sets all destroyed overlays to this.
+	OVERLAY_CAPSULE, // see, possibly a tetrahedron or quadrilateral? Never used. Now replaced with capsule.
+	OVERLAY_DESTROYED, // see, DestroyOverlay sets all destroyed overlays to this.
 };
 
 struct OverlayBase_t
@@ -199,7 +199,7 @@ public:
 
 class CIVDebugOverlay : public IVDebugOverlay, public IVPhysicsDebugOverlay
 {
-public: // Hook statics:
+public: // Hook statics
 	static void AddEntityTextOverlay(CIVDebugOverlay* const thisptr, const int entIndex, const int lineOffset, const float duration, const int r, const int g, const int b, const int a, const char* const format, ...);
 
 	static void AddTextOverlay(CIVDebugOverlay* const thisptr, const Vector3D& origin, const float duration, const char* const format, ...);
@@ -234,9 +234,38 @@ inline CIVDebugOverlay* g_pDebugOverlay = nullptr;
 
 extern void DebugOverlay_HandleDecayed();
 
+// True when the process was launched with -devsdk / -dev / -developer.
+extern bool DebugOverlay_DevModeEnabled();
+
+// S2C overlay batch cap. Over-budget items drop with a warning; count is a
+// byte, payload length a short.
+static constexpr int kDebugOverlayS2CMax = 64;
+
+// Wire shape ids, named on both sides so the writer and the reader cannot drift.
+// An oriented box is one item rather than the twelve its edges would cost, which
+// is what lets a continuous shape stream fit in the frame budget.
+static constexpr uint8_t kS2CLine = 0;
+static constexpr uint8_t kS2CBox = 1;
+static constexpr uint8_t kS2CSphere = 2;
+static constexpr uint8_t kS2CCapsule = 3;
+static constexpr uint8_t kS2CTriangle = 4;
+static constexpr uint8_t kS2CTransformedBox = 5;
+static constexpr int kDebugOverlayS2CItemBytes = 58;
+static constexpr int kDebugOverlayS2CMaxBytes = 1 + kDebugOverlayS2CMax * kDebugOverlayS2CItemBytes;
+
+#if defined(CLIENT_DLL)
+// S3 type 69 -- dedi replicates script/engine overlay adds to the client list.
+void DebugOverlay_ApplyS2CPayload(const uint8_t* data, int nBytes);
+#endif // CLIENT_DLL
+
 inline void(*v_DebugOverlay_DrawAllOverlays)(bool bDraw);
 inline void(*v_DebugOverlay_ClearAllOverlays)(void);
 inline void(*v_DebugOverlay_DebugDebugOverlays)(void* unk1, unsigned short unk2, unsigned int unk3, float unk4);
+#if defined(CLIENT_DLL)
+inline void(*v_DebugOverlay_DestroyOverlay)(OverlayBase_t* const pOverlay);
+inline void(*v_DebugOverlay_AddLineOverlay)(const Vector3D* origin, const Vector3D* dest,
+	int r, int g, int b, int a, bool noDepthTest, float duration);
+#endif // CLIENT_DLL
 
 inline void (*v_DebugOverlay_AddEntityTextOverlay)(CIVDebugOverlay* const thisptr, const int entIndex, const int lineOffset, const float duration,
 	const int r, const int g, const int b, const int a, const char* const format, ...);
@@ -252,6 +281,13 @@ inline int* g_nRenderTickCount = nullptr;
 inline int* g_nOverlayTickCount = nullptr;
 
 inline int* g_nOverlayStage = nullptr;
+
+// Overlay expire clock: tick*interval if live, else float time.
+// g_pClientState is unresolved on the client product.
+inline bool* s_pOverlayUseTickClock = nullptr;
+inline int* s_pOverlayTickCount = nullptr;
+inline float* s_pOverlayTickInterval = nullptr;
+inline float* s_pOverlayCurTime = nullptr;
 
 inline int* g_nNewOtherOverlays = nullptr;
 inline int* g_nNewTextOverlays = nullptr;
@@ -269,6 +305,10 @@ class VDebugOverlay : public IDetour
 		LogFunAdr("DebugOverlay_DebugDebugOverlays", v_DebugOverlay_DebugDebugOverlays);
 		LogFunAdr("DebugOverlay_AddEntityTextOverlay", v_DebugOverlay_AddEntityTextOverlay);
 		LogFunAdr("DebugOverlay_SetEndTime", v_DebugOverlay_SetEndTime);
+#if defined(CLIENT_DLL)
+		LogFunAdr("DebugOverlay_DestroyOverlay", v_DebugOverlay_DestroyOverlay);
+		LogFunAdr("DebugOverlay_AddLineOverlay", v_DebugOverlay_AddLineOverlay);
+#endif // CLIENT_DLL
 		LogVarAdr("s_pOverlays", s_pOverlays);
 		LogVarAdr("s_pOverlayText", s_pOverlayText);
 		LogVarAdr("s_OverlayMutex", s_OverlayMutex);
@@ -277,17 +317,76 @@ class VDebugOverlay : public IDetour
 		LogVarAdr("g_nRenderTickCount", g_nRenderTickCount);
 		LogVarAdr("g_nNewOtherOverlays", g_nNewOtherOverlays);
 		LogVarAdr("g_nNewTextOverlays", g_nNewTextOverlays);
+#if defined(CLIENT_DLL)
+		LogVarAdr("s_pOverlayCurTime", s_pOverlayCurTime);
+#endif // CLIENT_DLL
 	}
 	virtual void GetFun(void) const
 	{
+#if defined(CLIENT_DLL)
+		// mov [rsp+8],cl ; sub rsp,38h ; mov rax,[cvar] ; cmp dword [rax+64h],0 ; jz end
+		Module_FindPattern(g_GameDll, "88 4C 24 08 48 83 EC 38 48 8B 05 ?? ?? ?? ?? 83 78 64 00 0F 84").GetPtr(v_DebugOverlay_DrawAllOverlays);
+		Module_FindPattern(g_GameDll, "40 53 48 83 EC ?? 48 8D 0D ?? ?? ?? ?? FF 15 ?? ?? ?? ?? 48 8B 0D").GetPtr(v_DebugOverlay_ClearAllOverlays);
+		Module_FindPattern(g_GameDll, "4C 8B DC 45 89 43 ?? 66 89 54 24").GetPtr(v_DebugOverlay_DebugDebugOverlays);
+		Module_FindPattern(g_GameDll, "40 53 48 83 EC ?? 48 8B D9 48 8D 0D ?? ?? ?? ?? FF 15 ?? ?? ?? ?? 48 63 03").GetPtr(v_DebugOverlay_DestroyOverlay);
+		Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC ?? 48 8B 05 ?? ?? ?? ?? 41 8B F1 41 8B E8 48 8B DA").GetPtr(v_DebugOverlay_AddLineOverlay);
+
+		if (!v_DebugOverlay_DrawAllOverlays || !v_DebugOverlay_ClearAllOverlays)
+			Warning(eDLL_T::CLIENT, "[DBGDRAW] overlay manager patterns unresolved; debug drawing disabled\n");
+		if (!v_DebugOverlay_DestroyOverlay)
+			Warning(eDLL_T::CLIENT, "[DBGDRAW] DestroyOverlay unresolved; native-allocated overlays cannot be freed\n");
+		if (!v_DebugOverlay_AddLineOverlay)
+			Warning(eDLL_T::CLIENT, "[DBGDRAW] AddLineOverlay unresolved; server overlay replicate cannot insert lines\n");
+#else
 		Module_FindPattern(g_GameDll, "40 55 48 83 EC 30 48 8B 05 ?? ?? ?? ?? 0F B6 E9").GetPtr(v_DebugOverlay_DrawAllOverlays);
 		Module_FindPattern(g_GameDll, "40 53 48 83 EC ?? 48 8D 0D ?? ?? ?? ?? FF 15 ?? ?? ?? ?? 48 8B 0D").GetPtr(v_DebugOverlay_ClearAllOverlays);
 		Module_FindPattern(g_GameDll, "4C 8B DC 45 89 43 ?? 66 89 54 24").GetPtr(v_DebugOverlay_DebugDebugOverlays);
 		Module_FindPattern(g_GameDll, "40 53 56 57 48 83 EC ?? 48 8D B4 24").GetPtr(v_DebugOverlay_AddEntityTextOverlay);
 		Module_FindPattern(g_GameDll, "48 83 EC ?? FF 05 ?? ?? ?? ?? 48 8B D1").GetPtr(v_DebugOverlay_SetEndTime);
+#endif // CLIENT_DLL
 	}
 	virtual void GetVar(void) const
 	{
+#if defined(CLIENT_DLL)
+		s_OverlayMutex   = CMemory(v_DebugOverlay_ClearAllOverlays).Offset(0x04).FindPatternSelf("48 8D 0D", CMemory::Direction::DOWN, 16).ResolveRelativeAddressSelf(0x3, 0x7).RCast<CThreadMutex*>();
+		s_pOverlays      = CMemory(v_DebugOverlay_ClearAllOverlays).Offset(0x10).FindPatternSelf("48 8B 0D", CMemory::Direction::DOWN, 32).ResolveRelativeAddressSelf(0x3, 0x7).RCast<OverlayBase_t**>();
+		s_pOverlayText   = CMemory(v_DebugOverlay_ClearAllOverlays).Offset(0x30).FindPatternSelf("48 8B 1D", CMemory::Direction::DOWN, 64).ResolveRelativeAddressSelf(0x3, 0x7).RCast<OverlayText_t**>();
+
+		// Both tick compares are rip-relative reads in the decay walk, in
+		// render-then-overlay order. Index them by occurrence: chaining off a
+		// resolved site would restart the scan inside the data section.
+		const CMemory drawBase(v_DebugOverlay_DrawAllOverlays);
+		g_nRenderTickCount  = drawBase.FindPattern("3B 05", CMemory::Direction::DOWN, 0x120, 1).ResolveRelativeAddress(0x2, 0x6).RCast<int*>();
+		g_nOverlayTickCount = drawBase.FindPattern("3B 05", CMemory::Direction::DOWN, 0x120, 2).ResolveRelativeAddress(0x2, 0x6).RCast<int*>();
+
+		// Overlay clock, mined off the decay compare in the same walk. The
+		// byte test appears twice: occurrence 1 is the engine-running flag.
+		s_pOverlayUseTickClock = drawBase.FindPattern("80 3D", CMemory::Direction::DOWN, 0x220, 2).ResolveRelativeAddress(0x2, 0x7).RCast<bool*>();
+		s_pOverlayTickCount    = drawBase.FindPattern("66 0F 6E 05", CMemory::Direction::DOWN, 0x220, 1).ResolveRelativeAddress(0x4, 0x8).RCast<int*>();
+		s_pOverlayTickInterval = drawBase.FindPattern("F3 0F 59 05", CMemory::Direction::DOWN, 0x220, 1).ResolveRelativeAddress(0x4, 0x8).RCast<float*>();
+		s_pOverlayCurTime      = drawBase.FindPattern("F3 0F 10 05", CMemory::Direction::DOWN, 0x220, 1).ResolveRelativeAddress(0x4, 0x8).RCast<float*>();
+
+		if (!s_pOverlayUseTickClock || !s_pOverlayTickCount || !s_pOverlayTickInterval || !s_pOverlayCurTime)
+			Warning(eDLL_T::CLIENT, "[DBGDRAW] overlay clock unresolved; duration overlays cannot expire\n");
+
+		const CMemory debugBase(v_DebugOverlay_DebugDebugOverlays);
+		g_nOverlayStage = debugBase.FindPattern("8B 05", CMemory::Direction::DOWN, 0x120, 3).ResolveRelativeAddress(0x2, 0x6).RCast<int*>();
+
+		// The two new-overlay counters are zeroed back to back at the tail.
+		g_nNewOtherOverlays = debugBase.FindPattern("89 3D", CMemory::Direction::DOWN, 0x1200, 1).ResolveRelativeAddress(0x2, 0x6).RCast<int*>();
+		g_nNewTextOverlays  = debugBase.FindPattern("89 3D", CMemory::Direction::DOWN, 0x1200, 2).ResolveRelativeAddress(0x2, 0x6).RCast<int*>();
+
+		if (!s_pOverlays || !s_pOverlayText || !g_nRenderTickCount || !g_nOverlayTickCount ||
+			!g_nOverlayStage || !g_nNewOtherOverlays || !g_nNewTextOverlays)
+			Warning(eDLL_T::CLIENT, "[DBGDRAW] globals unresolved: overlays=0x%llX text=0x%llX renderTick=0x%llX overlayTick=0x%llX stage=0x%llX newOther=0x%llX newText=0x%llX\n",
+				(unsigned long long)(uintptr_t)s_pOverlays,
+				(unsigned long long)(uintptr_t)s_pOverlayText,
+				(unsigned long long)(uintptr_t)g_nRenderTickCount,
+				(unsigned long long)(uintptr_t)g_nOverlayTickCount,
+				(unsigned long long)(uintptr_t)g_nOverlayStage,
+				(unsigned long long)(uintptr_t)g_nNewOtherOverlays,
+				(unsigned long long)(uintptr_t)g_nNewTextOverlays);
+#else
 		s_pOverlays = CMemory(v_DebugOverlay_DrawAllOverlays).Offset(0x10).FindPatternSelf("48 8B 3D", CMemory::Direction::DOWN, 150).ResolveRelativeAddressSelf(0x3, 0x7).RCast<OverlayBase_t**>();
 		s_pOverlayText = CMemory(v_DebugOverlay_ClearAllOverlays).Offset(0x3A).FindPatternSelf("48 8B 1D", CMemory::Direction::DOWN, 150).ResolveRelativeAddressSelf(0x3, 0x7).RCast<OverlayText_t**>();
 		s_OverlayMutex = CMemory(v_DebugOverlay_DrawAllOverlays).Offset(0x10).FindPatternSelf("48 8D 0D", CMemory::Direction::DOWN, 150).ResolveRelativeAddressSelf(0x3, 0x7).RCast<CThreadMutex*>();
@@ -303,6 +402,7 @@ class VDebugOverlay : public IDetour
 
 		g_GameDll.GetVirtualMethodTable(".?AVCIVDebugOverlay@@", 1).GetPtr(g_pIVPhysicsDebugOverlay_VFTable);
 		g_GameDll.GetVirtualMethodTable(".?AVCIVDebugOverlay@@", 2).GetPtr(g_pIVDebugOverlay_VFTable);
+#endif // CLIENT_DLL
 	}
 	virtual void GetCon(void) const { }
 	virtual void Detour(const bool bAttach) const;

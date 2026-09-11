@@ -24,7 +24,7 @@
 // It uses separate chaining: each key hashes to a bucket, each
 // bucket is a linked list of hashed commands. We store the hash of 
 // the command's string name as well as its pointer, so we can do 
-// the linked list march part of the Find() operation more quickly.
+// the linked list march part of the Find operation more quickly.
 class CConCommandHash
 {
 public:
@@ -82,7 +82,7 @@ public:
 
 		CCommandHashIterator_t(int _bucket, const CCommandHashHandle_t& _handle)
 			: bucket(_bucket), handle(_handle) {};
-		// inline operator UtlHashFastHandle_t() const { return handle; };
+		// inline operator UtlHashFastHandle_t const { return handle; };
 	};
 	inline CCommandHashIterator_t First() const;
 	inline CCommandHashIterator_t Next(const CCommandHashIterator_t& hHash) const;
@@ -92,7 +92,7 @@ public:
 private:
 	// a find func where we've already computed the hash for the string.
 	// (hidden private in case we decide to invent a custom string hash func
-	//  for this class)
+	// for this class)
 	CCommandHashHandle_t Find(const char* name, HashKey_t hash) const;
 
 protected:

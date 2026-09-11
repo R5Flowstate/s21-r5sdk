@@ -57,8 +57,19 @@ macro( add_module MODULE_TYPE MODULE_NAME REUSE_PCH FOLDER_NAME WARNINGS_AS_ERRO
         message( FATAL_ERROR "Invalid module type: ${MODULE_TYPE}; expected 'lib', 'shared_lib', or 'exe'." )
     endif()
 
-    if ( NOT "${REUSE_PCH}" STREQUAL "" )
-        target_precompile_headers( ${PROJECT_NAME} REUSE_FROM ${REUSE_PCH} )
+    # Client inject products must reuse vpc_cl (PCH built with CLIENT_DLL) so
+    # dual-body public headers freeze S21 layout. Plain "vpc" freezes S3.
+    set( _R5_PCH_REUSE "${REUSE_PCH}" )
+    if( NOT "${REUSE_PCH}" STREQUAL "" )
+        if( "${MODULE_NAME}" MATCHES "_cl$"
+            OR "${MODULE_NAME}" STREQUAL "client"
+            OR "${MODULE_NAME}" STREQUAL "engine_cl"
+            OR "${MODULE_NAME}" STREQUAL "client_static" )
+            if( TARGET vpc_cl )
+                set( _R5_PCH_REUSE "vpc_cl" )
+            endif()
+        endif()
+        target_precompile_headers( ${PROJECT_NAME} REUSE_FROM ${_R5_PCH_REUSE} )
     endif()
 
     set_target_properties( ${MODULE_NAME} PROPERTIES FOLDER ${FOLDER_NAME} )
@@ -126,6 +137,36 @@ macro( define_compiler_variables )
 endmacro()
 
 # -----------------------------------------------------------------------------
+# VERSIONINFO + optional Authenticode on a shipped PE (client/server/loader).
+# Signing no-ops unless R5SDK_SIGN_THUMBPRINT (or the env var) is set.
+# -----------------------------------------------------------------------------
+macro( r5sdk_attach_pe_identity TARGET )
+    target_sources( ${TARGET} PRIVATE
+        "${ENGINE_SOURCE_DIR}/resource/sdk_version.rc"
+    )
+    source_group( "Resource" FILES
+        "${ENGINE_SOURCE_DIR}/resource/sdk_version.rc"
+    )
+
+    set_source_files_properties( "${ENGINE_SOURCE_DIR}/resource/sdk_version.rc"
+        TARGET_DIRECTORY ${TARGET}
+        PROPERTIES COMPILE_DEFINITIONS
+            "VER_FILEVERSION=${R5SDK_VER_COMMA};VER_FILEVERSION_STR=\"${R5SDK_VER_DOT}\""
+    )
+
+    add_custom_command( TARGET ${TARGET} POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+            "-DR5SDK_SIGN_FILE=$<TARGET_FILE:${TARGET}>"
+            "-DR5SDK_SIGNTOOL=${R5SDK_SIGNTOOL}"
+            "-DR5SDK_SIGN_THUMBPRINT=${R5SDK_SIGN_THUMBPRINT}"
+            "-DR5SDK_SIGN_TIMESTAMP_URL=${R5SDK_SIGN_TIMESTAMP_URL}"
+            -P "${ENGINE_SOURCE_DIR}/cmake/SignBinary.cmake"
+        COMMENT "Authenticode ${TARGET}"
+        VERBATIM
+    )
+endmacro()
+
+# -----------------------------------------------------------------------------
 # Apply whole program optimization for this target in release and profile ( !slow! )
 # -----------------------------------------------------------------------------
 macro( whole_program_optimization )
@@ -161,6 +202,7 @@ macro( thirdparty_suppress_warnings )
     if( MSVC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
         target_compile_options( ${PROJECT_NAME} PRIVATE
             /wd4057 # 'function': 'int *' differs in indirection to slightly different base types from 'unsigned int [4]'
+            /wd4065 # switch statement contains 'default' but no 'case' labels (protobuf generated code).
             /wd4100 # Unreferenced formal parameter.
             /wd4131 # Using old-style declarations.
             /wd4152 # Function/data pointer conversion in expression.
@@ -179,6 +221,7 @@ macro( thirdparty_suppress_warnings )
             /wd4505 # Unreferenced local function has been removed.
             /wd4701 # potentially uninitialized local variable.
             /wd4702 # Unreachable code.
+            /wd4703 # potentially uninitialized local pointer variable (protobuf text_format).
             /wd4706 # assignment within conditional expression.
         )
     endif()

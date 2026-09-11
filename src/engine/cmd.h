@@ -1,3 +1,4 @@
+#if defined(CLIENT_DLL)
 #ifndef CMD_H
 #define CMD_H
 #include "tier1/commandbuffer.h"
@@ -15,7 +16,7 @@ typedef enum
 
 //-----------------------------------------------------------------------------
 // Purpose: Returns current player calling this function
-// Output : ECommandTarget_t - 
+// Output: ECommandTarget_t - 
 //-----------------------------------------------------------------------------
 FORCEINLINE ECommandTarget_t Cbuf_GetCurrentPlayer(void)
 {
@@ -26,9 +27,65 @@ FORCEINLINE ECommandTarget_t Cbuf_GetCurrentPlayer(void)
 extern bool Cbuf_HasRoomForExecutionMarkers(const int cExecutionMarkers);
 extern bool Cbuf_AddTextWithMarkers(const char* text, const ECmdExecutionMarker markerLeft, const ECmdExecutionMarker markerRight);
 
-#ifndef CLIENT_DLL
+
+/* ==== COMMAND_BUFFER ================================================================================================================================================== */
+inline void(*Cbuf_AddText)(ECommandTarget_t eTarget, const char* pText, cmd_source_t cmdSource);
+inline void(*Cbuf_AddExecutionMarker)(ECommandTarget_t target, ECmdExecutionMarker marker);
+inline void(*Cbuf_Execute)(void);
+inline void(*v_Cmd_Dispatch)(ECommandTarget_t eTarget, const ConCommandBase* pCmdBase, const CCommand* pCommand, bool bCallBackupCallback);
+inline bool(*v_Cmd_ForwardToServer)(const CCommand* pCommand);
+
+// S21 Cmd_ExecuteString(player, CCommand*, source). CCommand: +0x04 argc, +0x10 raw[1024], +0x410 argv[0].
+inline __int64 (*v_S21_Cmd_ExecuteString)(unsigned int player, void* parsedCmd, int source);
+
+// Connect worker: CHAR** address. CClientState vtable slot 11 is the network dispatcher.
+inline void (*v_S21_Connect_Worker)(void** addrPtrPtr);
+
+//---------------------------------------------------------------------
+// NET_SendPacket public a3 is netadr_t*. Loopback is type==1. SetSignonState(self, state, spawncount, a4).
+//---------------------------------------------------------------------
+inline __int64 (*v_S21_NET_SendPacket_Public)(__int64 a1, unsigned int a2, __int64 a3, const void* a4, unsigned int a5, unsigned int a6);
+inline __int64 (*v_S21_NET_SendPacket_Inner)(__int64 a1, __int64 a2, __int64 a3, const void* a4, int a5, unsigned int* a6, char a7);
+// Every call site passes 4 qwords; fixed 4-arg is MS x64 ABI compatible.
+inline void   (*v_S21_NET_SendLoopback)(unsigned int a1, int a2, const void* a3, __int64 a4);
+inline char   (*v_S21_CBaseClient_SetSignonState)(__int64 a1, unsigned int a2, int a3, __int64 a4);
+
+extern CCommandBuffer** s_pCommandBuffer;
+extern LPCRITICAL_SECTION s_pCommandBufferMutex;
+
+extern CUtlVector<int>* g_pExecutionMarkers;
+
+#endif // CMD_H
+#else // !CLIENT_DLL
+#ifndef CMD_H
+#define CMD_H
+#include "tier1/commandbuffer.h"
+
+#define MAX_EXECUTION_MARKERS 2048
+
+typedef enum
+{
+	eCmdExecutionMarker_Enable_FCVAR_SERVER_CAN_EXECUTE = 'a',
+	eCmdExecutionMarker_Disable_FCVAR_SERVER_CAN_EXECUTE = 'b',
+
+	eCmdExecutionMarker_Enable_FCVAR_CLIENTCMD_CAN_EXECUTE = 'c',
+	eCmdExecutionMarker_Disable_FCVAR_CLIENTCMD_CAN_EXECUTE = 'd'
+} ECmdExecutionMarker;
+
+//-----------------------------------------------------------------------------
+// Purpose: Returns current player calling this function
+// Output: ECommandTarget_t - 
+//-----------------------------------------------------------------------------
+FORCEINLINE ECommandTarget_t Cbuf_GetCurrentPlayer(void)
+{
+	// Always returns 'CBUF_FIRST_PLAYER' in Respawn's code.
+	return ECommandTarget_t::CBUF_FIRST_PLAYER;
+}
+
+extern bool Cbuf_HasRoomForExecutionMarkers(const int cExecutionMarkers);
+extern bool Cbuf_AddTextWithMarkers(const char* text, const ECmdExecutionMarker markerLeft, const ECmdExecutionMarker markerRight);
+
 extern bool Cmd_ExecuteUnrestricted(const char* const pCommandString, const char* const pValueString);
-#endif // CLIENT_DLL
 
 /* ==== COMMAND_BUFFER ================================================================================================================================================== */
 inline void(*Cbuf_AddText)(ECommandTarget_t eTarget, const char* pText, cmd_source_t cmdSource);
@@ -77,3 +134,4 @@ class VCmd : public IDetour
 };
 
 #endif // CMD_H
+#endif // CLIENT_DLL

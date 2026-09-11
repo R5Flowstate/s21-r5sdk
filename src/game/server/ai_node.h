@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose:
+// Purpose
 //
 //=============================================================================//
 #pragma once
@@ -17,7 +17,7 @@ constexpr int NO_NODE    = -1;			// Returned when no node meets the qualificatio
 enum NodeType_e // !TODO: unconfirmed for r1/r2/r5.
 {
 	NODE_ANY,			// Used to specify any type of node (for search)
-	NODE_DELETED,		// Used in wc_edit mode to remove nodes during runtime     
+	NODE_DELETED,		// Used in wc_edit mode to remove nodes during runtime 
 	NODE_GROUND,
 	NODE_AIR,
 	NODE_CLIMB,
@@ -105,7 +105,7 @@ public:
 
 	// This is an array of floats that is indexed
 	// into by teamNum at [r5apex_ds + EC84DC];
-	// Seems to be used along with the cvar:
+	// Seems to be used along with the cvar
 	// 'ai_path_dangerous_cluster_min_time'.
 	float clusterTime[MAX_TEAMS];
 

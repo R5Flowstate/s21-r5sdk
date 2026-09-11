@@ -14,6 +14,9 @@ public:
 		m_BrowserConfig.m_nBind0 = ImGuiKey_Insert;
 		m_BrowserConfig.m_nBind1 = ImGuiKey_F11;
 
+		m_LocalConfig.m_nBind0 = ImGuiKey_F12;
+		m_LocalConfig.m_nBind1 = ImGuiKey_F12;
+
 		m_DevMenuConfig.m_nBind0 = ImGuiKey_F3;
 		m_DevMenuConfig.m_nBind1 = ImGuiKey_Delete;
 	}
@@ -26,6 +29,7 @@ public:
 	
 	BindPair_s m_ConsoleConfig;
 	BindPair_s m_BrowserConfig;
+	BindPair_s m_LocalConfig;
 	BindPair_s m_DevMenuConfig;
 
 	void Load();
@@ -36,6 +40,7 @@ public:
 	{
 		return (key == m_ConsoleConfig.m_nBind0 || key == m_ConsoleConfig.m_nBind1)
 			|| (key == m_BrowserConfig.m_nBind0 || key == m_BrowserConfig.m_nBind1)
+			|| (key == m_LocalConfig.m_nBind0 || key == m_LocalConfig.m_nBind1)
 			|| (key == m_DevMenuConfig.m_nBind0 || key == m_DevMenuConfig.m_nBind1);
 	};
 };

@@ -10,6 +10,11 @@ struct AsyncHandleTracker_s
 	HANDLE handle;
 };
 
+// AsyncHandleStatus_s and the V_AsyncIO patterns describe the dedicated-server
+// engine only. On the client engine the status entry is 72 bytes (not 0x40), the
+// status array sits at a fixed offset past the file-slot array, file-open takes
+// an extra mode/flags argument, and read takes one more argument than the
+// typedef below.
 struct AsyncHandleStatus_s
 {
 	enum Status_e: uint8_t
@@ -61,6 +66,26 @@ inline RFixedArrayMT* g_pAsyncFileSlotMgr;         // Manages 'g_pakFileSlots'.
 inline AsyncHandleStatus_s* g_pAsyncStatusSlots; // bufSize=256*sizeof(PakStatus_t).
 inline RFixedArrayMT* g_pAsyncStatusSlotMgr;       // Manages 'g_pakStatusSlots'.
 
+#if defined(CLIENT_DLL)
+inline int (__fastcall *v_FS_OpenAsyncFile_S21)(const char* path, int logChannel, size_t* fileSizeOut, unsigned char flags);
+
+class V_AsyncIO_S21 : public IDetour
+{
+	virtual void GetAdr(void) const
+	{
+		LogFunAdr("FS_OpenAsyncFile_S21", v_FS_OpenAsyncFile_S21);
+	}
+	virtual void GetFun(void) const
+	{
+		Module_FindPattern(g_GameDll,
+			"48 89 7C 24 ?? 41 56 48 81 EC ?? ?? ?? ?? 45 8B D1")
+			.GetPtr(v_FS_OpenAsyncFile_S21);
+	}
+	virtual void GetVar(void) const { }
+	virtual void GetCon(void) const { }
+	virtual void Detour(const bool bAttach) const;
+};
+#else // CLIENT_DLL
 class V_AsyncIO : public IDetour
 {
 	virtual void GetAdr(void) const
@@ -100,6 +125,7 @@ class V_AsyncIO : public IDetour
 	virtual void GetCon(void) const { }
 	virtual void Detour(const bool bAttach) const;
 };
+#endif // !CLIENT_DLL
 
 
 #endif // !ASYNCIO_H

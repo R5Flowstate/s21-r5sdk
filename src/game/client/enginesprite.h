@@ -1,6 +1,6 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //===========================================================================//
@@ -28,7 +28,7 @@ public:
 	//void SetFrame(RenderMode_t nRenderMode, int nFrame);
 	//bool Init(const char* name);
 	//void Shutdown(void);
-	//void UnloadMaterial();
+	//void UnloadMaterial;
 	//void SetColor(float r, float g, float b);
 	//int GetOrientation(void);
 	//void GetHUDSpriteColor(float* color);

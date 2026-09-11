@@ -1,6 +1,6 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 //===========================================================================//
 #ifndef IINPUTSYSTEM_H
@@ -142,7 +142,7 @@ public:
 	virtual void SetMouseCursorVisible( const bool bVisible ) = 0;
 	virtual void SetJoystickCursorVisible( const bool bVisible ) = 0;
 
-	/// Reset the current cursor icon.  Used to reset the icon in the case of alt+tabs where the cursor has been forced to a different
+	/// Reset the current cursor icon. Used to reset the icon in the case of alt+tabs where the cursor has been forced to a different
 	/// icon because it was outside of the client rect during the reload.
 	virtual void ResetCursorIcon() = 0;
 

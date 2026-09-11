@@ -71,9 +71,9 @@
 #define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
 #endif
 
-#define MAIN_WORKER_DLL "gamesdk.dll"
-#define SERVER_WORKER_DLL "dedicated.dll"
-#define CLIENT_WORKER_DLL "bin\\x64_retail\\client.dll"
+#define MAIN_WORKER_DLL "client.dll"
+#define SERVER_WORKER_DLL "server.dll"
+#define CLIENT_WORKER_DLL "client.dll"
 
 #define MAIN_GAME_DLL "r5apex.exe"
 #define SERVER_GAME_DLL "r5apex_ds.exe"

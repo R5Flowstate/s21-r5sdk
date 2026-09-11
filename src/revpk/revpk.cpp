@@ -103,7 +103,7 @@ static void ReVPK_ExplainUsage()
         "\t<%s>\t- ( optional ) path in which the VPK files will be unpacked\n"
         "\t<%s>\t- ( optional ) whether to parse the directory file name from the pack file name\n",
 
-        PACK_COMMAND, // Pack parameters:
+        PACK_COMMAND, // Pack parameters
         "locale", g_LanguageNames[0],
         "context", g_GameDllTargets[0], g_GameDllTargets[1],
         
@@ -115,7 +115,7 @@ static void ReVPK_ExplainUsage()
         "compressLevel", // Compress level.
         "fastest", "faster", "default", "better", "uber",
 
-        UNPACK_COMMAND,// Unpack parameters:
+        UNPACK_COMMAND,// Unpack parameters
         "fileName", "outPath", "sanitize"
     );
 
@@ -267,7 +267,7 @@ static void ReVPK_Unpack(const CCommand& args)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose
 //-----------------------------------------------------------------------------
 int main(int argc, char* argv[])
 {

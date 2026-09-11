@@ -1,4 +1,4 @@
-﻿//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
 // Purpose: Defines a symbol table
 //
@@ -15,7 +15,7 @@
 //#include "tier0/vprof.h"
 #include <stddef.h>
 
-// memdbgon must be the last include file in a .cpp file!!!
+// memdbgon must be the last include file in a.cpp file!!!
 #include "tier0/memdbgon.h"
 
 #define INVALID_STRING_INDEX CStringPoolIndex( 0xFFFF, 0xFFFF )
@@ -147,10 +147,8 @@ int CUtlSymbolTable::CLess::operator()( const CStringPoolIndex &i1, const CStrin
 	// Need to do pointer math because CUtlSymbolTable is used in CUtlVectors, and hence
 	// can be arbitrarily moved in memory on a realloc. Yes, this is portable. In reality,
 	// right now at least, because m_LessFunc is the first member of CUtlRBTree, and m_Lookup
-	// is the first member of CUtlSymbolTabke, this == pTable
 	CUtlSymbolTable *pTable = (CUtlSymbolTable *)( (byte *)this - offsetof(CUtlSymbolTable::CTree, m_LessFunc) ) - offsetof(CUtlSymbolTable, m_Lookup );
 
-#if 1 // using the hashes
 	const char *str1, *str2;
 	hashDecoration_t hash1, hash2;
 
@@ -205,23 +203,6 @@ int CUtlSymbolTable::CLess::operator()( const CStringPoolIndex &i1, const CStrin
 		return hash1 < hash2;
 	}
 
-#else // not using the hashes, just comparing strings
-	const char* str1 = (i1 == INVALID_STRING_INDEX) ? pTable->m_pUserSearchString :
-		pTable->StringFromIndex( i1 );
-	const char* str2 = (i2 == INVALID_STRING_INDEX) ? pTable->m_pUserSearchString :
-		pTable->StringFromIndex( i2 );
-
-	if ( !str1 && str2 )
-		return 1;
-	if ( !str2 && str1 )
-		return -1;
-	if ( !str1 && !str2 )
-		return 0;
-	if ( !pTable->m_bInsensitive )
-		return strcmp( str1, str2 ) < 0;
-	else
-		return strcmpi( str1, str2 ) < 0;
-#endif
 }
 
 
@@ -375,9 +356,9 @@ void CUtlSymbolTable::RemoveAll()
 
 
 //-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : *pFileName - 
-// Output : FileNameHandle_t
+// Purpose
+// Input: *pFileName - 
+// Output: FileNameHandle_t
 //-----------------------------------------------------------------------------
 FileNameHandle_t CUtlFilenameSymbolTable::FindOrAddFileName( const char *pFileName )
 {
@@ -463,9 +444,9 @@ FileNameHandle_t CUtlFilenameSymbolTable::FindFileName( const char *pFileName )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : handle - 
-// Output : const char
+// Purpose
+// Input: handle - 
+// Output: const char
 //-----------------------------------------------------------------------------
 bool CUtlFilenameSymbolTable::String( const FileNameHandle_t& handle, char *buf, int buflen )
 {

@@ -1,4 +1,4 @@
-﻿//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Color conversion routines.
 //
@@ -7,7 +7,7 @@
 #include "mathlib/mathlib.h"
 #include "mathlib/vector.h"
 
-// memdbgon must be the last include file in a .cpp file!!!
+// memdbgon must be the last include file in a.cpp file!!!
 #include "tier0/memdbgon.h"
 
 //-----------------------------------------------------------------------------
@@ -122,7 +122,7 @@ void BuildGammaTable(float gamma, float texGamma, float brightness, int overbrig
 	int		i, inf;
 	float	g1, g3;
 
-	// Con_Printf("BuildGammaTable %.1f %.1f %.1f\n", g, v_lightgamma.GetFloat(), v_texgamma.GetFloat() );
+	// Con_Printf("BuildGammaTable %.1f %.1f %.1f\n", g, v_lightgamma.GetFloat, v_texgamma.GetFloat );
 
 	float g = gamma;
 	if (g > 3.0f)
@@ -186,9 +186,9 @@ void BuildGammaTable(float gamma, float texGamma, float brightness, int overbrig
 	for (i=0 ; i<1024 ; i++)
 	{
 		// convert from screen gamma space to linear space
-		lineargammatable[i] = 1023 * pow ( i/1023.0, v_gamma.GetFloat() );
+		lineargammatable[i] = 1023 * pow ( i/1023.0, v_gamma.GetFloat );
 		// convert from linear gamma space to screen space
-		screengammatable[i] = 1023 * pow ( i/1023.0, 1.0 / v_gamma.GetFloat() );
+		screengammatable[i] = 1023 * pow ( i/1023.0, 1.0 / v_gamma.GetFloat );
 	}
 	*/
 
@@ -210,19 +210,6 @@ void BuildGammaTable(float gamma, float texGamma, float brightness, int overbrig
 		lineartotexture[i] = (int)pow(i / 1023.0, 1.0 / texGamma) * 255;
 	}
 
-#if 0
-	for (i = 0; i < 256; i++)
-	{
-		float f;
-
-		// convert from nonlinear lightmap space (0..255) to linear space (0..4)
-		// f =  (i / 255.0) * sqrt( 4 );
-		f = i * (2.0 / 255.0);
-		f = f * f;
-
-		texlighttolinear[i] = f;
-	}
-#endif
 
 	{
 		float f;
@@ -277,7 +264,7 @@ float GammaToLinear(float gamma)
 	{
 		// Use GammaToLinearFullRange maybe if you trip this.
 // X360TEMP
-//		Assert( gamma <= 1.0f );
+// Assert( gamma <= 1.0f );
 		return 1.0f;
 	}
 
@@ -450,81 +437,9 @@ void ColorRGBExp32ToVector(const ColorRGBExp32& in, Vector3D& out)
 	out.z = 255.0f * TexLightToLinear(in.b, in.exponent);
 }
 
-#if 0
-// assumes that the desired mantissa range is 128..255
-static int VectorToColorRGBExp32_CalcExponent(float in)
-{
-	int power = 0;
 
-	if (in != 0.0f)
-	{
-		while (in > 255.0f)
-		{
-			power += 1;
-			in *= 0.5f;
-		}
-
-		while (in < 128.0f)
-		{
-			power -= 1;
-			in *= 2.0f;
-		}
-	}
-
-	return power;
-}
-
-void VectorToColorRGBExp32(const Vector3D& vin, ColorRGBExp32& c)
-{
-	Vector3D v = vin;
-	Assert(s_bMathlibInitialized);
-	Assert(v.x >= 0.0f && v.y >= 0.0f && v.z >= 0.0f);
-	int i;
-	float max = v[0];
-	for (i = 1; i < 3; i++)
-	{
-		// Get the maximum value.
-		if (v[i] > max)
-		{
-			max = v[i];
-		}
-	}
-
-	// figure out the exponent for this luxel.
-	int exponent = VectorToColorRGBExp32_CalcExponent(max);
-
-	// make the exponent fits into a signed byte.
-	if (exponent < -128)
-	{
-		exponent = -128;
-	}
-	else if (exponent > 127)
-	{
-		exponent = 127;
-	}
-
-	// undone: optimize with a table
-	float scalar = pow(2.0f, -exponent);
-	// convert to mantissa x 2^exponent format
-	for (i = 0; i < 3; i++)
-	{
-		v[i] *= scalar;
-		// clamp
-		if (v[i] > 255.0f)
-		{
-			v[i] = 255.0f;
-		}
-	}
-	c.r = (unsigned char)v[0];
-	c.g = (unsigned char)v[1];
-	c.b = (unsigned char)v[2];
-	c.exponent = (signed char)exponent;
-}
-
-#else
-
-// given a floating point number  f, return an exponent e such that
-// for f' = f * 2^e,  f is on [128..255].
+// given a floating point number f, return an exponent e such that
+// for f' = f * 2^e, f is on [128..255].
 // Uses IEEE 754 representation to directly extract this information
 // from the float.
 inline static int VectorToColorRGBExp32_CalcExponent(const float* pin)
@@ -603,7 +518,7 @@ void VectorToColorRGBExp32(const Vector3D& vin, ColorRGBExp32& c)
 		scalar = *reinterpret_cast<float*>(&fbits);
 	}
 
-	// we should never need to clamp:
+	// we should never need to clamp
 	Assert(vin.x * scalar <= 255.0f &&
 		vin.y * scalar <= 255.0f &&
 		vin.z * scalar <= 255.0f);
@@ -628,4 +543,3 @@ void VectorToColorRGBExp32(const Vector3D& vin, ColorRGBExp32& c)
 	c.exponent = (signed char)exponent;
 }
 
-#endif

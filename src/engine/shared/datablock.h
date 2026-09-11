@@ -12,6 +12,11 @@
 // the maximum amount of fragments per data block transfer
 #define MAX_DATABLOCK_FRAGMENTS 768
 
+// ceil-aligned payload the 0xC0004 scratch can hold (768 * 1024).
+// Wire transferSize is attacker-controlled; never use it as the write bound.
+#define MAX_DATABLOCK_TRANSFER_SIZE (MAX_DATABLOCK_FRAGMENTS * MAX_DATABLOCK_FRAGMENT_SIZE)
+#define DATABLOCK_SDK_SCRATCH_SIZE 4194304
+
 #define DATABLOCK_DEBUG_NAME_LEN 64
 #define DATABLOCK_INVALID_BLOCK_NR -1
 
@@ -96,13 +101,11 @@ protected:
 	bool m_bBlockAckStatus[MAX_DATABLOCK_FRAGMENTS];
 	uint8_t* m_pScratchBuffer;
 
-	// this member is true when:
-	// net_debugDataBlockSender.GetBool() == true, or:
-	// m_bStartedTransfer == true, or:
-	// ( m_TimeCurrentSend - m_TimeFirstSend ) > net_datablock_longSendTime.GetFloat(), or:
+	// this member is true when
+	// ( m_TimeCurrentSend - m_TimeFirstSend ) > net_datablock_longSendTime.GetFloat, or
 	// m_nTransferId < 4
 	//
-	// if the above condition is true, function ServerDataBlockSender::SendPendingDataBlocks()
+	// if the above condition is true, function ServerDataBlockSender::SendPendingDataBlocks
 	// also returns true, else this function always returns false
 	bool m_bAbnormalSend;
 };
@@ -151,32 +154,5 @@ protected:
 	bool m_BlockStatus[MAX_DATABLOCK_FRAGMENTS];
 	char* m_pScratchBuffer;
 };
-
-inline void* (*NetDataBlockSender__Destructor)(NetDataBlockSender* thisptr);
-inline void* (*NetDataBlockReceiver__Destructor)(NetDataBlockReceiver* thisptr);
-
-///////////////////////////////////////////////////////////////////////////////
-class VNetDataBlock : public IDetour
-{
-	virtual void GetAdr(void) const
-	{
-		LogFunAdr("NetDataBlockSender::~NetDataBlockSender", NetDataBlockSender__Destructor);
-		LogFunAdr("NetDataBlockReceiver::~NetDataBlockReceiver", NetDataBlockReceiver__Destructor);
-	}
-	virtual void GetFun(void) const
-	{
-		Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 57 48 83 EC 20 8B DA 48 8B F9 E8 ?? ?? ?? ?? F6 C3 01 74"
-			" 0D BA ?? ?? ?? ?? 48 8B CF E8 ?? ?? ?? ?? 48 8B C7 48 8B 5C 24 ?? 48 83 C4 20 5F C3 CC CC CC CC CC CC CC CC CC CC CC CC 48 89 5C 24"
-			" ?? 48 89 74 24 ?? 57 48 83 EC 20 33 F6 66 C7 81 ?? ?? ?? ?? ?? ??").GetPtr(NetDataBlockSender__Destructor);
-
-		Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 57 48 83 EC 20 8B DA 48 8B F9 E8 ?? ?? ?? ?? F6 C3 01 74"
-			" 0D BA ?? ?? ?? ?? 48 8B CF E8 ?? ?? ?? ?? 48 8B C7 48 8B 5C 24 ?? 48 83 C4 20 5F C3 CC CC CC CC CC CC CC CC CC CC CC CC 48 89 5C 24"
-			" ?? 48 89 74 24 ?? 57 48 83 EC 20 48 8D 05 ?? ?? ?? ?? C6 41 12 00").GetPtr(NetDataBlockReceiver__Destructor);
-	}
-	virtual void GetVar(void) const { }
-	virtual void GetCon(void) const { }
-	virtual void Detour(const bool bAttach) const { }
-};
-///////////////////////////////////////////////////////////////////////////////
 
 #endif // IDATABLOCK_H

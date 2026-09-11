@@ -6,31 +6,68 @@
 //=============================================================================//
 
 #include "core/stdafx.h"
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cstddef>
 #include "tier1/cvar.h"
 #include "public/server_class.h"
 #include "public/eiface.h"
 #include "public/const.h"
 #include "common/protocol.h"
 #include "common/callback.h"
-#include "rtech/liveapi/liveapi.h"
 #include "engine/server/sv_main.h"
 #include "gameinterface.h"
 #include "entitylist.h"
 #include "baseanimating.h"
 #include "engine/server/server.h"
+#include "engine/client/client.h"
+#include "common/netmessages.h"
+#include "tier1/cmd.h"
 #include "game/shared/usercmd.h"
 #include "game/server/util_server.h"
 #include "pluginsystem/pluginsystem.h"
 #include "game/server/recipientfilter.h"
+#include "game/shared/weapon_script_vars.h"
+#include "game/shared/weapon_heat.h"
+#include "game/server/weapon_ammo_pool_mod.h"
+#include "game/shared/offhand_slots_ext.h"
+#include "game/server/energize.h"
+#include "game/server/akimbo.h"
+#include "game/shared/globalnonrewind_vars.h"
+#include "game/shared/scriptnetdata_ext.h"
+#include "game/shared/scriptnetdata_limits.h"
+#include "game/shared/deathfield_system.h"
+#include "game/shared/highlight_context.h"
+#include "game/shared/sdk_entity_state.h"
+#include "game/server/chatbuilder.h"
+#include "game/server/jetdrive.h"
+#include "game/server/player_launch.h"
+#include "game/server/trigger_gravity.h"
+#include "game/server/trigger_updraft.h"
+#include "engine/server/precache_natives.h"
+#include "engine/server/skinnames_table_inject.h"
+#include "engine/server/snapshot_diag.h"
+#include "game/shared/dt_extend.h"
+#include "game/shared/player_extend_sidecar.h"
+#include "game/server/translocation.h"
+#include "game/server/extended_range_use.h"
+#include "game/server/vscript_server.h"
+#include "game/server/vscript_server_natives.h"
+#include "game/client/vscript_player.h"
+#include "game/shared/vscript_remotefunctions_sdk.h"
+#include "game/shared/scriptremotefunctions.h"
+#include "game/shared/scriptremotefunctions_server.h"
+#include "game/shared/vscript_remotefunctions_sdk.h"
+#include "game/client/scriptnetdata_client.h"
 
 //-----------------------------------------------------------------------------
 // Purpose: retrieves the index of the client that issued the last command
-// Output : int
+// Output: int
 //-----------------------------------------------------------------------------
 int UTIL_GetCommandClientIndex(void)
 {
-	// -1 == unknown,dedicated server console
-	// 0  == player 1
 
 	// Convert to 1 based offset
 	return (*g_nCommandClientIndex)+1;
@@ -38,7 +75,7 @@ int UTIL_GetCommandClientIndex(void)
 
 //-----------------------------------------------------------------------------
 // Purpose: retrieves the player of the client that issued the last command
-// Output : CPlayer*
+// Output: CPlayer*
 //-----------------------------------------------------------------------------
 CPlayer* UTIL_GetCommandClient(void)
 {
@@ -83,10 +120,103 @@ void CServerGameDLL::PrecompileScriptsJob(void)
 }
 
 //-----------------------------------------------------------------------------
+// SDK per-level reset state. Armed after each level's string-table create so
+// a transition that never reaches LevelShutdown still resets before the next
+// level caches table pointers.
+//-----------------------------------------------------------------------------
+static std::atomic<unsigned int> s_nSdkLevelGeneration{0};
+static std::atomic<bool>         s_bSdkLevelResetArmed{false};
+
+void ServerGameDLL_RunSdkLevelReset(const char* pszReason)
+{
+	// Arm pack freeze before entity teardown so snapshot workers cannot pack freed BCC.
+	SnapshotDiag_SetPackFrozen(true);
+
+	// Drop per-entity SDK shadow state so stale entries do not survive the next map.
+	SDKEntityState_FlushAll(ESide::Server);
+	SDKEntityState_FlushAll(ESide::Client);
+
+	WeaponScriptVars_LevelShutdown();
+	WeaponScriptVars_PhaseShift_LevelShutdown();
+	WeaponScriptVars_WeaponLockedSet_LevelShutdown();
+	WeaponScriptVars_InfiniteAmmo_LevelShutdown();
+	JetDrive_Wire_LevelShutdown();
+	PlayerLaunch_LevelShutdown();
+	PlayerExtend_LevelShutdown();
+	TriggerGravity_Wire_LevelShutdown();
+	UpdraftBridge_Wire_LevelShutdown();
+	WeaponHeat_LevelShutdown();
+	WeaponAmmoPoolMod_LevelShutdown();
+	OffhandSlotsExt_LevelShutdown();
+	EnergizeBridge_LevelShutdown();
+	AkimboBridge_LevelShutdown();
+	GlobalNonRewind_LevelShutdown();
+	ScriptNetDataExt_LevelShutdown();
+	SNDC_ExtensionLevelShutdown();
+	Translocation_LevelShutdown();
+	ServerScript_PlacementLevelShutdown();
+	BreachTrace_LevelShutdown();
+	PrecacheNativesDedi_LevelShutdown();
+	ExtendedUse_LevelShutdown();
+	ScriptRemoteC2S_LevelShutdown();
+	// Clear dt_extend's NonRewind/GLOBAL captures + pending/applied
+	// m_pServerClass swap queues so map 2+ re-captures fresh and stale
+	// entity pointers can't edict-collide with new entities.
+	DTExtend_LevelShutdown();
+	// Drop snapshot_diag's per-entity settings-applied hash set + one-shot
+	// forensic dump guard so a new map's first entity isn't shadowed by
+	// a stale map-1 ptr in the set.
+	SnapshotDiag_LevelShutdown();
+	// Clear the SkinNames inject guard; string tables are recreated per-map.
+	SkinNamesInject_LevelShutdown();
+	ScriptNetData_LevelShutdown();
+	DeathField_LevelShutdown();
+	HighlightContext_LevelShutdown();
+	// Teleport sticky state (and other player script maps) must clear on dedi
+	// changelevel too -- was incorrectly gated behind !DEDICATED.
+	VScriptPlayer_LevelShutdown();
+	Script_ClearRemoteFunctionRegistrations();
+	ScriptRemote_ResetExtendedArgBuffer();
+
+	s_bSdkLevelResetArmed.store(false, std::memory_order_release);
+
+	Msg(eDLL_T::SERVER, "[s21-dedi] SDK level reset (%s, gen %u)\n",
+		pszReason ? pszReason : "?",
+		s_nSdkLevelGeneration.load(std::memory_order_acquire));
+}
+
+unsigned int ServerGameDLL_GetLevelGeneration(void)
+{
+	return s_nSdkLevelGeneration.load(std::memory_order_acquire);
+}
+
+unsigned int ServerGameDLL_OnLevelStringTablesCreated(void)
+{
+	// map / State_NewGame never call LevelShutdown; catch that path here
+	// before any SDK code caches a table pointer for the new level.
+	if (s_bSdkLevelResetArmed.exchange(false, std::memory_order_acq_rel))
+		ServerGameDLL_RunSdkLevelReset("engine level-init");
+
+	const unsigned int gen =
+		s_nSdkLevelGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+	s_bSdkLevelResetArmed.store(true, std::memory_order_release);
+
+	// CreateNetworkStringTables runs during level bring-up before the BSP
+	// entity lump is parsed, so the factory is live when trigger_updraft
+	// brushes are created.
+	UpdraftBridge_InstallEntityFactory();
+
+	return gen;
+}
+
+//-----------------------------------------------------------------------------
 // Called when a level is shutdown (including changing levels)
 //-----------------------------------------------------------------------------
 void CServerGameDLL::LevelShutdown(void)
 {
+	ServerGameDLL_RunSdkLevelReset("LevelShutdown");
+
 	const static int index = 8;
 	CallVFunc<void>(index, this);
 }
@@ -104,7 +234,7 @@ void CServerGameDLL::GameShutdown(void)
 
 //-----------------------------------------------------------------------------
 // Purpose: Gets the simulation tick interval
-// Output : float
+// Output: float
 //-----------------------------------------------------------------------------
 float CServerGameDLL::GetTickInterval(void)
 {
@@ -114,7 +244,7 @@ float CServerGameDLL::GetTickInterval(void)
 
 //-----------------------------------------------------------------------------
 // Purpose: get all server classes
-// Output : ServerClass*
+// Output: ServerClass*
 //-----------------------------------------------------------------------------
 ServerClass* CServerGameDLL::GetAllServerClasses(void)
 {
@@ -123,73 +253,188 @@ ServerClass* CServerGameDLL::GetAllServerClasses(void)
 }
 
 static ConVar chat_debug("chat_debug", "0", FCVAR_RELEASE, "Enables chat-related debug printing.");
-static ConVar sv_overrideTeamChatRestriction("sv_overrideTeamChatRestriction", "0", FCVAR_RELEASE,
-	"When enabled this allows sv_forceChatToTeamOnly to take control of the team chat restriction.",
-	"0: Default, 1: Forces the value from sv_forceChatToTeamOnly."
+static ConVar sv_chat_commands("sv_chat_commands", "1", FCVAR_RELEASE,
+	"Treat chat lines starting with '!' as client commands (not broadcast).");
+
+static bool Chat_CommandVerbDenied(const char* const pszVerb)
+{
+	if (!pszVerb || !pszVerb[0])
+		return true;
+
+	static const char* const kDeny[] = {
+		"script", "script_client", "script_ui",
+		"bind", "unbind", "unbindall",
+		"exec", "alias", "quit",
+		"_setClassVarClient",
+		"net_setkey", "net_generatekey", "net_getkey", "sv_netkey",
+		"net_tracePayload", "net_dumpWire", "net_useRandomKey",
+		"spawnbots",
+		"chat_announce",
+		"launchplaylist",
+		"language",
+		"fs_guardLiveMapUnmount",
+		"sdk_splitpacket_recv_clamp",
+		"bridge_akimbo",
+		"bridge_akimbo_deploy_partner",
+	};
+
+	for (size_t i = 0; i < SDK_ARRAYSIZE(kDeny); i++)
+	{
+		if (!_stricmp(pszVerb, kDeny[i]))
+			return true;
+	}
+
+	if (pszVerb[0] == '+' || pszVerb[0] == '-')
+		return true;
+
+	return false;
+}
+
+// Returns true if the line was a '!' command and must not be broadcast.
+static bool Chat_TryRunBangCommand(CClient* const pSenderClient, const char* text)
+{
+	if (!sv_chat_commands.GetBool() || !pSenderClient || !text || text[0] != '!')
+		return false;
+
+	const char* pszCmd = text + 1;
+	while (*pszCmd == ' ' || *pszCmd == '\t')
+		++pszCmd;
+	if (!*pszCmd)
+		return true;
+
+	if (V_strlen(pszCmd) >= 512)
+	{
+		Warning(eDLL_T::SERVER, "[CHAT-CMD] drop overlong command from slot=%i\n",
+			pSenderClient->GetUserID());
+		return true;
+	}
+
+	CCommand args;
+	if (!args.Tokenize(pszCmd, cmd_source_t::kCommandSrcNetClient) || args.ArgC() < 1)
+	{
+		Warning(eDLL_T::SERVER, "[CHAT-CMD] drop from slot=%i (tokenize)\n",
+			pSenderClient->GetUserID());
+		return true;
+	}
+
+	if (Chat_CommandVerbDenied(args.Arg(0)))
+	{
+		Warning(eDLL_T::SERVER, "[CHAT-CMD] drop '%s' from slot=%i\n",
+			args.Arg(0), pSenderClient->GetUserID());
+		return true;
+	}
+
+	// Engine ProcessStringCmd reads cmd at +0x20 and the 1024-byte buffer at +0x28.
+	// Do not construct NET_StringCmd (INetMessage still has pure virtuals).
+	unsigned char raw[sizeof(NET_StringCmd)];
+	memset(raw, 0, sizeof(raw));
+	char* const pszBuf = reinterpret_cast<char*>(raw + 0x28);
+	V_strncpy(pszBuf, pszCmd, 512);
+	*reinterpret_cast<const char**>(raw + 0x20) = pszBuf;
+
+	CClient* const pShifted = reinterpret_cast<CClient*>(
+		reinterpret_cast<char*>(pSenderClient) + sizeof(void*));
+	CClient::VProcessStringCmd(pShifted, reinterpret_cast<NET_StringCmd*>(raw));
+	return true;
+}
+
+static ConVar bridge_chat_bridge_render("bridge_chat_bridge_render", "1", FCVAR_RELEASE,
+	"S21 bridge: deliver player chat as a bridge chat stream carrying the sender's name (1, default) "
+	"instead of the native SayText usermessage. The native handler resolves the sender by edict and "
+	"renders nothing when that entity is outside the viewer's realm, which silences every cross-realm "
+	"line. 0 = native SayText (same-realm senders only).");
+static ConVar bridge_chat_unreliable("bridge_chat_unreliable", "1", FCVAR_RELEASE,
+	"S21 bridge: broadcast the SayText chat usermessage UNRELIABLY (1, default) instead of reliably. "
+	"The S21<->S3 bridge only translates/relays the UNRELIABLE S2C message stream to the client; reliable "
+	"subchannel usermessages (the default for chat) never reach the S21 hud chat. Localhost bridge = no loss.");
+static ConVar sv_overrideTeamChatRestriction("sv_overrideTeamChatRestriction", "1", FCVAR_RELEASE,
+	"When enabled, sv_forceChatToTeamOnly controls the chat restriction (overriding the client's "
+	"per-message team flag). Defaults ON for the S21 bridge -- the bridge client emits SayText with "
+	"isTeamChat=1, so without this every line would render as TEAM chat; with this + sv_forceChatToTeamOnly 0, "
+	"chat is GLOBAL.",
+	"0: honor the client's per-message team flag, 1: force the value from sv_forceChatToTeamOnly."
 );
 static ConVar sv_allowIconsInChat("sv_allowIconsInChat", "0", FCVAR_RELEASE, "Allow game icon characters in chat messages. 0 = Block icons, 1 = Allow icons");
 
 // Function to check if a UTF-8 string contains blocked game icon characters
 static bool SV_ContainsBlockedIcons(const char* text)
 {
-    if (!text) return false;
-    
-    const unsigned char* p = reinterpret_cast<const unsigned char*>(text);
-    
-    while (*p)
-    {
-        // Check for UTF-8 sequences that represent the blocked icon characters
-        // These characters are in the Private Use Area around U+F0000-U+F0FFF
-        
-        // UTF-8 encoding for U+F0000-U+F0FFF:
-        // 4-byte sequence: 0xF3 0xB0 0x80-0xBF 0x80-0xBF
-        if (p[0] == 0xF3 && p[1] == 0xB0)
-        {
-            // This is likely one of the blocked icon characters
-            return true;
-        }
-        
-        // Also check for some other common Private Use Area ranges that might contain icons
-        // U+E000-U+F8FF (3-byte UTF-8: 0xEE-0xEF)
-        if (p[0] >= 0xEE && p[0] <= 0xEF)
-        {
-            // Check if this matches the specific icon pattern
-            // The icons you listed seem to be in a specific range
-            if (p[0] == 0xEF && p[1] >= 0x80 && p[1] <= 0xBF)
-            {
-                return true; // Block these specific Private Use Area characters
-            }
-        }
-        
-        // Move to next character
-        if (*p < 0x80)
-        {
-            // ASCII character
-            p++;
-        }
-        else if ((*p & 0xE0) == 0xC0)
-        {
-            // 2-byte UTF-8
-            p += 2;
-        }
-        else if ((*p & 0xF0) == 0xE0)
-        {
-            // 3-byte UTF-8
-            p += 3;
-        }
-        else if ((*p & 0xF8) == 0xF0)
-        {
-            // 4-byte UTF-8
-            p += 4;
-        }
-        else
-        {
-            // Invalid UTF-8, skip
-            p++;
-        }
-    }
-    
-    return false;
+	if (!text)
+		return false;
+
+	const unsigned char* p = reinterpret_cast<const unsigned char*>(text);
+	int safety = 0;
+
+	while (*p && safety++ < 2048)
+	{
+		if (p[0] == 0xF3 && p[1] == 0xB0)
+			return true;
+		if (p[0] == 0xEF && p[1] >= 0x80 && p[1] <= 0xBF)
+			return true;
+
+		const unsigned char c = p[0];
+		if (c <= 0x7F)
+		{
+			++p;
+			continue;
+		}
+
+		if (c <= 0xBF || c == 0xC0 || c == 0xC1 || c >= 0xF5)
+		{
+			++p;
+			continue;
+		}
+
+		if (c <= 0xDF)
+		{
+			if (!p[1] || (p[1] & 0xC0) != 0x80)
+			{
+				++p;
+				continue;
+			}
+			p += 2;
+			continue;
+		}
+
+		if (c <= 0xEF)
+		{
+			unsigned char lo = 0x80;
+			unsigned char hi = 0xBF;
+			if (c == 0xE0)
+				lo = 0xA0;
+			else if (c == 0xED)
+				hi = 0x9F;
+			if (!p[1] || !p[2]
+				|| p[1] < lo || p[1] > hi
+				|| (p[2] & 0xC0) != 0x80)
+			{
+				++p;
+				continue;
+			}
+			p += 3;
+			continue;
+		}
+
+		{
+			unsigned char lo = 0x80;
+			unsigned char hi = 0xBF;
+			if (c == 0xF0)
+				lo = 0x90;
+			else if (c == 0xF4)
+				hi = 0x8F;
+			if (!p[1] || !p[2] || !p[3]
+				|| p[1] < lo || p[1] > hi
+				|| (p[2] & 0xC0) != 0x80
+				|| (p[3] & 0xC0) != 0x80)
+			{
+				++p;
+				continue;
+			}
+			p += 4;
+		}
+	}
+
+	return false;
 }
 
 void CServerGameDLL::OnReceivedSayTextMessage(CServerGameDLL* thisptr, int senderId, const char* text, bool isTeamChat)
@@ -197,8 +442,43 @@ void CServerGameDLL::OnReceivedSayTextMessage(CServerGameDLL* thisptr, int sende
 	CPlayer* const pSenderPlayer = UTIL_PlayerByIndex(senderId);
 	CClient* const pSenderClient = g_pServer->GetClient(senderId - 1);
 
+	if (chat_debug.GetBool())
+		Msg(eDLL_T::SERVER, "[BRIDGE-CHAT] OnReceivedSayText senderId=%d player=%p client=%p connected=%d team=%d text='%s'\n",
+			senderId, reinterpret_cast<void*>(pSenderPlayer), reinterpret_cast<void*>(pSenderClient),
+			(pSenderPlayer && pSenderPlayer->IsConnected()) ? 1 : 0, (int)isTeamChat, text ? text : "(null)");
+
 	if (!pSenderPlayer || !pSenderClient ||  !pSenderPlayer->IsConnected())
+	{
+		if (chat_debug.GetBool())
+			Msg(eDLL_T::SERVER, "[BRIDGE-CHAT] DROP: sender invalid/disconnected (player=%p client=%p)\n",
+				reinterpret_cast<void*>(pSenderPlayer), reinterpret_cast<void*>(pSenderClient));
 		return;
+	}
+
+	if (text && text[0] == 'b' && text[1] == 'r' && text[2] == 'c' && text[3] == ' ')
+	{
+		const char* const pszNum = text + 4;
+		if (pszNum[0] >= '0' && pszNum[0] <= '9')
+		{
+			char* pszEnd = nullptr;
+			const unsigned long nSeqUL = strtoul(pszNum, &pszEnd, 10);
+			const ptrdiff_t nDigits = pszEnd ? (pszEnd - pszNum) : 0;
+			if (pszEnd && nDigits > 0 && nDigits <= 10
+				&& !(nDigits == 10 && strncmp(pszNum, "4294967295", 10) > 0)
+				&& *pszEnd == ' ')
+			{
+				CClientExtended* const pExt = pSenderClient->GetClientExtended();
+				if (pExt && !pExt->AcceptBridgeRelSeq(static_cast<uint32_t>(nSeqUL)))
+				{
+					if (chat_debug.GetBool())
+						Msg(eDLL_T::SERVER, "[BRIDGE-CHAT] drop dup seq=%lu senderId=%d\n",
+							nSeqUL, senderId);
+					return;
+				}
+				text = pszEnd + 1;
+			}
+		}
+	}
 
 	const bool bIsTeamChat = sv_overrideTeamChatRestriction.GetBool() ? sv_forceChatToTeamOnly->GetBool()  : isTeamChat;
 
@@ -290,12 +570,15 @@ void CServerGameDLL::OnReceivedSayTextMessage(CServerGameDLL* thisptr, int sende
 		}
 	}
 
+	if (Chat_TryRunBangCommand(pSenderClient, text))
+		return;
+
 	const bool bSenderDeadAndCanOnlyTalkToDead = hudchat_dead_can_only_talk_to_other_dead->GetBool() && pSenderPlayer->GetLifeState();
 
 	for (int nRecipientIndex = 1; nRecipientIndex <= nMaxClients; nRecipientIndex++)
 	{
 		const CPlayer* const pRecipientPlayer = UTIL_PlayerByIndex(nRecipientIndex);
-		const CClient* const pRecipientClient = g_pServer->GetClient(nRecipientIndex - 1);
+		CClient* const pRecipientClient = g_pServer->GetClient(nRecipientIndex - 1);
 
 		//Are we all there
 		if (!pRecipientPlayer || !pRecipientClient || !pRecipientPlayer->IsConnected())
@@ -306,7 +589,7 @@ void CServerGameDLL::OnReceivedSayTextMessage(CServerGameDLL* thisptr, int sende
 			continue;
 
 		//If we are only allowed to talk to the dead make sure the recipient is dead
-		if (bSenderDeadAndCanOnlyTalkToDead == !pRecipientPlayer->GetLifeState())
+		if (bSenderDeadAndCanOnlyTalkToDead && !pRecipientPlayer->GetLifeState())
 			continue;
 
 		//If we arent the recipient
@@ -316,8 +599,22 @@ void CServerGameDLL::OnReceivedSayTextMessage(CServerGameDLL* thisptr, int sende
 		)
 			continue;
 
+		if (chat_debug.GetBool())
+			Msg(eDLL_T::SERVER, "[BRIDGE-CHAT] -> sending SayText to recipient idx=%d edict=%d (maxClients=%d, team=%d, unreliable=%d, bridgeRender=%d)\n",
+				nRecipientIndex, pSenderPlayer->GetEdict(), nMaxClients, (int)bIsTeamChat,
+				(int)bridge_chat_unreliable.GetBool(), (int)bridge_chat_bridge_render.GetBool());
+
+		if (bridge_chat_bridge_render.GetBool())
+		{
+			ChatBuilder_SendPlayerChat(pRecipientClient,
+				pSenderPlayer->GetEdict(), pSenderPlayer->GetNetName(), text ? text : "",
+				bIsTeamChat, !bridge_chat_unreliable.GetBool());
+			continue;
+		}
+
 		CSingleUserRecipientFilter filter(pRecipientPlayer);
-		filter.MakeReliable();
+		if (!bridge_chat_unreliable.GetBool())
+			filter.MakeReliable();
 
 		v_UserMessageBegin(&filter, "SayText", 2);
 
@@ -419,6 +716,12 @@ void CServerGameClients::_ProcessUserCmds(CServerGameClients* thisp, edict_t edi
 		from = to;
 	}
 
+	if (buf->IsOverflowed())
+	{
+		Warning(eDLL_T::SERVER, "%s: overflowed usercmd stream (edict %d)\n", __FUNCTION__, edict);
+		return;
+	}
+
 	// Server has gone inactive, just ignore.
 	if (ignore)
 	{
@@ -433,18 +736,39 @@ void CServerGameClients::_ProcessUserCmds(CServerGameClients* thisp, edict_t edi
 		return;
 	}
 
+	// Time the engine's per-cmd dispatch; first usercmd can trip net_processTimeBudget.
+	const double flUsrCmdStart = Plat_FloatTime();
+	const double flUsrCmdStallBase = Plat_GetThreadStallTime();
 	pPlayer->ProcessUserCmds(cmds, numCmds, totalCmds, droppedPackets, paused);
+	const double flUsrCmdEnd = Plat_FloatTime();
+	const float flUsrCmdMs = static_cast<float>((flUsrCmdEnd - flUsrCmdStart) * 1000.0);
+
+	// The intake path logs from inside itself, so part of dur can be this thread
+	// blocked in log emission rather than intake work. Report it separately.
+	const float flUsrCmdStallMs = static_cast<float>(
+		Clamp(Plat_GetThreadStallTime() - flUsrCmdStallBase, 0.0,
+			flUsrCmdEnd - flUsrCmdStart) * 1000.0);
+
+	// Always log if a real hitch (>5 ms) occurred -- hitch detection is
+	// useful in any session.
+	if (flUsrCmdMs > 5.0f)
+	{
+		Msg(eDLL_T::SERVER,
+			"[USRCMD-TIME] slot=%d numCmds=%d totalCmds=%d dur=%.2fms logstall=%.2fms cmdNr=%u tick=%u\n",
+			edict - 1, numCmds, totalCmds, flUsrCmdMs, flUsrCmdStallMs,
+			(unsigned)cmds[0].command_number, (unsigned)cmds[0].tick_count);
+	}
 }
 
 //---------------------------------------------------------------------------------
-// Purpose: dispatches the server frame job, this calls ExecuteFrameServerJob(),
-//          anything you add in this function will either be before, or after the
-//          server frame job has ran, so ThreadInServerFrameThread() will always
-//          return false here. If you need to run code in the server frame thread,
-//          consider adding your code in ExecuteFrameServerJob().
-// Input  : flFrameTime - 
-//			bRunOverlays - 
-//			bUpdateFrame - 
+// Purpose: dispatches the server frame job, this calls ExecuteFrameServerJob,
+// anything you add in this function will either be before, or after the
+// server frame job has ran, so ThreadInServerFrameThread will always
+// return false here. If you need to run code in the server frame thread,
+// consider adding your code in ExecuteFrameServerJob.
+// Input: flFrameTime - 
+// bRunOverlays - 
+// bUpdateFrame - 
 //---------------------------------------------------------------------------------
 static void DispatchFrameServerJob(double flFrameTime, bool bRunOverlays, bool bUniformUpdate)
 {
@@ -453,16 +777,48 @@ static void DispatchFrameServerJob(double flFrameTime, bool bRunOverlays, bool b
 
 //---------------------------------------------------------------------------------
 // Purpose: executes the server frame job
-// Input  : flFrameTime - 
-//			bRunOverlays - 
-//			bUpdateFrame - 
+// Input: flFrameTime - 
+// bRunOverlays - 
+// bUpdateFrame - 
 //---------------------------------------------------------------------------------
 static void ExecuteFrameServerJob(double flFrameTime, bool bRunOverlays, bool bUpdateFrame)
 {
 	v_ExecuteFrameServerJob(flFrameTime, bRunOverlays, bUpdateFrame);
 
-	LiveAPISystem()->RunFrame();
 	DrawAllDebugOverlays();
+}
+
+static bool s_bFreezeCurLatched = false;
+static float s_flFreezeCurTime = 0.0f;
+
+__int64 CServerGameDLL::GameFrame(void* thisptr, unsigned char simulating)
+{
+	float flSavedFrame = 0.0f;
+	const float flScale = GameTimescale_WorldScale();
+	const bool bFreeze = (gpGlobals != nullptr) && (flScale < 1.0f);
+	if (bFreeze)
+	{
+		if (!s_bFreezeCurLatched)
+		{
+			s_flFreezeCurTime = gpGlobals->curTime;
+			s_bFreezeCurLatched = true;
+			Msg(eDLL_T::SERVER, "[FREEZE] hold curTime=%.4f\n",
+				static_cast<double>(s_flFreezeCurTime));
+		}
+		gpGlobals->curTime = s_flFreezeCurTime;
+		flSavedFrame = gpGlobals->frameTime;
+		gpGlobals->frameTime *= flScale;
+	}
+	else
+		s_bFreezeCurLatched = false;
+
+	const __int64 nRet = CServerGameDLL__GameFrame(thisptr, simulating);
+	if (bFreeze)
+	{
+		gpGlobals->frameTime = flSavedFrame;
+		gpGlobals->curTime = s_flFreezeCurTime;
+	}
+	return nRet;
 }
 
 void MessageEnd(void)
@@ -505,6 +861,11 @@ void VServerGameDLL::Detour(const bool bAttach) const
 	DetourSetup(&CServerGameClients__ProcessUserCmds, CServerGameClients::_ProcessUserCmds, bAttach);
 	DetourSetup(&v_DispatchFrameServerJob, &DispatchFrameServerJob, bAttach);
 	DetourSetup(&v_ExecuteFrameServerJob, &ExecuteFrameServerJob, bAttach);
+	if (CServerGameDLL__GameFrame)
+		DetourSetup(&CServerGameDLL__GameFrame, &CServerGameDLL::GameFrame, bAttach);
+	else if (bAttach)
+		Warning(eDLL_T::SERVER,
+			"[FREEZE] CServerGameDLL::GameFrame pattern unresolved -- sim scale off\n");
 }
 
 CThreadMutex* g_serverFrameMutex;

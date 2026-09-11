@@ -1,6 +1,6 @@
 //==== Copyright (c) 1996-2005, Valve Corporation, All rights reserved. =====//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -20,7 +20,7 @@
 CoreMsgVCallbackSink_t g_CoreMsgVCallback = nullptr;
 
 //-----------------------------------------------------------------------------
-// Templates to assist in validating pointers:
+// Templates to assist in validating pointers
 //-----------------------------------------------------------------------------
 /*PLATFORM_INTERFACE*/ void _AssertValidReadPtr(void* ptr, int count/* = 1*/)
 {
@@ -93,14 +93,14 @@ CoreMsgVCallbackSink_t g_CoreMsgVCallback = nullptr;
 
 //-----------------------------------------------------------------------------
 // Purpose: Show logs to all console interfaces (va_list version)
-// Input  : logType - 
-//			logLevel - 
-//			context - 
-//			*pszLogger - 
-//			*pszFormat -
-//			args - 
-//			exitCode - 
-//			*pszUptimeOverride - 
+// Input: logType - 
+// logLevel - 
+// context - 
+// *pszLogger - 
+// *pszFormat -
+// args - 
+// exitCode - 
+// *pszUptimeOverride - 
 //-----------------------------------------------------------------------------
 void CoreMsgV(LogType_t logType, LogLevel_t logLevel, eDLL_T context,
 	const char* pszLogger, const char* pszFormat, va_list args,
@@ -113,12 +113,12 @@ void CoreMsgV(LogType_t logType, LogLevel_t logLevel, eDLL_T context,
 
 //-----------------------------------------------------------------------------
 // Purpose: Show logs to all console interfaces
-// Input  : logType - 
-//			logLevel - 
-//			context - 
-//			exitCode - 
-//			*pszLogger - 
-//			*pszFormat -
+// Input: logType - 
+// logLevel - 
+// context - 
+// exitCode - 
+// *pszLogger - 
+// *pszFormat -
 //			... - 
 //-----------------------------------------------------------------------------
 void CoreMsg(LogType_t logType, LogLevel_t logLevel, eDLL_T context,
@@ -132,8 +132,8 @@ void CoreMsg(LogType_t logType, LogLevel_t logLevel, eDLL_T context,
 
 //-----------------------------------------------------------------------------
 // Purpose: Prints general debugging messages
-// Input  : context - 
-//			*fmt - ... - 
+// Input: context - 
+// *fmt -... - 
 //-----------------------------------------------------------------------------
 void Msg(eDLL_T context, const char* fmt, ...)
 {
@@ -145,8 +145,8 @@ void Msg(eDLL_T context, const char* fmt, ...)
 
 //-----------------------------------------------------------------------------
 // Purpose: Prints logs from remote console
-// Input  : context - 
-//			*fmt - ... - 
+// Input: context - 
+// *fmt -... - 
 //-----------------------------------------------------------------------------
 void NetMsg(LogType_t logType, eDLL_T context, const char* uptime, const char* fmt, ...)
 {
@@ -158,8 +158,8 @@ void NetMsg(LogType_t logType, eDLL_T context, const char* uptime, const char* f
 
 //-----------------------------------------------------------------------------
 // Purpose: Print engine and SDK warnings
-// Input  : context - 
-//			*fmt - ... - 
+// Input: context - 
+// *fmt -... - 
 //-----------------------------------------------------------------------------
 void Warning(eDLL_T context, const char* fmt, ...)
 {
@@ -171,9 +171,9 @@ void Warning(eDLL_T context, const char* fmt, ...)
 
 //-----------------------------------------------------------------------------
 // Purpose: Print engine and SDK errors
-// Input  : context - 
-//			code - 
-//			*fmt - ... - 
+// Input: context - 
+// code - 
+// *fmt -... - 
 //-----------------------------------------------------------------------------
 void Error(eDLL_T context, const UINT code, const char* fmt, ...)
 {
@@ -185,8 +185,8 @@ void Error(eDLL_T context, const UINT code, const char* fmt, ...)
 #ifndef DBGFLAG_STRINGS_STRIP
 //-----------------------------------------------------------------------------
 // Purpose: Prints general debugging messages (uncertain builds only!)
-// Input  : context - 
-//			*fmt - ... - 
+// Input: context - 
+// *fmt -... - 
 //-----------------------------------------------------------------------------
 void DevMsg(eDLL_T context, const char* fmt, ...)
 {
@@ -198,8 +198,8 @@ void DevMsg(eDLL_T context, const char* fmt, ...)
 
 //-----------------------------------------------------------------------------
 // Purpose: Print engine and SDK warnings (uncertain builds only!)
-// Input  : context - 
-//			*fmt - ... - 
+// Input: context - 
+// *fmt -... - 
 //-----------------------------------------------------------------------------
 void DevWarning(eDLL_T context, const char* fmt, ...)
 {
@@ -212,9 +212,9 @@ void DevWarning(eDLL_T context, const char* fmt, ...)
 
 //-----------------------------------------------------------------------------
 // Purpose: Print engine and SDK errors, and exit process
-// Input  : context - 
-//			code - 
-//			*fmt - ... - 
+// Input: context - 
+// code - 
+// *fmt -... - 
 //-----------------------------------------------------------------------------
 void Plat_FatalError(eDLL_T context, const char* fmt, ...)
 {

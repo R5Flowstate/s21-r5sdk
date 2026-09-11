@@ -10,12 +10,7 @@
 typedef    signed char     sint8;
 typedef  unsigned char     uint8;
 
-#if !defined(_STEAMTYPES_H) && !defined(STEAMTYPES_H) && !defined(USE_STEAMWORKS)
 typedef           char     int8;
-#else
-// When Steamworks is enabled, use signed char to match Steam's int8
-#define int8 sint8
-#endif
 
 typedef           int8     i8;
 typedef          sint8     s8;

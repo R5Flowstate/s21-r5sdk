@@ -18,12 +18,12 @@ abstract_class IClientRenderable
 {
 	// Gets at the containing class...
 	virtual IClientUnknown* GetIClientUnknown() = 0;
-	// TODO:
+	// TODO
 };
 
 class IClientModelRenderable
 {
-	// TODO:
+	// TODO
 	virtual void InterfaceNeedsRebuild() = 0;
 };
 

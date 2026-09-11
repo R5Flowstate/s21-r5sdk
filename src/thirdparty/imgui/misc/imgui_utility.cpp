@@ -11,6 +11,7 @@
 
 #define GAME_CONSOLE_KEY "Console"
 #define GAME_BROWSER_KEY "Browser"
+#define GAME_LOCAL_KEY "Local"
 
 static void ImguiConfig_ClampedKeyInit(KeyValues* const keyValues, ImGuiConfig::BindPair_s& bindPair, const int fallBackPrimary, const int fallBackSecondary)
 {
@@ -50,6 +51,12 @@ void ImGuiConfig::Load()
         ImguiConfig_ClampedKeyInit(pBrowserKV, m_BrowserConfig, ImGuiKey_Insert, ImGuiKey_F11);
     }
 
+    KeyValues* pLocalKV = pKeyMapKV->FindKey(GAME_LOCAL_KEY);
+    if (pLocalKV)
+    {
+        ImguiConfig_ClampedKeyInit(pLocalKV, m_LocalConfig, ImGuiKey_F12, ImGuiKey_F12);
+    }
+
     pKeyMapKV->DeleteThis();
 }
 
@@ -69,6 +76,10 @@ void ImGuiConfig::Save() const
     KeyValues* pBrowserKV = kv.FindKey(GAME_BROWSER_KEY, true);
     pBrowserKV->SetInt("$primaryKey", m_BrowserConfig.m_nBind0);
     pBrowserKV->SetInt("$secondaryKey", m_BrowserConfig.m_nBind1);
+
+    KeyValues* pLocalKV = kv.FindKey(GAME_LOCAL_KEY, true);
+    pLocalKV->SetInt("$primaryKey", m_LocalConfig.m_nBind0);
+    pLocalKV->SetInt("$secondaryKey", m_LocalConfig.m_nBind1);
 
     CUtlBuffer uBuf(0ll, 0, CUtlBuffer::TEXT_BUFFER);
 

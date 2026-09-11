@@ -1,21 +1,23 @@
 //=============================================================================//
-// 
+//
 // Purpose: Expose native code to VScript API
-// 
+//
 //-----------------------------------------------------------------------------
-// 
+//
 // Read the documentation in 'game/shared/vscript_shared.cpp' before modifying
 // existing code or adding new code!
-// 
-// To create server script bindings:
-// - use the DEFINE_SERVER_SCRIPTFUNC_NAMED() macro.
+//
+// To create server script bindings
+// - use the DEFINE_SERVER_SCRIPTFUNC_NAMED macro.
 // - prefix your function with "ServerScript_" i.e.: "ServerScript_GetVersion".
-// 
+//
 //=============================================================================//
 
 #include "core/stdafx.h"
 #include "common/callback.h"
+#include "game/shared/scriptnetdata_limits.h"
 #include "engine/server/server.h"
+#include "engine/server/sv_main.h"
 #include "engine/host_state.h"
 #include "engine/debugoverlay.h"
 #include "pluginsystem/pluginsystem.h"
@@ -23,32 +25,93 @@
 #include "vscript/languages/squirrel_re/include/sqvm.h"
 
 #include "game/shared/vscript_gamedll_defs.h"
+#include "game/shared/globalnonrewind_vars.h"
+#include "game/shared/weapon_heat.h"
+#include "game/server/energize.h"
+#include "game/server/akimbo.h"
+#include "game/shared/deathfield_system.h"
+#include "game/shared/alliance_compat.h"
+#include "game/shared/highlight_context.h"
+#include "game/shared/dt_extend.h"
+#include "game/shared/player_extend_sidecar.h"
+#include "game/shared/edict_dirty.h"
 
+#include "game/shared/scriptremotefunctions_server.h"
 #include "game/shared/vscript_shared.h"
 #include "game/shared/vscript_debug_overlay_shared.h"
 
-#include "liveapi/liveapi.h"
 #include "vscript_server.h"
+#include "vscript_server_natives.h"
+#include "vscript_server_placement.h"
 #include "player.h"
+#include "util_server.h"
+#include "entitylist.h"
 #include "detour_impl.h"
 #include "game/shared/weapon_script_vars.h"
+#include "game/server/chatbuilder.h"
+#include "game/server/jetdrive.h"
+#include "game/server/trigger_updraft.h"
+#include "game/server/skydive.h"
+#include "game/server/player_overheat.h"
+#include "game/server/context_action.h"
+#include "game/server/translocation.h"
+#include "game/shared/status_effects_sdk.h"
+#include "game/shared/util_shared.h"
+#include "game/client/vscript_player.h"
+#include "game/shared/vscript_remotefunctions_sdk.h"
+#include "engine/enginetrace.h"
+#include "engine/modelloader.h"
+#include "engine/server/precache_natives.h"
+#include "public/bspflags.h"
+#include "tier1/keyvalues.h"
+#include "tier1/convar.h"
+#include "tier1/cvar.h"
+#include "tier2/curlutils.h"
+#include "ebisusdk/EbisuSDK.h"
+#include "game/server/sound.h"
+#include "vscript/languages/squirrel_re/include/sqarray.h"
+
+#include <atomic>
+#include <cfloat>
+#include <fstream>
+#include <set>
+#include <string>
+#include <thread>
+#include <unordered_map>
 
 /*
 =====================
 SQVM_ServerScript_f
 
-  Executes input on the
-  VM in SERVER context.
+ Executes input on the
+ VM in SERVER context.
 =====================
 */
 static void SQVM_ServerScript_f(const CCommand& args)
 {
-    if (args.ArgC() >= 2)
+    if (args.ArgC() < 2)
     {
-        Script_Execute(args.ArgS(), SQCONTEXT::SERVER);
+        Warning(eDLL_T::SERVER, "script: missing code (example: script SpawnBots(60))\n");
+        return;
     }
+    Script_Execute(args.ArgS(), SQCONTEXT::SERVER);
+    ScriptRemoteC2S_DropFnCache();
 }
-static ConCommand script("script", SQVM_ServerScript_f, "Run input code as SERVER script on the VM", FCVAR_DEVELOPMENTONLY | FCVAR_GAMEDLL | FCVAR_CHEAT | FCVAR_SERVER_FRAME_THREAD);
+static ConCommand script("script", SQVM_ServerScript_f, "Run input code as SERVER script on the VM", FCVAR_GAMEDLL | FCVAR_CHEAT | FCVAR_DEVELOPMENTONLY | FCVAR_SERVER_FRAME_THREAD);
+
+static void SQVM_SpawnBots_f(const CCommand& args)
+{
+    int n = 1;
+    if (args.ArgC() >= 2)
+        n = atoi(args.Arg(1));
+    if (n < 1)
+        n = 1;
+    char code[64];
+    V_snprintf(code, sizeof(code), "SpawnBots(%d)", n);
+    Msg(eDLL_T::SERVER, "[SpawnBots] console %s\n", code);
+    Script_Execute(code, SQCONTEXT::SERVER);
+}
+static ConCommand spawnbots("spawnbots", SQVM_SpawnBots_f, "Spawn fake players. Usage: spawnbots <count>", FCVAR_GAMEDLL | FCVAR_CHEAT | FCVAR_SERVER_FRAME_THREAD);
 
 //-----------------------------------------------------------------------------
 // Purpose: server NDebugOverlay proxies
@@ -90,14 +153,14 @@ static float ServerScript_DebugScreenText_DetermineDuration(HSQUIRRELVM v)
     const float serverFPS = script_server_fps->GetFloat();
     // Make sure the overlay exists as long as the entire server
     // script frame, as it must last until the next call from the
-    // server is initiated. Otherwise the following happens:
-    // 
+    // server is initiated. Otherwise the following happens
+    //
     // - 1 / script_server_fps < NDEBUG_PERSIST_TILL_NEXT_SERVER =
-    //                           text will flicker as they decay
-    //                           before the next frame is fired.
+    // text will flicker as they decay
+    // before the next frame is fired.
     // - 1 / script_server_fps > NDEBUG_PERSIST_TILL_NEXT_SERVER =
-    //                           text will overlap with previous
-    //                           as the prev hasn't decayed yet.
+    // text will overlap with previous
+    // as the prev hasn't decayed yet.
     return 1.0f / serverFPS;
 }
 
@@ -119,11 +182,15 @@ static SQRESULT ServerScript_DebugScreenText(HSQUIRRELVM v)
     {
         SQFloat posX;
         SQFloat posY;
-        const SQChar* text;
+        const SQChar* text = nullptr;
 
         sq_getfloat(v, 2, &posX);
         sq_getfloat(v, 3, &posY);
-        sq_getstring(v, 4, &text);
+        if (SQ_FAILED(sq_getstring(v, 4, &text)) || !text)
+        {
+            v_SQVM_ScriptError("DebugScreenText: argument 'text' must be a string");
+            SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+        }
 
         const Color color(255, 255, 255, 255);
         ServerScript_Internal_DebugScreenTextWithColor(v, posX, posY, color, text);
@@ -141,13 +208,21 @@ static SQRESULT ServerScript_DebugScreenTextWithColor(HSQUIRRELVM v)
     {
         SQFloat posX;
         SQFloat posY;
-        const SQChar* text;
-        const SQVector3D* colorVec;
+        const SQChar* text = nullptr;
+        const SQVector3D* colorVec = nullptr;
 
         sq_getfloat(v, 2, &posX);
         sq_getfloat(v, 3, &posY);
-        sq_getstring(v, 4, &text);
-        sq_getvector(v, 5, &colorVec);
+        if (SQ_FAILED(sq_getstring(v, 4, &text)) || !text)
+        {
+            v_SQVM_ScriptError("DebugScreenTextWithColor: argument 'text' must be a string");
+            SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+        }
+        if (SQ_FAILED(sq_getvector(v, 5, &colorVec)) || !colorVec)
+        {
+            v_SQVM_ScriptError("DebugScreenTextWithColor: argument 'color' must be a vector");
+            SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+        }
 
         const Color color = Script_VectorToColor(colorVec, 1.0f);
         ServerScript_Internal_DebugScreenTextWithColor(v, posX, posY, color, text);
@@ -272,7 +347,7 @@ static SQRESULT ServerScript_BanPlayerById(HSQUIRRELVM v)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: unbans a player by given Steam ID or ip address
+// Purpose: unbans a player by given user id or ip address
 //-----------------------------------------------------------------------------
 static SQRESULT ServerScript_UnbanPlayer(HSQUIRRELVM v)
 {
@@ -317,6 +392,18 @@ static SQRESULT ServerScript_BroadcastServerTextMessage(HSQUIRRELVM v)
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
+static CClient* ServerScript_ClientForPlayer(CPlayer* pPlayer)
+{
+    if (!pPlayer || !g_pServer)
+        return nullptr;
+
+    const int nSlot = pPlayer->GetEdict() - 1;
+    if (nSlot < 0 || nSlot >= MAX_PLAYERS)
+        return nullptr;
+
+    return g_pServer->GetClient(nSlot);
+}
+
 static SQRESULT ServerScript_SendServerTextMessage(HSQUIRRELVM v)
 {
     CPlayer* pPlayer = nullptr;
@@ -343,7 +430,7 @@ static SQRESULT ServerScript_SendServerTextMessage(HSQUIRRELVM v)
         SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
     }
 
-    CClient* const pClient = g_pServer->GetClient(pPlayer->GetEdict() - 1);
+    CClient* const pClient = ServerScript_ClientForPlayer(pPlayer);
 
     if (!pClient)
         return SQ_ERROR;
@@ -354,110 +441,116 @@ static SQRESULT ServerScript_SendServerTextMessage(HSQUIRRELVM v)
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
-// Chat Builder API - gives complete control over chat rendering
-// Format: "CMD|data|CMD|data|..."
-// Commands: N=newline, T=text, C=color(r,g,b), F=fade(dur,fade)
-
+//-----------------------------------------------------------------------------
+// Purpose: chat builder - renders an array of styled segments in the recipient's
+//          chat box. Each segment is a table:
+//            { text = "hi", r = 255, g = 0, b = 0, rainbow = false,
+//              newline = true, sustain = 10.0, fade = 1.0 }
+//          Only "text" is required. sustain/fade are seconds; 0 means the
+//          recipient's own chat defaults.
+//-----------------------------------------------------------------------------
 static SQRESULT ServerScript_ChatBuilder(HSQUIRRELVM v)
 {
     CPlayer* pPlayer = nullptr;
-    const SQChar* pszCommands = nullptr;
 
     if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pPlayer)))
         return SQ_ERROR;
 
-    sq_getstring(v, 2, &pszCommands);
+    ChatBuilderSeg_t segs[kChatBuilderMaxSegments] = {};
+    const int nCount = ChatBuilder_ParseSegArray(v, 2, segs, kChatBuilderMaxSegments);
 
-    if (!VALID_CHARSTAR(pszCommands))
+    if (nCount < 0)
     {
-        v_SQVM_ScriptError("Null commands string");
+        v_SQVM_ScriptError("Expected an array of segment tables");
         SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
     }
 
-    CClient* const pClient = g_pServer->GetClient(pPlayer->GetEdict() - 1);
+    if (!g_pServer)
+        return SQ_ERROR;
+
+    const int nEdict = pPlayer->GetEdict();
+
+    if (nEdict < 1 || nEdict > MAX_PLAYERS)
+        return SQ_ERROR;
+
+    CClient* const pClient = g_pServer->GetClient(nEdict - 1);
 
     if (!pClient)
         return SQ_ERROR;
 
-    // Prefix commands with special marker in message field
-    char szMarkedCommands[256];
-    V_snprintf(szMarkedCommands, sizeof(szMarkedCommands), "~~~CB~~~%s", pszCommands);
-
-    // Send with empty prefix
-    SVC_SystemSayText message("", szMarkedCommands, true);
-
-    sq_pushbool(v, pClient->SendNetMsgEx(&message, false, false, false));
+    const bool bAdminMsg = ChatBuilder_ReadOptionalBool(v, 3, false);
+    sq_pushbool(v, ChatBuilder_SendToClient(pClient, segs, nCount, bAdminMsg));
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
-// Broadcast ChatBuilder message to all players
+//-----------------------------------------------------------------------------
+// Purpose: chat builder - broadcasts the same segment array to every client
+//-----------------------------------------------------------------------------
 static SQRESULT ServerScript_BroadcastChatBuilder(HSQUIRRELVM v)
 {
-    const SQChar* pszCommands = nullptr;
-    sq_getstring(v, 2, &pszCommands);
+    ChatBuilderSeg_t segs[kChatBuilderMaxSegments] = {};
+    const int nCount = ChatBuilder_ParseSegArray(v, 2, segs, kChatBuilderMaxSegments);
 
-    if (!VALID_CHARSTAR(pszCommands))
+    if (nCount < 0)
     {
-        v_SQVM_ScriptError("Null commands string");
+        v_SQVM_ScriptError("Expected an array of segment tables");
         SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
     }
 
-    // Prefix commands with special marker in message field
-    char szMarkedCommands[256];
-    V_snprintf(szMarkedCommands, sizeof(szMarkedCommands), "~~~CB~~~%s", pszCommands);
-
-    // Send with empty prefix
-    SVC_SystemSayText message("", szMarkedCommands, true);
-
-    g_pServer->BroadcastMessage(&message, true, false);
+    const bool bAdminMsg = ChatBuilder_ReadOptionalBool(v, 3, false);
+    ChatBuilder_Broadcast(segs, nCount, bAdminMsg);
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: chat builder - one rainbow-coloured line
+//-----------------------------------------------------------------------------
 static SQRESULT ServerScript_ChatBuilderRainbow(HSQUIRRELVM v)
 {
     CPlayer* pPlayer = nullptr;
     const SQChar* pszText = nullptr;
-    SQFloat flDuration = 5.0f;
-    SQFloat flFadeTime = 1.0f;
+    SQFloat flSustain = 0.0f;
+    SQFloat flFade = 0.0f;
 
     if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pPlayer)))
         return SQ_ERROR;
 
     sq_getstring(v, 2, &pszText);
-    sq_getfloat(v, 3, &flDuration);
-    sq_getfloat(v, 4, &flFadeTime);
+    sq_getfloat(v, 3, &flSustain);
+    sq_getfloat(v, 4, &flFade);
 
-    if (!VALID_CHARSTAR(pszText))
+    ChatBuilderSeg_t seg = {};
+    seg.op = CHATBUILDER_OP_RAINBOW;
+    seg.flags = CHATBUILDER_F_NEWLINE;
+    seg.r = seg.g = seg.b = 255;
+    seg.sustainMs = ChatBuilder_ClampMs(flSustain, kChatBuilderMaxSustainMs);
+    seg.fadeMs = ChatBuilder_ClampMs(flFade, kChatBuilderMaxFadeMs);
+    seg.textLen = static_cast<uint8_t>(
+        ChatBuilder_SanitizeText(pszText, seg.text, kChatBuilderMaxSegText));
+
+    if (seg.textLen == 0)
     {
-        v_SQVM_ScriptError("Null text string");
-        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+        sq_pushbool(v, false);
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
     }
 
-    CClient* const pClient = g_pServer->GetClient(pPlayer->GetEdict() - 1);
+    if (!g_pServer)
+        return SQ_ERROR;
+
+    const int nEdict = pPlayer->GetEdict();
+
+    if (nEdict < 1 || nEdict > MAX_PLAYERS)
+        return SQ_ERROR;
+
+    CClient* const pClient = g_pServer->GetClient(nEdict - 1);
+
     if (!pClient)
         return SQ_ERROR;
 
-    // Build simplified command using client-side 'R' command
-    // Format: "N|F|duration,fade|R|text|"
-    char szCommands[512];
-    int written = snprintf(szCommands, sizeof(szCommands), "N|F|%.1f,%.1f|R|%s|",
-        flDuration, flFadeTime, pszText);
-
-    if (written < 0 || written >= sizeof(szCommands))
-    {
-        v_SQVM_ScriptError("Command buffer overflow - text too long");
-        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
-    }
-
-    // Send the message
-    char szMarkedCommands[512];
-    V_snprintf(szMarkedCommands, sizeof(szMarkedCommands), "~~~CB~~~%s", szCommands);
-
-    SVC_SystemSayText message("", szMarkedCommands, true);
-    sq_pushbool(v, pClient->SendNetMsgEx(&message, false, false, false));
+    const bool bAdminMsg = ChatBuilder_ReadOptionalBool(v, 5, false);
+    sq_pushbool(v, ChatBuilder_SendToClient(pClient, &seg, 1, bAdminMsg));
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
-
 //-----------------------------------------------------------------------------
 // Purpose: gets the number of real players on this server
 //-----------------------------------------------------------------------------
@@ -505,11 +598,15 @@ static SQRESULT ServerScript_CreateFakePlayer(HSQUIRRELVM v)
         SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
     }
 
-    const SQChar* playerName;
+    const SQChar* playerName = nullptr;
     SQInteger teamNum;
 
     // Get parameters
-    sq_getstring(v, 2, &playerName);
+    if (SQ_FAILED(sq_getstring(v, 2, &playerName)) || !playerName)
+    {
+        v_SQVM_ScriptError("CreateFakePlayer: argument 'playerName' must be a string");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
     sq_getinteger(v, 3, &teamNum);
 
     if (!VALID_CHARSTAR(playerName))
@@ -534,7 +631,7 @@ static SQRESULT ServerScript_CreateFakePlayer(HSQUIRRELVM v)
     // Fully connect the client
     g_pServerGameClients->ClientFullyConnect(nHandle, false);
 
-    // Return the edict index - scripts can use GetPlayerArray() or GetPlayerByIndex() to get the entity
+    // Return the edict index - scripts can use GetPlayerArray or GetPlayerByIndex to get the entity
     sq_pushinteger(v, static_cast<SQInteger>(nHandle));
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
@@ -567,7 +664,10 @@ static SQRESULT ServerScript_ScriptSetClassVar(HSQUIRRELVM v)
         SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
     }
 
-    CClient* const client = g_pServer->GetClient(player->GetEdict() - 1);
+    CClient* const client = ServerScript_ClientForPlayer(player);
+    if (!client)
+        return SQ_ERROR;
+
     SVC_SetClassVar msg(key, val);
 
     const bool success = client->SendNetMsgEx(&msg, false, true, false);
@@ -581,12 +681,15 @@ static SQRESULT ServerScript_ScriptSetClassVar(HSQUIRRELVM v)
         };
 
         const CCommand cmd((int)V_ARRAYSIZE(pArgs), pArgs, cmd_source_t::kCommandSrcCode);
-        const int oldIdx = *g_nCommandClientIndex;
+        if (cmd.ArgC() >= 3)
+        {
+            const int oldIdx = *g_nCommandClientIndex;
 
-        *g_nCommandClientIndex = client->GetUserID();
-        v__setClassVarServer_f(cmd);
+            *g_nCommandClientIndex = client->GetUserID();
+            v__setClassVarServer_f(cmd);
 
-        *g_nCommandClientIndex = oldIdx;
+            *g_nCommandClientIndex = oldIdx;
+        }
     }
 
     sq_pushbool(v, success);
@@ -607,13 +710,68 @@ static bool Internal_ServerScript_ValidateHull(const SQInteger hull)
     return true;
 }
 
+// Engine map-coord ceiling used by stock NavMesh natives before querying.
+static constexpr float s_navMeshMapCoordLimit = 131072.0f;
+
+//-----------------------------------------------------------------------------
+// Purpose: reject non-finite coords and values outside engine map bounds
+//-----------------------------------------------------------------------------
+static bool Internal_ServerScript_ValidateMapPoint(HSQUIRRELVM v, const SQVector3D* point)
+{
+    if (!point)
+    {
+        v_SQVM_ScriptError("Point is null");
+        return false;
+    }
+
+    if (!isfinite(point->x) || !isfinite(point->y) || !isfinite(point->z))
+    {
+        v_SQVM_ScriptError("Point (%f, %f, %f) has non-finite components",
+            point->x, point->y, point->z);
+        return false;
+    }
+
+    if (fabsf(point->x) > s_navMeshMapCoordLimit
+        || fabsf(point->y) > s_navMeshMapCoordLimit
+        || fabsf(point->z) > s_navMeshMapCoordLimit)
+    {
+        v_SQVM_ScriptError("Point (%f, %f, %f) is outside map bounds (+/-%f)",
+            point->x, point->y, point->z, s_navMeshMapCoordLimit);
+        return false;
+    }
+
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: resolve loaded navmesh for hull; raises the standard script error if absent
+//-----------------------------------------------------------------------------
+static const dtNavMesh* Internal_ServerScript_GetNavMeshForHull(HSQUIRRELVM v, const Hull_e hullType)
+{
+    const NavMeshType_e navType = NAI_Hull::NavMeshType(hullType);
+    const dtNavMesh* const nav = Detour_GetNavMeshByType(navType);
+
+    if (!nav)
+    {
+        v_SQVM_ScriptError("NavMesh \"%s\" for hull \"%s\" hasn't been loaded!",
+            NavMesh_GetNameForType(navType), g_aiHullNames[hullType]);
+        return nullptr;
+    }
+
+    return nav;
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: checks if the provided half-extents is valid
 //-----------------------------------------------------------------------------
 static bool Internal_ServerScript_NavMesh_GetExtents(HSQUIRRELVM v, const SQInteger stackIdx, rdVec3D* const out)
 {
-    const SQVector3D* extents;
-    sq_getvector(v, stackIdx, &extents);
+    const SQVector3D* extents = nullptr;
+    if (SQ_FAILED(sq_getvector(v, stackIdx, &extents)) || !extents)
+    {
+        v_SQVM_ScriptError("Argument 'halfExtents' must be a vector");
+        return false;
+    }
 
     const SQFloat maxMagnitudeSqr = 9000000.0f;
     const SQFloat magnitudeSqr = extents->Dot();
@@ -635,28 +793,58 @@ static bool Internal_ServerScript_NavMesh_GetExtents(HSQUIRRELVM v, const SQInte
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: findNearestPoly query only; no stack reads, no errors.
+// Returns false if nav is null or no poly is found.
+//-----------------------------------------------------------------------------
+static bool Internal_ServerScript_NavMesh_QueryNearestPos(
+    const dtNavMesh* const nav,
+    const rdVec3D& searchPoint,
+    const rdVec3D& halfExtents,
+    rdVec3D* const outResult)
+{
+    if (!nav || !outResult)
+        return false;
+
+    dtNavMeshQuery query;
+    query.attachNavMeshUnsafe(nav);
+
+    dtQueryFilter filter;
+    filter.setIncludeFlags(DT_POLYFLAGS_ALL);
+    filter.setExcludeFlags(DT_POLYFLAGS_DISABLED);
+
+    dtPolyRef nearestRef = 0;
+    rdVec3D nearestPt;
+
+    const dtStatus status = query.findNearestPoly(&searchPoint, &halfExtents, &filter, &nearestRef, &nearestPt);
+
+    if (dtStatusFailed(status) || !nearestRef)
+        return false;
+
+    outResult->init(nearestPt.x, nearestPt.y, nearestPt.z);
+    return true;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: finds the nearest poly to given point, with an optional bounds filter.
+// On miss pushes null (GetNearestPos contract). Raises on bad args / missing mesh.
 //-----------------------------------------------------------------------------
 static bool Internal_ServerScript_NavMesh_FindNearestPos(HSQUIRRELVM v, const bool useBounds)
 {
-    SQInteger hullIdx;
-    sq_getinteger(v, useBounds ? 4 : 3, &hullIdx);
+    SQInteger hullIdx = 0;
+    if (SQ_FAILED(sq_getinteger(v, useBounds ? 4 : 3, &hullIdx)))
+    {
+        v_SQVM_ScriptError("Argument 'hullType' must be an integer");
+        return false;
+    }
 
     if (!Internal_ServerScript_ValidateHull(hullIdx))
         return false;
 
     const Hull_e hullType = Hull_e(hullIdx);
 
-    const NavMeshType_e navType = NAI_Hull::NavMeshType(hullType);
-    const dtNavMesh* const nav = Detour_GetNavMeshByType(navType);
-
+    const dtNavMesh* const nav = Internal_ServerScript_GetNavMeshForHull(v, hullType);
     if (!nav)
-    {
-        v_SQVM_ScriptError("NavMesh \"%s\" for hull \"%s\" hasn't been loaded!",
-            NavMesh_GetNameForType(navType), g_aiHullNames[hullType]);
-
         return false;
-    }
 
     rdVec3D halfExtents;
 
@@ -671,24 +859,17 @@ static bool Internal_ServerScript_NavMesh_FindNearestPos(HSQUIRRELVM v, const bo
         halfExtents.init(maxs.x, maxs.y, maxs.z);
     }
 
-    const SQVector3D* point;
-    sq_getvector(v, 2, &point);
+    const SQVector3D* point = nullptr;
+    if (SQ_FAILED(sq_getvector(v, 2, &point)) || !point)
+    {
+        v_SQVM_ScriptError("Argument 'searchPoint' must be a vector");
+        return false;
+    }
 
     const rdVec3D searchPoint(point->x, point->y, point->z);
 
-    dtNavMeshQuery query;
-    query.attachNavMeshUnsafe(nav);
-
-    dtQueryFilter filter;
-    filter.setIncludeFlags(DT_POLYFLAGS_ALL);
-    filter.setExcludeFlags(DT_POLYFLAGS_DISABLED);
-
-    dtPolyRef nearestRef;
     rdVec3D nearestPt;
-
-    const dtStatus status = query.findNearestPoly(&searchPoint, &halfExtents, &filter, &nearestRef, &nearestPt);
-
-    if (dtStatusFailed(status) || !nearestRef)
+    if (!Internal_ServerScript_NavMesh_QueryNearestPos(nav, searchPoint, halfExtents, &nearestPt))
     {
         v->PushNull();
         return true;
@@ -727,6 +908,685 @@ static SQRESULT ServerScript_NavMesh_GetNearestPosInBounds(HSQUIRRELVM v)
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: nearest navmesh position to point (HULL_HUMAN); echoes input on miss
+//-----------------------------------------------------------------------------
+static SQRESULT ServerScript_NavMesh_GetClosestPoint(HSQUIRRELVM v)
+{
+    const SQVector3D* point = nullptr;
+    if (SQ_FAILED(sq_getvector(v, 2, &point)) || !point)
+    {
+        v_SQVM_ScriptError("Argument 'point' must be a vector");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
+
+    if (!Internal_ServerScript_ValidateMapPoint(v, point))
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+
+    const SQVector3D pointCopy(point->x, point->y, point->z);
+
+    // Absent mesh / no poly: return caller input (never world origin).
+    const dtNavMesh* const nav = Detour_GetNavMeshByType(NAI_Hull::NavMeshType(HULL_HUMAN));
+    if (!nav)
+    {
+        sq_pushvector(v, &pointCopy);
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+    }
+
+    const Vector3D& maxs = NAI_Hull::Maxs(HULL_HUMAN);
+    const rdVec3D halfExtents(maxs.x, maxs.y, maxs.z);
+    const rdVec3D searchPoint(point->x, point->y, point->z);
+
+    rdVec3D nearestPt;
+    if (!Internal_ServerScript_NavMesh_QueryNearestPos(nav, searchPoint, halfExtents, &nearestPt))
+    {
+        sq_pushvector(v, &pointCopy);
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+    }
+
+    const SQVector3D result(nearestPt.x, nearestPt.y, nearestPt.z);
+    sq_pushvector(v, &result);
+    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: up to N nearest navmesh positions around origin (HULL_HUMAN)
+//-----------------------------------------------------------------------------
+static SQRESULT ServerScript_NavMesh_GetClosestPoints(HSQUIRRELVM v)
+{
+    const SQVector3D* origin = nullptr;
+    if (SQ_FAILED(sq_getvector(v, 2, &origin)) || !origin)
+    {
+        v_SQVM_ScriptError("Argument 'origin' must be a vector");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
+
+    if (!Internal_ServerScript_ValidateMapPoint(v, origin))
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+
+    SQInteger numPointsArg = 0;
+    if (SQ_FAILED(sq_getinteger(v, 3, &numPointsArg)))
+    {
+        v_SQVM_ScriptError("Argument 'numPoints' must be an integer");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
+
+    int numPoints = static_cast<int>(numPointsArg);
+    if (numPoints < 1)
+        numPoints = 1;
+    if (numPoints > 64)
+        numPoints = 64;
+
+    const SQVector3D originCopy(origin->x, origin->y, origin->z);
+
+    // Mesh absent or query failure: echo caller's origin (never world 0,0,0).
+    auto pushOriginFill = [&]() -> SQRESULT
+    {
+        sq_newarray(v, 0);
+        for (int i = 0; i < numPoints; ++i)
+        {
+            sq_pushvector(v, &originCopy);
+            sq_arrayappend(v, -2);
+        }
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+    };
+
+    const dtNavMesh* const nav = Detour_GetNavMeshByType(NAI_Hull::NavMeshType(HULL_HUMAN));
+    if (!nav)
+        return pushOriginFill();
+
+    const Vector3D& maxs = NAI_Hull::Maxs(HULL_HUMAN);
+    const rdVec3D halfExtents(maxs.x * 4.0f, maxs.y * 4.0f, maxs.z * 4.0f);
+    const rdVec3D searchPoint(origin->x, origin->y, origin->z);
+
+    dtNavMeshQuery query;
+    query.attachNavMeshUnsafe(nav);
+
+    dtQueryFilter filter;
+    filter.setIncludeFlags(DT_POLYFLAGS_ALL);
+    filter.setExcludeFlags(DT_POLYFLAGS_DISABLED);
+
+    constexpr int kMaxPolys = 256;
+    dtPolyRef polys[kMaxPolys];
+    int polyCount = 0;
+
+    const dtStatus status = query.queryPolygons(&searchPoint, &halfExtents, &filter, polys, &polyCount, kMaxPolys);
+    if (dtStatusFailed(status) || polyCount <= 0)
+        return pushOriginFill();
+
+    if (polyCount > kMaxPolys)
+        polyCount = kMaxPolys;
+
+    struct ClosestEntry_t
+    {
+        float distSqr;
+        rdVec3D pt;
+    };
+
+    ClosestEntry_t entries[kMaxPolys];
+    int entryCount = 0;
+
+    for (int i = 0; i < polyCount; ++i)
+    {
+        bool posOverPoly = false;
+        rdVec3D closest;
+        const dtStatus cstatus = query.closestPointOnPoly(polys[i], &searchPoint, &closest, &posOverPoly);
+        if (dtStatusFailed(cstatus))
+            continue;
+
+        if (entryCount >= kMaxPolys)
+            break;
+
+        entries[entryCount].distSqr = rdVdistSqr(&searchPoint, &closest);
+        entries[entryCount].pt = closest;
+        ++entryCount;
+    }
+
+    if (entryCount <= 0)
+        return pushOriginFill();
+
+    for (int i = 1; i < entryCount; ++i)
+    {
+        ClosestEntry_t key = entries[i];
+        int j = i - 1;
+        while (j >= 0 && entries[j].distSqr > key.distSqr)
+        {
+            entries[j + 1] = entries[j];
+            --j;
+        }
+        entries[j + 1] = key;
+    }
+
+    const int emitCount = (entryCount < numPoints) ? entryCount : numPoints;
+
+    sq_newarray(v, 0);
+    for (int i = 0; i < emitCount; ++i)
+    {
+        const SQVector3D result(entries[i].pt.x, entries[i].pt.y, entries[i].pt.z);
+        sq_pushvector(v, &result);
+        sq_arrayappend(v, -2);
+    }
+
+    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: poly count in a tall vertical column through point (HULL_HUMAN)
+//-----------------------------------------------------------------------------
+static SQRESULT ServerScript_NavMesh_TraceVerticalLine_PolyCount(HSQUIRRELVM v)
+{
+    const SQVector3D* point = nullptr;
+    if (SQ_FAILED(sq_getvector(v, 2, &point)) || !point)
+    {
+        v_SQVM_ScriptError("Argument 'point' must be a vector");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
+
+    if (!Internal_ServerScript_ValidateMapPoint(v, point))
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+
+    const dtNavMesh* const nav = Detour_GetNavMeshByType(NAI_Hull::NavMeshType(HULL_HUMAN));
+    if (!nav)
+    {
+        sq_pushinteger(v, 0);
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+    }
+
+    const rdVec3D searchPoint(point->x, point->y, point->z);
+    const rdVec3D halfExtents(8.0f, 8.0f, 32768.0f);
+
+    dtNavMeshQuery query;
+    query.attachNavMeshUnsafe(nav);
+
+    dtQueryFilter filter;
+    filter.setIncludeFlags(DT_POLYFLAGS_ALL);
+    filter.setExcludeFlags(DT_POLYFLAGS_DISABLED);
+
+    constexpr int kMaxPolys = 256;
+    dtPolyRef polys[kMaxPolys];
+    int polyCount = 0;
+
+    const dtStatus status = query.queryPolygons(&searchPoint, &halfExtents, &filter, polys, &polyCount, kMaxPolys);
+    if (dtStatusFailed(status) || polyCount < 0)
+        polyCount = 0;
+    if (polyCount > kMaxPolys)
+        polyCount = kMaxPolys;
+
+    sq_pushinteger(v, polyCount);
+    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: one representative point per distinct elevation in a vertical column
+//-----------------------------------------------------------------------------
+static SQRESULT ServerScript_NavMesh_GetPointsInDifferentElevations(HSQUIRRELVM v)
+{
+    const SQVector3D* point = nullptr;
+    if (SQ_FAILED(sq_getvector(v, 2, &point)) || !point)
+    {
+        v_SQVM_ScriptError("Argument 'point' must be a vector");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
+
+    if (!Internal_ServerScript_ValidateMapPoint(v, point))
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+
+    sq_newarray(v, 0);
+
+    const dtNavMesh* const nav = Detour_GetNavMeshByType(NAI_Hull::NavMeshType(HULL_HUMAN));
+    if (!nav)
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+
+    const rdVec3D searchPoint(point->x, point->y, point->z);
+    const rdVec3D halfExtents(8.0f, 8.0f, 32768.0f);
+
+    dtNavMeshQuery query;
+    query.attachNavMeshUnsafe(nav);
+
+    dtQueryFilter filter;
+    filter.setIncludeFlags(DT_POLYFLAGS_ALL);
+    filter.setExcludeFlags(DT_POLYFLAGS_DISABLED);
+
+    constexpr int kMaxPolys = 256;
+    dtPolyRef polys[kMaxPolys];
+    int polyCount = 0;
+
+    const dtStatus status = query.queryPolygons(&searchPoint, &halfExtents, &filter, polys, &polyCount, kMaxPolys);
+    if (dtStatusFailed(status) || polyCount <= 0)
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+
+    if (polyCount > kMaxPolys)
+        polyCount = kMaxPolys;
+
+    constexpr int kMaxResults = 32;
+    constexpr float kElevEps = 32.0f;
+    rdVec3D kept[kMaxResults];
+    int keptCount = 0;
+
+    for (int i = 0; i < polyCount; ++i)
+    {
+        bool posOverPoly = false;
+        rdVec3D closest;
+        const dtStatus cstatus = query.closestPointOnPoly(polys[i], &searchPoint, &closest, &posOverPoly);
+        if (dtStatusFailed(cstatus))
+            continue;
+
+        bool tooClose = false;
+        for (int k = 0; k < keptCount; ++k)
+        {
+            if (fabsf(closest.z - kept[k].z) < kElevEps)
+            {
+                tooClose = true;
+                break;
+            }
+        }
+
+        if (tooClose)
+            continue;
+
+        if (keptCount >= kMaxResults)
+            break;
+
+        kept[keptCount++] = closest;
+    }
+
+    for (int i = 1; i < keptCount; ++i)
+    {
+        rdVec3D key = kept[i];
+        int j = i - 1;
+        while (j >= 0 && kept[j].z > key.z)
+        {
+            kept[j + 1] = kept[j];
+            --j;
+        }
+        kept[j + 1] = key;
+    }
+
+    for (int i = 0; i < keptCount; ++i)
+    {
+        const SQVector3D result(kept[i].x, kept[i].y, kept[i].z);
+        sq_pushvector(v, &result);
+        sq_arrayappend(v, -2);
+    }
+
+    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: true if any hazard-flagged poly lies within distance of point
+//-----------------------------------------------------------------------------
+static SQRESULT ServerScript_NavMesh_HasHarmfulAreaWithinDistance(HSQUIRRELVM v)
+{
+    const SQVector3D* point = nullptr;
+    if (SQ_FAILED(sq_getvector(v, 2, &point)) || !point)
+    {
+        v_SQVM_ScriptError("Argument 'point' must be a vector");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
+
+    if (!Internal_ServerScript_ValidateMapPoint(v, point))
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+
+    SQFloat distance = 0.0f;
+    if (SQ_FAILED(sq_getfloat(v, 3, &distance)))
+    {
+        v_SQVM_ScriptError("Argument 'distance' must be a float");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
+
+    if (!isfinite(distance) || distance <= 0.0f)
+    {
+        v_SQVM_ScriptError("Distance (%f) must be greater than zero and finite", distance);
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
+
+    const dtNavMesh* const nav = Detour_GetNavMeshByType(NAI_Hull::NavMeshType(HULL_HUMAN));
+    if (!nav)
+    {
+        sq_pushbool(v, false);
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+    }
+
+    const rdVec3D searchPoint(point->x, point->y, point->z);
+    const float distF = static_cast<float>(distance);
+    const rdVec3D halfExtents(distF, distF, distF);
+
+    dtNavMeshQuery query;
+    query.attachNavMeshUnsafe(nav);
+
+    dtQueryFilter filter;
+    filter.setIncludeFlags(DT_POLYFLAGS_HAZARD);
+    filter.setExcludeFlags(0);
+
+    constexpr int kMaxPolys = 32;
+    dtPolyRef polys[kMaxPolys];
+    int polyCount = 0;
+
+    const dtStatus status = query.queryPolygons(&searchPoint, &halfExtents, &filter, polys, &polyCount, kMaxPolys);
+    const bool found = !dtStatusFailed(status) && polyCount > 0;
+
+    sq_pushbool(v, found);
+    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: positions on open navmesh polys matching area/adjacency criteria
+//-----------------------------------------------------------------------------
+static SQRESULT ServerScript_NavMesh_SearchForOpenAreas(HSQUIRRELVM v)
+{
+    SQInteger hullIdx = 0;
+    if (SQ_FAILED(sq_getinteger(v, 2, &hullIdx)))
+    {
+        v_SQVM_ScriptError("Argument 'hullType' must be an integer");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
+
+    if (!Internal_ServerScript_ValidateHull(hullIdx))
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+
+    const Hull_e hullType = Hull_e(hullIdx);
+
+    SQFloat idealTileArea = 0.0f;
+    SQFloat minTileSize = 0.0f;
+    SQFloat minSurroundingArea = 0.0f;
+    SQFloat maxSurroundingArea = 0.0f;
+    SQFloat maxPathCost = 0.0f;
+    SQInteger minNumAdjacentTilesArg = 0;
+
+    if (SQ_FAILED(sq_getfloat(v, 3, &idealTileArea)))
+    {
+        v_SQVM_ScriptError("Argument 'idealTileArea' must be a float");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
+    if (SQ_FAILED(sq_getfloat(v, 4, &minTileSize)))
+    {
+        v_SQVM_ScriptError("Argument 'minTileSize' must be a float");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
+    if (SQ_FAILED(sq_getfloat(v, 5, &minSurroundingArea)))
+    {
+        v_SQVM_ScriptError("Argument 'minSurroundingArea' must be a float");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
+    if (SQ_FAILED(sq_getfloat(v, 6, &maxSurroundingArea)))
+    {
+        v_SQVM_ScriptError("Argument 'maxSurroundingArea' must be a float");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
+    if (SQ_FAILED(sq_getfloat(v, 7, &maxPathCost)))
+    {
+        v_SQVM_ScriptError("Argument 'maxPathCost' must be a float");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
+    if (SQ_FAILED(sq_getinteger(v, 8, &minNumAdjacentTilesArg)))
+    {
+        v_SQVM_ScriptError("Argument 'minNumAdjacentTiles' must be an integer");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
+
+    static bool s_warnedMaxPathCost = false;
+    if (!s_warnedMaxPathCost)
+    {
+        s_warnedMaxPathCost = true;
+        DevWarning(eDLL_T::SERVER,
+            "[NAVMESH] NavMesh_SearchForOpenAreas: maxPathCost is not implemented (no path origin in signature)\n");
+    }
+
+    (void)maxPathCost;
+
+    sq_newarray(v, 0);
+
+    // Silent degrade: do not raise (callers treat empty as "no spots").
+    const dtNavMesh* const nav = Detour_GetNavMeshByType(NAI_Hull::NavMeshType(hullType));
+    if (!nav)
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+
+    const int minNumAdjacentTiles = static_cast<int>(minNumAdjacentTilesArg);
+    const float minPolyArea = static_cast<float>(minTileSize) * static_cast<float>(minTileSize);
+    const float minSurr = static_cast<float>(minSurroundingArea);
+    const float maxSurr = static_cast<float>(maxSurroundingArea);
+    const float idealArea = static_cast<float>(idealTileArea);
+
+    constexpr int kMaxKeepers = 64;
+    constexpr int kMaxPolysExamined = 200000;
+
+    struct OpenAreaEntry_t
+    {
+        float score;
+        rdVec3D center;
+    };
+
+    OpenAreaEntry_t keepers[kMaxKeepers];
+    int keeperCount = 0;
+    int polysExamined = 0;
+    bool hitPolyCap = false;
+    bool hitKeeperCap = false;
+
+    CFastTimer timer;
+    timer.Start();
+
+    const int maxTiles = nav->getMaxTiles();
+    for (int ti = 0; ti < maxTiles; ++ti)
+    {
+        if (hitPolyCap || hitKeeperCap)
+            break;
+
+        const dtMeshTile* const tile = nav->getTile(ti);
+        if (!tile || !tile->header)
+            continue;
+
+        const dtMeshHeader* const header = tile->header;
+        const int polyCount = header->polyCount;
+        const int maxLinkCount = header->maxLinkCount;
+
+        for (int pi = 0; pi < polyCount; ++pi)
+        {
+            if (polysExamined >= kMaxPolysExamined)
+            {
+                hitPolyCap = true;
+                break;
+            }
+            ++polysExamined;
+
+            if (keeperCount >= kMaxKeepers)
+            {
+                hitKeeperCap = true;
+                break;
+            }
+
+            const dtPoly* const poly = &tile->polys[pi];
+            const float area = dtCalcPolySurfaceArea(poly, tile->verts);
+            if (area < minPolyArea)
+                continue;
+
+            int neighbourCount = 0;
+            float surroundingArea = 0.0f;
+            int linkSafety = 0;
+
+            for (unsigned int li = poly->firstLink; li != DT_NULL_LINK; li = tile->links[li].next)
+            {
+                if (++linkSafety > maxLinkCount)
+                    break;
+
+                if (li >= static_cast<unsigned int>(maxLinkCount))
+                    break;
+
+                const dtLink& link = tile->links[li];
+                if (!link.ref)
+                    continue;
+
+                const dtMeshTile* ntile = nullptr;
+                const dtPoly* npoly = nullptr;
+                if (dtStatusFailed(nav->getTileAndPolyByRef(link.ref, &ntile, &npoly)))
+                    continue;
+
+                ++neighbourCount;
+                surroundingArea += dtCalcPolySurfaceArea(npoly, ntile->verts);
+            }
+
+            if (neighbourCount < minNumAdjacentTiles)
+                continue;
+
+            if (surroundingArea < minSurr || surroundingArea > maxSurr)
+                continue;
+
+            if (keeperCount >= kMaxKeepers)
+            {
+                hitKeeperCap = true;
+                break;
+            }
+
+            keepers[keeperCount].score = fabsf(area - idealArea);
+            keepers[keeperCount].center = poly->center;
+            ++keeperCount;
+        }
+    }
+
+    timer.End();
+
+    if (hitPolyCap)
+    {
+        DevMsg(eDLL_T::SERVER,
+            "[NAVMESH] NavMesh_SearchForOpenAreas: stopped after examining %d polys\n",
+            kMaxPolysExamined);
+    }
+    else if (hitKeeperCap)
+    {
+        DevMsg(eDLL_T::SERVER,
+            "[NAVMESH] NavMesh_SearchForOpenAreas: stopped after collecting %d keepers\n",
+            kMaxKeepers);
+    }
+
+    DevMsg(eDLL_T::SERVER,
+        "[NAVMESH] NavMesh_SearchForOpenAreas: examined %d polys, kept %d in %lf seconds\n",
+        polysExamined, keeperCount, timer.GetDuration().GetSeconds());
+
+    for (int i = 1; i < keeperCount; ++i)
+    {
+        OpenAreaEntry_t key = keepers[i];
+        int j = i - 1;
+        while (j >= 0 && keepers[j].score > key.score)
+        {
+            keepers[j + 1] = keepers[j];
+            --j;
+        }
+        keepers[j + 1] = key;
+    }
+
+    for (int i = 0; i < keeperCount; ++i)
+    {
+        const SQVector3D result(keepers[i].center.x, keepers[i].center.y, keepers[i].center.z);
+        sq_pushvector(v, &result);
+        sq_arrayappend(v, -2);
+    }
+
+    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: builds a waypoint list between two world positions over the human
+// hull's NavMesh. Returns an empty array when no route exists; callers treat
+// that as "fly straight at the target".
+//-----------------------------------------------------------------------------
+static SQRESULT ServerScript_NavMesh_FindUnboundPath(HSQUIRRELVM v)
+{
+    const SQVector3D* startArg = nullptr;
+    if (SQ_FAILED(sq_getvector(v, 2, &startArg)) || !startArg)
+    {
+        v_SQVM_ScriptError("Argument 'startPos' must be a vector");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
+
+    if (!Internal_ServerScript_ValidateMapPoint(v, startArg))
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+
+    const SQVector3D* endArg = nullptr;
+    if (SQ_FAILED(sq_getvector(v, 3, &endArg)) || !endArg)
+    {
+        v_SQVM_ScriptError("Argument 'endPos' must be a vector");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
+
+    if (!Internal_ServerScript_ValidateMapPoint(v, endArg))
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+
+    // Every failure below degrades to an empty waypoint list, never an error.
+    sq_newarray(v, 0);
+
+    const dtNavMesh* const nav = Detour_GetNavMeshByType(NAI_Hull::NavMeshType(HULL_HUMAN));
+    if (!nav)
+    {
+        DevWarning(eDLL_T::SERVER, "[NAVMESH] NavMesh_FindUnboundPath: no mesh loaded for hull \"%s\"\n",
+            g_aiHullNames[HULL_HUMAN]);
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+    }
+
+    dtNavMeshQuery query;
+    query.attachNavMeshUnsafe(nav);
+
+    dtQueryFilter filter;
+    filter.setIncludeFlags(DT_POLYFLAGS_ALL);
+    filter.setExcludeFlags(DT_POLYFLAGS_DISABLED);
+
+    const Vector3D& maxs = NAI_Hull::Maxs(HULL_HUMAN);
+    const rdVec3D halfExtents(maxs.x, maxs.y, maxs.z);
+
+    const rdVec3D startPos(startArg->x, startArg->y, startArg->z);
+    const rdVec3D endPos(endArg->x, endArg->y, endArg->z);
+
+    dtPolyRef startRef = 0;
+    dtPolyRef endRef = 0;
+    rdVec3D startPt;
+    rdVec3D endPt;
+
+    if (dtStatusFailed(query.findNearestPoly(&startPos, &halfExtents, &filter, &startRef, &startPt)) || !startRef)
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+
+    if (dtStatusFailed(query.findNearestPoly(&endPos, &halfExtents, &filter, &endRef, &endPt)) || !endRef)
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+
+    constexpr int kMaxPolys = 256;
+    dtPolyRef polys[kMaxPolys];
+    unsigned char jumpTypes[kMaxPolys];
+    int polyCount = 0;
+
+    if (dtStatusFailed(query.findPath(startRef, endRef, &startPt, &endPt, &filter,
+        polys, jumpTypes, &polyCount, kMaxPolys)) || polyCount <= 0)
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+
+    // findPath returns a partial corridor when the goal is unreachable; clamp
+    // the end to the last poly we did reach so the string-pull stays on mesh.
+    rdVec3D targetPt = endPt;
+    if (polys[polyCount - 1] != endRef)
+        query.closestPointOnPoly(polys[polyCount - 1], &endPt, &targetPt, nullptr);
+
+    constexpr int kMaxWaypoints = 128;
+    rdVec3D straightPath[kMaxWaypoints];
+    unsigned char straightFlags[kMaxWaypoints];
+    dtPolyRef straightRefs[kMaxWaypoints];
+    unsigned char straightJumps[kMaxWaypoints];
+    int waypointCount = 0;
+
+    // 0xffffffff admits every traverse type; a zero filter rejects all portals.
+    if (dtStatusFailed(query.findStraightPath(&startPt, &targetPt, polys, jumpTypes, polyCount,
+        straightPath, straightFlags, straightRefs, straightJumps, &waypointCount,
+        kMaxWaypoints, 0xffffffff)) || waypointCount <= 0)
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+
+    if (waypointCount > kMaxWaypoints)
+        waypointCount = kMaxWaypoints;
+
+    // Skip the first vertex: it is the caller's own position.
+    for (int i = 1; i < waypointCount; ++i)
+    {
+        const SQVector3D result(straightPath[i].x, straightPath[i].y, straightPath[i].z);
+        sq_pushvector(v, &result);
+        sq_arrayappend(v, -2);
+    }
+
+    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: saves a recorded animation on the disk to be used by bakery
 //-----------------------------------------------------------------------------
 static SQRESULT ServerScript_SaveRecordedAnimation(HSQUIRRELVM v)
@@ -751,8 +1611,18 @@ static SQRESULT ServerScript_SaveRecordedAnimation(HSQUIRRELVM v)
         SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
     }
 
-    const SQChar* fileName;
-    sq_getstring(v, 3, &fileName);
+    const SQChar* fileName = nullptr;
+    if (SQ_FAILED(sq_getstring(v, 3, &fileName)) || !fileName)
+    {
+        v_SQVM_ScriptError("SaveRecordedAnimation: argument 'fileName' must be a string");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
+
+    if (!V_IsValidPath(fileName) || V_stristr(fileName, ":") || V_stristr(fileName, "\\") || V_stristr(fileName, "/"))
+    {
+        v_SQVM_ScriptError("SaveRecordedAnimation: argument 'fileName' is not a simple name");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+    }
 
     char fileNameBuf[MAX_OSPATH];
     const int fmtResult = snprintf(fileNameBuf, sizeof(fileNameBuf), "anim_recording/%s.anir", fileName);
@@ -873,17 +1743,17 @@ static SQRESULT ServerScript_SaveRecordedAnimation(HSQUIRRELVM v)
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
+
 //---------------------------------------------------------------------------------
 // Purpose: registers script functions in SERVER context
-// Input  : *s - 
+// Input: *s -
 //---------------------------------------------------------------------------------
 void Script_RegisterServerFunctions(CSquirrelVM* s)
 {
     Script_RegisterCommonAbstractions(s);
     Script_RegisterCoreServerFunctions(s);
     Script_RegisterAdminServerFunctions(s);
-
-    Script_RegisterLiveAPIFunctions(s);
+    Script_RegisterDedicatedS21ServerNatives(s);
 
     // NOTE: plugin functions must always come after SDK functions!
     for (auto& callback : !PluginSystem()->GetRegisterServerScriptFuncsCallbacks())
@@ -893,14 +1763,67 @@ void Script_RegisterServerFunctions(CSquirrelVM* s)
     }
 }
 
+static void Script_RegisterLiveAPIEventTypes(CSquirrelVM* const s)
+{
+	Script_RegisterEnumTable(s, "eLiveAPI_EventTypes", 0,
+		"ammoUsed",
+		"arenasItemDeselected",
+		"arenasItemSelected",
+		"bannerCollected",
+		"blackMarketAction",
+		"characterSelected",
+		"customEvent",
+		"datacenter",
+		"gameStateChanged",
+		"gibraltarShieldAbsorbed",
+		"grenadeThrown",
+		"init",
+		"inventoryDrop",
+		"inventoryItem",
+		"inventoryPickUp",
+		"inventoryUse",
+		"legendUpgradeSelected",
+		"liveAPIEvent",
+		"loadoutConfiguration",
+		"matchSetup",
+		"matchStateEnd",
+		"observerAnnotation",
+		"observerSwitched",
+		"player",
+		"playerAbilityUsed",
+		"playerAssist",
+		"playerConnected",
+		"playerDamaged",
+		"playerDisconnected",
+		"playerDowned",
+		"playerKilled",
+		"playerRespawnTeam",
+		"playerRevive",
+		"playerStatChanged",
+		"playerUpgradeTierChanged",
+		"revenantForgedShadowDamaged",
+		"ringFinishedClosing",
+		"ringStartClosing",
+		"squadEliminated",
+		"vector3",
+		"version",
+		"warpGateUsed",
+		"weaponSwitched",
+		"wraithPortal",
+		"ziplineUsed",
+		"MAX"
+	);
+}
+
 void Script_RegisterServerEnums(CSquirrelVM* const s)
 {
-    Script_RegisterLiveAPIEnums(s);
+	WeaponScriptVars_RegisterS21EWeaponVarAliases(s);
+	Script_RegisterLiveAPIEventTypes(s);
 }
 
 //---------------------------------------------------------------------------------
 // Purpose: core server script functions
-// Input  : *s - 
+// Input: *s -
 //---------------------------------------------------------------------------------
 void Script_RegisterCoreServerFunctions(CSquirrelVM* s)
 {
@@ -918,13 +1841,126 @@ void Script_RegisterCoreServerFunctions(CSquirrelVM* s)
 
     DEFINE_SERVER_SCRIPTFUNC_NAMED(s, NavMesh_GetNearestPos, "Finds the nearest position to the provided point on the hull's NavMesh using the hull's bounds as extents", "vector ornull", "vector searchPoint, int hullType", false);
     DEFINE_SERVER_SCRIPTFUNC_NAMED(s, NavMesh_GetNearestPosInBounds, "Finds the nearest position to the provided point on the hull's NavMesh using provided bounds as extents", "vector ornull", "vector searchPoint, vector halfExtents, int hullType", false);
+    DEFINE_SERVER_SCRIPTFUNC_NAMED(s, NavMesh_GetClosestPoint, "Finds the closest NavMesh position to a point, or returns the point if none is found", "vector", "vector point", false);
+    DEFINE_SERVER_SCRIPTFUNC_NAMED(s, NavMesh_GetClosestPoints, "Gets the closest NavMesh positions near a point", "array<vector>", "vector origin, int numPoints", false);
+    DEFINE_SERVER_SCRIPTFUNC_NAMED(s, NavMesh_TraceVerticalLine_PolyCount, "Counts NavMesh polygons stacked under a point", "int", "vector point", false);
+    DEFINE_SERVER_SCRIPTFUNC_NAMED(s, NavMesh_GetPointsInDifferentElevations, "Gets one NavMesh point per distinct elevation under a point", "array<vector>", "vector point", false);
+    DEFINE_SERVER_SCRIPTFUNC_NAMED(s, NavMesh_HasHarmfulAreaWithinDistance, "Returns whether a harmful NavMesh area is within distance of a point", "bool", "vector point, float distance", false);
+    DEFINE_SERVER_SCRIPTFUNC_NAMED(s, NavMesh_SearchForOpenAreas, "Finds open NavMesh positions matching area and adjacency criteria", "array<vector>", "int hullType, float idealTileArea, float minTileSize, float minSurroundingArea, float maxSurroundingArea, float maxPathCost, int minNumAdjacentTiles", false);
+    DEFINE_SERVER_SCRIPTFUNC_NAMED(s, NavMesh_FindUnboundPath, "Finds a NavMesh waypoint path between two positions; empty when unreachable", "array<vector>", "vector startPos, vector endPos", false);
+
+    DEFINE_SERVER_SCRIPTFUNC_NAMED(s, FS_StatsIngest,
+        "Queue a 1v1 stats ingest POST. URL and host key come from convars. Returns true if queued",
+        "bool",
+        "string body",
+        false);
 
     DEFINE_SERVER_SCRIPTFUNC_NAMED(s, SaveRecordedAnimation, "Saves an anim_recording asset to be used by bakery. (dev only)", "void", "var recordedAnim, string fileName", false);
+
+    Script_RegisterRemoteFunctionServerNatives(s);
+
+    // S21 bridge: server-VM bindings for the two precache natives the
+    // S21 client expects. See engine/server/precache_natives.cpp
+
+    Script_RegisterPrecacheServerNatives(s);
+
+    s->RegisterConstant("SNDC_GLOBAL_NON_REWIND", 5);
+
+    s->RegisterConstant("GRX_CURRENCY_PREMIUM", 0);
+    s->RegisterConstant("GRX_CURRENCY_CREDITS", 1);
+    s->RegisterConstant("GRX_CURRENCY_CRAFTING", 2);
+    s->RegisterConstant("GRX_CURRENCY_HEIRLOOM", 3);
+    s->RegisterConstant("GRX_CURRENCY_EXOTIC", 4);
+    s->RegisterConstant("GRX_CURRENCY_ESCROW", 5);
+    s->RegisterConstant("GRX_CURRENCY_EVENT", 6);
+    s->RegisterConstant("GRX_CURRENCY_COUNT", 7);
+
+    s->RegisterConstant("SHIELD_CHANGE_SOURCE_DIRECT", 0);
+    s->RegisterConstant("SHIELD_CHANGE_SOURCE_REGEN", 1);
+    s->RegisterConstant("FX_PATTACH_WEAPON_CHARGE_FRACTION_CURVED", 0x18);
+    s->RegisterConstant("FORCE_STANCE_STAND", 0);
+    s->RegisterConstant("FORCE_STANCE_CROUCH", 1);
+    s->RegisterConstant("WT_GADGET", 9);
+    s->RegisterConstant("TRACE_COLLISION_GROUP_NPC_MOVEMENT", 10); // S3 engine index
+    // Newer script alias of the restrict-who-targets bit (same value as AI_AP_FLAG_TITAN_ONLY).
+    s->RegisterConstant("AI_AP_FLAG_SMART_AI_ONLY", 1);
+
+    // WPT_* weapon-type bitmask constants (shared across all three VMs)
+    WeaponScriptVars_RegisterWPTConstants(s);
+
+    s->RegisterConstant("PHASETYPE_DEFAULT", 0);
+    s->RegisterConstant("PHASETYPE_BALANCE", 1);
+    s->RegisterConstant("PHASETYPE_TUNNEL", 2);
+    s->RegisterConstant("PHASETYPE_DASH", 3);
+    s->RegisterConstant("PHASETYPE_GATE", 4);
+    s->RegisterConstant("PHASETYPE_BREACH", 5);
+    s->RegisterConstant("PHASETYPE_TRANSPORT", 6);
+    s->RegisterConstant("PHASETYPE_DOOR", 7);
+    s->RegisterConstant("PHASETYPE_TELEPORTER", 8);
+    s->RegisterConstant("PHASETYPE_REWIND", 9);
+
+    s->RegisterConstant("INFINITEAMMO_NONE", 0);
+    s->RegisterConstant("INFINITEAMMO_CLIPS", 1);
+
+    s->RegisterConstant("HIGHLIGHT_FLAG_REQUIRE_SAME_TEAM", 0x80);
+    s->RegisterConstant("HIGHLIGHT_FLAG_REQUIRE_DIFFERENT_TEAM", 0x100);
+    s->RegisterConstant("HIGHLIGHT_FLAG_REQUIRE_FRIENDLY_TEAM", 0x200);
+    s->RegisterConstant("HIGHLIGHT_FLAG_REQUIRE_ENEMY_TEAM", 0x400);
+    s->RegisterConstant("HIGHLIGHT_FLAG_REQUIRE_LOW_MOVEMENT", 0x1000);
+    s->RegisterConstant("HIGHLIGHT_FLAG_REQUIRE_HIGH_MOVEMENT", 0x2000);
+    s->RegisterConstant("HIGHLIGHT_FLAG_CHECK_OFTEN", 0x4000);
+    s->RegisterConstant("HIGHLIGHT_FLAG_CHECK_NEXT_FRAME", 0x8000);
+    s->RegisterConstant("HIGHLIGHT_FLAG_DISABLE_DEATH_FADE", 0x10000);
+    s->RegisterConstant("HIGHLIGHT_FLAG_TEAM_AGNOSTIC", 0x20000);
+    s->RegisterConstant("HIGHLIGHT_FLAG_ADDITIONAL_LOS_CHECKS", 0x80000);
+    s->RegisterConstant("HIGHLIGHT_VIS_LOS_ENTSONLY_BLOCKSCAN", 7);
+
+    HighlightContext_RegisterDrawFuncEnum(s->GetVM());
+
+    Script_RegisterFuncNamed(s, "HighlightContext_GetId", "Script_HighlightContext_GetId", "Get highlight context id by name", "int", "string name", false, Script_HighlightContext_GetId);
+    Script_RegisterFuncNamed(s, "HighlightContext_SetParam", "Script_HighlightContext_SetParam", "Set highlight param", "void", "int contextId, int paramIndex, vector value", false, Script_HighlightContext_SetParam);
+    Script_RegisterFuncNamed(s, "HighlightContext_GetParam", "Script_HighlightContext_GetParam", "Get highlight param", "vector", "int contextId, int paramIndex", false, Script_HighlightContext_GetParam);
+    Script_RegisterFuncNamed(s, "HighlightContext_SetDrawFunc", "Script_HighlightContext_SetDrawFunc", "Set draw function", "void", "int contextId, int drawFuncId", false, Script_HighlightContext_SetDrawFunc);
+    Script_RegisterFuncNamed(s, "HighlightContext_GetDrawFunc", "Script_HighlightContext_GetDrawFunc", "Get draw function", "int", "int contextId", false, Script_HighlightContext_GetDrawFunc);
+    Script_RegisterFuncNamed(s, "HighlightContext_SetRadius", "Script_HighlightContext_SetRadius", "Set outline radius", "void", "int contextId, float radius", false, Script_HighlightContext_SetRadius);
+    Script_RegisterFuncNamed(s, "HighlightContext_GetOutlineRadius", "Script_HighlightContext_GetOutlineRadius", "Get outline radius", "float", "int contextId", false, Script_HighlightContext_GetOutlineRadius);
+    Script_RegisterFuncNamed(s, "HighlightContext_GetInsideFunction", "Script_HighlightContext_GetInsideFunction", "Get inside function", "int", "int contextId", false, Script_HighlightContext_GetInsideFunction);
+    Script_RegisterFuncNamed(s, "HighlightContext_GetOutlineFunction", "Script_HighlightContext_GetOutlineFunction", "Get outline function", "int", "int contextId", false, Script_HighlightContext_GetOutlineFunction);
+    Script_RegisterFuncNamed(s, "HighlightContext_SetFlags", "Script_HighlightContext_SetFlags", "Set flags", "void", "int contextId, int flags", false, Script_HighlightContext_SetFlags);
+    Script_RegisterFuncNamed(s, "HighlightContext_SetNearFadeDistance", "Script_HighlightContext_SetNearFadeDistance", "Set near fade distance", "void", "int contextId, float distance", false, Script_HighlightContext_SetNearFadeDistance);
+    Script_RegisterFuncNamed(s, "HighlightContext_SetFarFadeDistance", "Script_HighlightContext_SetFarFadeDistance", "Set far fade distance", "void", "int contextId, float distance", false, Script_HighlightContext_SetFarFadeDistance);
+    Script_RegisterFuncNamed(s, "HighlightContext_SetFocusedColor", "Script_HighlightContext_SetFocusedColor", "Set focused color", "void", "int contextId, vector color", false, Script_HighlightContext_SetFocusedColor);
+    Script_RegisterFuncNamed(s, "HighlightContext_IsEntityVisible", "Script_HighlightContext_IsEntityVisible", "Is entity visible", "bool", "int contextId", false, Script_HighlightContext_IsEntityVisible);
+    Script_RegisterFuncNamed(s, "HighlightContext_IsAfterPostProcess", "Script_HighlightContext_IsAfterPostProcess", "Is after post process", "bool", "int contextId", false, Script_HighlightContext_IsAfterPostProcess);
+
+    Script_RegisterFuncNamed(s, "Weapon_GetBaseClassName", "Script_Global_Weapon_GetBaseClassName", "Returns baseclass or the weapon's classname", "string", "string weaponClassName", false, Script_Global_Weapon_GetBaseClassName);
+    Script_RegisterFuncNamed(s, "Weapon_GetBaseClassNameOrEmpty", "Script_Global_Weapon_GetBaseClassNameOrEmpty", "Returns baseclass or empty string", "string", "string weaponClassName", false, Script_Global_Weapon_GetBaseClassNameOrEmpty);
+
+    StatusEffects_SDK_RegisterServerFunctions(s);
+
+    // GlobalNonRewind variable system
+    Script_RegisterFuncNamed(s, "SetGlobalNonRewindNetBool", "Script_SetGlobalNonRewindNetBool", "Sets a global non-rewind bool", "void", "string name, bool value", false, Script_SetGlobalNonRewindNetBool);
+    Script_RegisterFuncNamed(s, "SetGlobalNonRewindNetInt", "Script_SetGlobalNonRewindNetInt", "Sets a global non-rewind int", "void", "string name, int value", false, Script_SetGlobalNonRewindNetInt);
+    Script_RegisterFuncNamed(s, "SetGlobalNonRewindNetFloat", "Script_SetGlobalNonRewindNetFloat", "Sets a global non-rewind float", "void", "string name, float value", false, Script_SetGlobalNonRewindNetFloat);
+    Script_RegisterFuncNamed(s, "SetGlobalNonRewindNetTime", "Script_SetGlobalNonRewindNetTime", "Sets a global non-rewind time", "void", "string name, float value", false, Script_SetGlobalNonRewindNetTime);
+    Script_RegisterFuncNamed(s, "GetGlobalNonRewindNetBool", "Script_GetGlobalNonRewindNetBool", "Gets a global non-rewind bool", "bool", "string name", false, Script_GetGlobalNonRewindNetBool);
+    Script_RegisterFuncNamed(s, "GetGlobalNonRewindNetInt", "Script_GetGlobalNonRewindNetInt", "Gets a global non-rewind int", "int", "string name", false, Script_GetGlobalNonRewindNetInt);
+    Script_RegisterFuncNamed(s, "GetGlobalNonRewindNetFloat", "Script_GetGlobalNonRewindNetFloat", "Gets a global non-rewind float", "float", "string name", false, Script_GetGlobalNonRewindNetFloat);
+    Script_RegisterFuncNamed(s, "GetGlobalNonRewindNetTime", "Script_GetGlobalNonRewindNetTime", "Gets a global non-rewind time", "float", "string name", false, Script_GetGlobalNonRewindNetTime);
+    Script_RegisterFuncNamed(s, "SetGlobalNonRewindNetEnt", "Script_SetGlobalNonRewindNetEnt", "Sets a global non-rewind entity", "void", "string name, entity ent", false, Script_SetGlobalNonRewindNetEnt);
+    Script_RegisterFuncNamed(s, "GetGlobalNonRewindNetEnt", "Script_GetGlobalNonRewindNetEnt", "Gets a global non-rewind entity", "entity ornull", "string name", false, Script_GetGlobalNonRewindNetEnt);
+
+
+    // Indexed deathfield natives (S21 signatures overwrite S3 no-index ones).
+    DeathField_RegisterOnVM(s);
+
+    // FreeDM/Control alliance natives (S3 missing SetTeamIsInAlliance) -- same RegisterOnVM pattern as DeathField
+    AllianceCompat_RegisterOnVM(s);
 }
 
 //---------------------------------------------------------------------------------
 // Purpose: admin server script functions
-// Input  : *s - 
+// Input: *s -
 //---------------------------------------------------------------------------------
 void Script_RegisterAdminServerFunctions(CSquirrelVM* s)
 {
@@ -934,15 +1970,15 @@ void Script_RegisterAdminServerFunctions(CSquirrelVM* s)
     DEFINE_SERVER_SCRIPTFUNC_NAMED(s, CreateFakePlayer, "Creates a fake player and returns the edict index (-1 on failure). Use GetPlayerArray() to get entity.", "int", "string name, int team", false);
 
     DEFINE_SERVER_SCRIPTFUNC_NAMED(s, KickPlayerByName, "Kicks a player from the server by name", "void", "string name, string reason", false);
-    DEFINE_SERVER_SCRIPTFUNC_NAMED(s, KickPlayerById, "Kicks a player from the server by handle or Steam ID", "void", "string id, string reason", false);
+    DEFINE_SERVER_SCRIPTFUNC_NAMED(s, KickPlayerById, "Kicks a player from the server by handle or user id", "void", "string id, string reason", false);
 
     DEFINE_SERVER_SCRIPTFUNC_NAMED(s, BanPlayerByName, "Bans a player from the server by name", "void", "string name, string reason", false);
-    DEFINE_SERVER_SCRIPTFUNC_NAMED(s, BanPlayerById, "Bans a player from the server by handle or Steam ID", "void", "string id, string reason", false);
+    DEFINE_SERVER_SCRIPTFUNC_NAMED(s, BanPlayerById, "Bans a player from the server by handle or user id", "void", "string id, string reason", false);
 
-    DEFINE_SERVER_SCRIPTFUNC_NAMED(s, UnbanPlayer, "Unbans a player from the server by Steam ID or ip address", "void", "string handle", false);
+    DEFINE_SERVER_SCRIPTFUNC_NAMED(s, UnbanPlayer, "Unbans a player from the server by user id or ip address", "void", "string handle", false);
 
     DEFINE_SERVER_SCRIPTFUNC_NAMED(s, BroadcastServerTextMessage, "Broadcasts a chatmessage to all clients", "void", "string prefix, string message, bool adminMsg", false);
-    DEFINE_SERVER_SCRIPTFUNC_NAMED(s, BroadcastChatBuilder, "Broadcasts a ChatBuilder message to all clients", "void", "string commands", false);
+    DEFINE_SERVER_SCRIPTFUNC_NAMED(s, BroadcastChatBuilder, "Broadcasts a styled chat message to all clients. Optional trailing bool adminMsg (default false) bypasses the recipient's chat filters.", "void", "array segments", true);
 }
 
 //---------------------------------------------------------------------------------
@@ -951,23 +1987,32 @@ void Script_RegisterAdminServerFunctions(CSquirrelVM* s)
 static void Script_RegisterServerEntityClassFuncs()
 {
     v_Script_RegisterServerEntityClassFuncs();
+
     static bool initialized = false;
 
     if (initialized)
         return;
 
     initialized = true;
+
+    WeaponScriptVars_RegisterEntityFuncs(g_serverScriptEntityStruct);
+    WeaponScriptVars_RegisterWeaponTypeDisableFuncs(g_serverScriptEntityStruct);
+    Translocation_RegisterProjectileFuncs(g_serverScriptEntityStruct);
+    Script_RegisterDedicatedEntityNatives(g_serverScriptEntityStruct);
 }
 //---------------------------------------------------------------------------------
 static void Script_RegisterServerPlayerClassFuncs()
 {
     v_Script_RegisterServerPlayerClassFuncs();
+    Script_UpdateDedicatedPlayerDecoySignature();
     static bool initialized = false;
 
     if (initialized)
         return;
 
     initialized = true;
+
+    Script_RegisterDedicatedPlayerNatives(g_serverScriptPlayerStruct);
 
     g_serverScriptPlayerStruct->AddFunction("SetClassVar",
         "ScriptSetClassVar",
@@ -987,19 +2032,52 @@ static void Script_RegisterServerPlayerClassFuncs()
 
     g_serverScriptPlayerStruct->AddFunction("ChatBuilder",
         "ScriptChatBuilder",
-        "Advanced chat builder API. Send commands as: 'N|' (newline), 'T|text|' (text), 'C|r,g,b|' (color), 'F|dur,fade|' (fade). Example: 'N|F|5,1|C|255,0,0|T|Red text!|'",
+        "Sends a styled chat message. Pass an array of tables: { text = \"hi\", r = 255, g = 0, b = 0, rainbow = false, newline = true, sustain = 10.0, fade = 1.0 }. Only text is required. Optional trailing bool adminMsg (default false) bypasses the recipient's chat filters.",
         "bool",
-        "string commands",
-        false,
+        "array segments",
+        true,
         ServerScript_ChatBuilder);
 
     g_serverScriptPlayerStruct->AddFunction("ChatBuilderRainbow",
         "ScriptChatBuilderRainbow",
-        "Sends a rainbow-colored message (cycles through colors per character). Keep text SHORT (under 20 chars recommended)",
+        "Sends a rainbow-colored line (cycles through colors per character). Text over 64 characters is truncated. Optional trailing bool adminMsg (default false) bypasses the recipient's chat filters.",
         "bool",
-        "string text, float duration, float fadeTime",
-        false,
+        "string text, float sustain, float fadeTime",
+        true,
         ServerScript_ChatBuilderRainbow);
+
+    // Register shared player functions (PushForcedStance, GetLastTimeDamaged, skydive, etc.)
+    Script_RegisterPlayerScriptFunctions(g_serverScriptPlayerStruct);
+    if (ServerScript_IsDedicatedRuntime())
+        Script_RegisterDedicatedPlayerScriptFunctions(g_serverScriptPlayerStruct);
+    WeaponScriptVars_RegisterLaserSightOverride(g_serverScriptPlayerStruct);
+    AkimboBridge_RegisterPlayerFuncs(g_serverScriptPlayerStruct);
+    WeaponScriptVars_RegisterOffhandPlayerOverrides(g_serverScriptPlayerStruct, /*isServerStruct=*/true);
+    JetDrive_RegisterScriptFunctions(g_serverScriptPlayerStruct);
+    UpdraftBridge_RegisterScriptFunctions(g_serverScriptPlayerStruct);
+    SkydiveBridge_RegisterScriptFunctions(g_serverScriptPlayerStruct);
+    PlayerOverheat_RegisterPlayerFuncs(g_serverScriptPlayerStruct);
+    Translocation_RegisterPlayerFuncs(g_serverScriptPlayerStruct);
+
+    // Register SERVER-ONLY player setters (NonRewind setters must not be on CLIENT)
+    Script_RegisterPlayerScriptSetters(g_serverScriptPlayerStruct);
+}
+//---------------------------------------------------------------------------------
+// Offhand natives and PhaseShiftBegin bind on the combat character. Registering
+// them on the player struct rebinds the name and NPC call sites throw.
+static void Script_RegisterServerCombatCharacterClassFuncs()
+{
+    v_Script_RegisterServerCombatCharacterClassFuncs();
+    static bool initialized = false;
+
+    if (initialized)
+        return;
+
+    initialized = true;
+
+    WeaponScriptVars_RegisterPhaseShiftOverride(g_serverScriptCombatCharacterStruct);
+    WeaponScriptVars_RegisterOffhandOverrides(g_serverScriptCombatCharacterStruct, /*isServerStruct=*/true);
+    ContextAction_RegisterScriptFunctions(g_serverScriptCombatCharacterStruct);
 }
 //---------------------------------------------------------------------------------
 static void Script_RegisterServerAIClassFuncs()
@@ -1011,28 +2089,6 @@ static void Script_RegisterServerAIClassFuncs()
         return;
 
     initialized = true;
-}
-//---------------------------------------------------------------------------------
-static SQRESULT ServerScript_SetScriptPoseParam0(HSQUIRRELVM v)
-{
-    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-}
-
-static SQRESULT ServerScript_GetScriptPoseParam0(HSQUIRRELVM v)
-{
-    sq_pushfloat(v, 0.0f);
-    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-}
-
-static SQRESULT ServerScript_SetScriptPoseParam1(HSQUIRRELVM v)
-{
-    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-}
-
-static SQRESULT ServerScript_GetScriptPoseParam1(HSQUIRRELVM v)
-{
-    sq_pushfloat(v, 0.0f);
-    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
 //---------------------------------------------------------------------------------
@@ -1046,44 +2102,19 @@ static void Script_RegisterServerWeaponClassFuncs()
 
     initialized = true;
 
-    g_serverScriptWeaponStruct->AddFunction(
-        "SetScriptPoseParam0",
-        "Script_SetScriptPoseParam0",
-        "Sets script pose parameter 0 (server no-op)",
-        "void",
-        "float value",
-        false,
-        ServerScript_SetScriptPoseParam0);
-
-    g_serverScriptWeaponStruct->AddFunction(
-        "GetScriptPoseParam0",
-        "Script_GetScriptPoseParam0",
-        "Gets script pose parameter 0 (server always returns 0.0)",
-        "float",
-        "",
-        false,
-        ServerScript_GetScriptPoseParam0);
-
-    g_serverScriptWeaponStruct->AddFunction(
-        "SetScriptPoseParam1",
-        "Script_SetScriptPoseParam1",
-        "Sets script pose parameter 1 (server no-op)",
-        "void",
-        "float value",
-        false,
-        ServerScript_SetScriptPoseParam1);
-
-    g_serverScriptWeaponStruct->AddFunction(
-        "GetScriptPoseParam1",
-        "Script_GetScriptPoseParam1",
-        "Gets script pose parameter 1 (server always returns 0.0)",
-        "float",
-        "",
-        false,
-        ServerScript_GetScriptPoseParam1);
+    Script_RegisterDedicatedWeaponNatives();
 
     WeaponScriptVars_RegisterWeaponFuncs(g_serverScriptWeaponStruct);
+    WeaponScriptVars_RegisterWeaponLockedSetSetter(g_serverScriptWeaponStruct);
+    WeaponScriptVars_RegisterInfiniteAmmoFuncs(g_serverScriptWeaponStruct);
+    WeaponScriptVars_RegisterInfiniteAmmoSetter(g_serverScriptWeaponStruct);
+    WeaponHeat_RegisterWeaponFuncs(g_serverScriptWeaponStruct);
+    EnergizeBridge_RegisterWeaponFuncs(g_serverScriptWeaponStruct);
+    AkimboBridge_RegisterWeaponFuncs(g_serverScriptWeaponStruct);
+    PlayerOverheat_RegisterWeaponFuncs(g_serverScriptWeaponStruct);
+    Translocation_RegisterWeaponFuncs(g_serverScriptWeaponStruct);
 }
+
 //---------------------------------------------------------------------------------
 static void Script_RegisterServerProjectileClassFuncs()
 {
@@ -1140,13 +2171,53 @@ static void Script_RegisterServerFirstPersonProxyClassFuncs()
     initialized = true;
 }
 
+//---------------------------------------------------------------------------------
+// Purpose: run after the engine's GRX block so COUNT=7 overrides the engine's 4.
+//---------------------------------------------------------------------------------
+static void Hook_Script_RegisterServerCodeConstants(CSquirrelVM* s)
+{
+    v_Script_RegisterServerCodeConstants(s); // run engine codeconsts (writes S3 schema)
+
+    // S21 GRX_CURRENCY: keep PREMIUM/CREDITS/CRAFTING; COUNT is 7 with four new keys.
+    s->RegisterConstant("GRX_CURRENCY_HEIRLOOM", 3);
+    s->RegisterConstant("GRX_CURRENCY_EXOTIC",   4);
+    s->RegisterConstant("GRX_CURRENCY_ESCROW",   5);
+    s->RegisterConstant("GRX_CURRENCY_EVENT",    6);
+    s->RegisterConstant("GRX_CURRENCY_COUNT",    7);
+}
+
+//---------------------------------------------------------------------------------
+// Purpose: S21 has 12 inventory slots; dual-wield partner is main+7, not main+5.
+//---------------------------------------------------------------------------------
+static void Hook_Script_RegisterServerWeaponSlotConstants(CSquirrelVM* s)
+{
+    v_Script_RegisterServerWeaponSlotConstants(s); // run engine codeconsts (writes S3 schema)
+
+    s->RegisterConstant("WEAPON_INVENTORY_SLOT_ANTI_TITAN",     5);
+    s->RegisterConstant("WEAPON_INVENTORY_SLOT_DUALPRIMARY_0",  7);
+    s->RegisterConstant("WEAPON_INVENTORY_SLOT_DUALPRIMARY_1",  8);
+    s->RegisterConstant("WEAPON_INVENTORY_SLOT_DUALPRIMARY_2",  9);
+    s->RegisterConstant("WEAPON_INVENTORY_SLOT_DUALPRIMARY_3", 10);
+
+    Msg(eDLL_T::SERVER, "[WEAP-SLOT] S21 inventory slot schema applied "
+        "(sling=4, anti_titan=5, gadget=6)\n");
+}
+
 void VScriptServer::Detour(const bool bAttach) const
 {
     DetourSetup(&v_ServerScript_DebugScreenText, &ServerScript_DebugScreenText, bAttach);
     DetourSetup(&v_ServerScript_DebugScreenTextWithColor, &ServerScript_DebugScreenTextWithColor, bAttach);
 
+    DetourSetup(&v_Script_RegisterServerCodeConstants, &Hook_Script_RegisterServerCodeConstants, bAttach);
+
+    if (v_Script_RegisterServerWeaponSlotConstants)
+        DetourSetup(&v_Script_RegisterServerWeaponSlotConstants, &Hook_Script_RegisterServerWeaponSlotConstants, bAttach);
+
+	Script_DedicatedTraceDetour(bAttach);
+
     DetourSetup(&v_Script_RegisterServerEntityClassFuncs, &Script_RegisterServerEntityClassFuncs, bAttach);
     DetourSetup(&v_Script_RegisterServerPlayerClassFuncs, &Script_RegisterServerPlayerClassFuncs, bAttach);
+    DetourSetup(&v_Script_RegisterServerCombatCharacterClassFuncs, &Script_RegisterServerCombatCharacterClassFuncs, bAttach);
     DetourSetup(&v_Script_RegisterServerAIClassFuncs, &Script_RegisterServerAIClassFuncs, bAttach);
     DetourSetup(&v_Script_RegisterServerWeaponClassFuncs, &Script_RegisterServerWeaponClassFuncs, bAttach);
     DetourSetup(&v_Script_RegisterServerProjectileClassFuncs, &Script_RegisterServerProjectileClassFuncs, bAttach);

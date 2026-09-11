@@ -1,6 +1,6 @@
 //========= Copyright (c) 1996-2005, Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -12,7 +12,7 @@
 #include "mathlib/vector4d.h"
 #include "mathlib/ssemath.h"
 
-// memdbgon must be the last include file in a .cpp file!!!
+// memdbgon must be the last include file in a.cpp file!!!
 #include "tier0/memdbgon.h"
 
 #pragma warning (disable : 4700) // local variable 'x' used without having been initialized
@@ -193,7 +193,6 @@ VMatrix SetupMatrixOrgAngles(const Vector3D& origin, const QAngle& vAngles)
 
 #endif // VECTOR_NO_SLOW_OPERATIONS
 
-#if 1
 bool PlaneIntersection(const VPlane& vp1, const VPlane& vp2, const VPlane& vp3, Vector3D& vOut)
 {
 	Vector3D v2Cross3 = CrossProduct(vp2.m_Normal, vp3.m_Normal);
@@ -204,29 +203,6 @@ bool PlaneIntersection(const VPlane& vp1, const VPlane& vp2, const VPlane& vp3, 
 	vOut = vRet * (1.0f / flDenom);
 	return true;
 }
-#else  // old slow inaccurate code
-bool PlaneIntersection(const VPlane& vp1, const VPlane& vp2, const VPlane& vp3, Vector& vOut)
-{
-	VMatrix mMat, mInverse;
-
-	mMat.Init(
-		vp1.m_Normal.x, vp1.m_Normal.y, vp1.m_Normal.z, -vp1.m_Dist,
-		vp2.m_Normal.x, vp2.m_Normal.y, vp2.m_Normal.z, -vp2.m_Dist,
-		vp3.m_Normal.x, vp3.m_Normal.y, vp3.m_Normal.z, -vp3.m_Dist,
-		0.0f, 0.0f, 0.0f, 1.0f
-	);
-	if (mMat.InverseGeneral(mInverse))
-	{
-		//vOut = mInverse * Vector(0.0f, 0.0f, 0.0f);
-		mInverse.GetTranslation(vOut);
-		return true;
-	}
-	else
-	{
-		return false;
-	}
-}
-#endif
 
 
 // ------------------------------------------------------------------------------------------- //
@@ -340,7 +316,7 @@ bool MatrixInverseGeneral(const VMatrix& src, VMatrix& dst)
 		rowMap[i] = i;
 	}
 
-	// Use row operations to get to reduced row-echelon form using these rules:
+	// Use row operations to get to reduced row-echelon form using these rules
 	// 1. Multiply or divide a row by a nonzero number.
 	// 2. Add a multiple of one row to another.
 	// 3. Interchange two rows.
@@ -629,7 +605,7 @@ void MatrixToAngles(const VMatrix& src, QAngle& vAngles)
 	// enough here to get angles?
 	if (xyDist > 0.001f)
 	{
-		// (yaw)	y = ATAN( forward.y, forward.x );		-- in our space, forward is the X axis
+		// (yaw)	y = ATAN( forward.y, forward.x ); -- in our space, forward is the X axis
 		vAngles[1] = RAD2DEG(atan2f(forward[1], forward[0]));
 
 		// The engine does pitch inverted from this, but we always end up negating it in the DLL
@@ -642,7 +618,7 @@ void MatrixToAngles(const VMatrix& src, QAngle& vAngles)
 	}
 	else	// forward is mostly Z, gimbal lock-
 	{
-		// (yaw)	y = ATAN( -left.x, left.y );			-- forward is mostly z, so use right for yaw
+		// (yaw)	y = ATAN( -left.x, left.y ); -- forward is mostly z, so use right for yaw
 		vAngles[1] = RAD2DEG(atan2f(-left[0], left[1]));
 
 		// The engine does pitch inverted from this, but we always end up negating it in the DLL
@@ -747,7 +723,6 @@ void MatrixMultiply(const VMatrix& src1, const VMatrix& src2, VMatrix& dst)
 
 void Vector4DMultiply(const VMatrix& src1, Vector4D const& src2, Vector4D& dst)
 {
-	// Make sure it works if src2 == dst
 	Vector4D tmp;
 	Vector4D const& v = (&src2 == &dst) ? tmp : src2;
 
@@ -768,7 +743,6 @@ void Vector4DMultiply(const VMatrix& src1, Vector4D const& src2, Vector4D& dst)
 
 void Vector4DMultiplyPosition(const VMatrix& src1, Vector3D const& src2, Vector4D& dst)
 {
-	// Make sure it works if src2 == dst
 	Vector3D tmp;
 	Vector3D const& v = (&src2 == &dst.AsVector3D()) ? static_cast<const Vector3D>(tmp) : src2;
 
@@ -791,7 +765,6 @@ void Vector4DMultiplyPosition(const VMatrix& src1, Vector3D const& src2, Vector4
 
 void Vector3DMultiply(const VMatrix& src1, const Vector3D& src2, Vector3D& dst)
 {
-	// Make sure it works if src2 == dst
 	Vector3D tmp;
 	const Vector3D& v = (&src2 == &dst) ? static_cast<const Vector3D>(tmp) : src2;
 
@@ -812,7 +785,6 @@ void Vector3DMultiply(const VMatrix& src1, const Vector3D& src2, Vector3D& dst)
 //-----------------------------------------------------------------------------
 void Vector3DMultiplyPositionProjective(const VMatrix& src1, const Vector3D& src2, Vector3D& dst)
 {
-	// Make sure it works if src2 == dst
 	Vector3D tmp;
 	const Vector3D& v = (&src2 == &dst) ? static_cast<const Vector3D>(tmp) : src2;
 	if (&src2 == &dst)
@@ -839,7 +811,6 @@ void Vector3DMultiplyPositionProjective(const VMatrix& src1, const Vector3D& src
 //-----------------------------------------------------------------------------
 void Vector3DMultiplyProjective(const VMatrix& src1, const Vector3D& src2, Vector3D& dst)
 {
-	// Make sure it works if src2 == dst
 	Vector3D tmp;
 	const Vector3D& v = (&src2 == &dst) ? static_cast<const Vector3D>(tmp) : src2;
 	if (&src2 == &dst)
@@ -868,7 +839,6 @@ void Vector3DMultiplyProjective(const VMatrix& src1, const Vector3D& src2, Vecto
 //-----------------------------------------------------------------------------
 void Vector4DMultiplyTranspose(const VMatrix& src1, Vector4D const& src2, Vector4D& dst)
 {
-	// Make sure it works if src2 == dst
 	bool srcEqualsDst = (&src2 == &dst);
 
 	Vector4D tmp;
@@ -890,7 +860,6 @@ void Vector4DMultiplyTranspose(const VMatrix& src1, Vector4D const& src2, Vector
 //-----------------------------------------------------------------------------
 void Vector3DMultiplyTranspose(const VMatrix& src1, const Vector3D& src2, Vector3D& dst)
 {
-	// Make sure it works if src2 == dst
 	bool srcEqualsDst = (&src2 == &dst);
 
 	Vector3D tmp;
@@ -912,7 +881,7 @@ void Vector3DMultiplyTranspose(const VMatrix& src1, const Vector3D& src2, Vector
 //-----------------------------------------------------------------------------
 void MatrixTransformPlane(const VMatrix& src, const cplane_t& inPlane, cplane_t& outPlane)
 {
-	// What we want to do is the following:
+	// What we want to do is the following
 	// 1) transform the normal into the new space.
 	// 2) Determine a point on the old plane given by plane dist * plane normal
 	// 3) Transform that point into the new space
@@ -969,13 +938,13 @@ void MatrixBuildTranslation(VMatrix& dst, const Vector3D& translation)
 //-----------------------------------------------------------------------------
 // Purpose: Builds the matrix for a counterclockwise rotation about an arbitrary axis.
 //
-//		   | ax2 + (1 - ax2)cosQ		axay(1 - cosQ) - azsinQ		azax(1 - cosQ) + aysinQ |
-// Ra(Q) = | axay(1 - cosQ) + azsinQ	ay2 + (1 - ay2)cosQ			ayaz(1 - cosQ) - axsinQ |
-//		   | azax(1 - cosQ) - aysinQ	ayaz(1 - cosQ) + axsinQ		az2 + (1 - az2)cosQ     |
+// | ax2 + (1 - ax2)cosQ axay(1 - cosQ) - azsinQ azax(1 - cosQ) + aysinQ |
+// Ra(Q) = | axay(1 - cosQ) + azsinQ	ay2 + (1 - ay2)cosQ ayaz(1 - cosQ) - axsinQ |
+// | azax(1 - cosQ) - aysinQ	ayaz(1 - cosQ) + axsinQ az2 + (1 - az2)cosQ |
 //          
-// Input  : mat - 
-//			vAxisOrRot - 
-//			angle - 
+// Input: mat - 
+// vAxisOrRot - 
+// angle - 
 //-----------------------------------------------------------------------------
 void MatrixBuildRotationAboutAxis(VMatrix& dst, const Vector3D& vAxisOfRot, float angleDegrees)
 {
@@ -1168,7 +1137,6 @@ void CalculateSphereFromProjectionMatrixInverse(const VMatrix& volumeToWorld, Ve
 	// Let the distance along the center line from the near point to the sphere center point = x
 	// Then let the distance between the sphere center point + near edge point == 
 	//	the distance between the sphere center point + far edge point == r == radius of sphere
-	// Then h1^2 + x^2 == r^2 == (l-x)^2 + h2^2
 	// h1^x + x^2 = l^2 - 2 * l * x + x^2 + h2^2
 	// 2 * l * x = l^2 + h2^2 - h1^2
 	// x = (l^2 + h2^2 - h1^2) / (2 * l)
@@ -1236,33 +1204,32 @@ void FrustumPlanesFromMatrix(const VMatrix& clipToWorld, Frustum_t& frustum)
 	frustum.SetPlanes(planes);
 }
 
-// BEWARE: top/bottom are FLIPPED relative to D3DXMatrixOrthoOffCenterRH().
+// BEWARE: top/bottom are FLIPPED relative to D3DXMatrixOrthoOffCenterRH.
 void MatrixBuildOrtho(VMatrix& dst, double left, double top, double right, double bottom, double zNear, double zFar)
 {
-	// FIXME: This is being used incorrectly! Should read:
+	// FIXME: This is being used incorrectly! Should read
 	// D3DXMatrixOrthoOffCenterRH( &matrix, left, right, bottom, top, zNear, zFar );
 	// Which is certainly why we need these extra -1 scales in y. Bleah
 
-	// NOTE: The camera can be imagined as the following diagram:
-	//		/z
+	// NOTE: The camera can be imagined as the following diagram
 	//	   /
-	//	  /____ x	Z is going into the screen
+	// /____ x	Z is going into the screen
 	//	  |
 	//	  |
-	//	  |y
+	// |y
 	//
 	// (0,0,z) represents the upper-left corner of the screen.
 	// Our projection transform needs to transform from this space to a LH coordinate
-	// system that looks thusly:
+	// system that looks thusly
 	// 
-	//	y|  /z
+	//	y| /z
 	//	 | /
-	//	 |/____ x	Z is going into the screen
+	// |/____ x	Z is going into the screen
 	//
 	// Where x,y lies between -1 and 1, and z lies from 0 to 1
 	// This is because the viewport transformation from projection space to pixels
 	// introduces a -1 scale in the y coordinates
-	//		D3DXMatrixOrthoOffCenterRH( &matrix, left, right, top, bottom, zNear, zFar );
+	// D3DXMatrixOrthoOffCenterRH( &matrix, left, right, top, bottom, zNear, zFar );
 
 	dst.Init(2.0f / vec_t(right - left), 0.0f, 0.0f, vec_t((left + right) / (left - right)),
 		0.0f, 2.0f / vec_t(bottom - top), 0.0f, vec_t((bottom + top) / (top - bottom)),

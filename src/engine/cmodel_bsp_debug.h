@@ -24,25 +24,7 @@ extern ConVar bsp_collision_debug_alpha;
 #ifndef DEDICATED
 
 //-----------------------------------------------------------------------------
-// 
-// Memory layout (64 bytes):
-//   minMax[3][2][4] - 48 bytes: int16 bounds per axis/minmax/child
-//     [axis 0=X,1=Y,2=Z][minmax 0=min,1=max][child 0-3]
-//   packedMetaData[4] - 16 bytes: child type/index info
-//
-// Child type extraction (from CollBvh_VisitNodes_r):
-//   type0 = packedMetaData[2] & 0xF
-//   type1 = (packedMetaData[2] >> 4) & 0xF
-//   type2 = packedMetaData[3] & 0xF
-//   type3 = (LOBYTE(packedMetaData[3]) >> 4)
-//
-// Child index extraction:
-//   index[i] = packedMetaData[i] >> 8
-//
-// Type meanings:
-//   0 = internal node (recurse with childIndex)
-//   1 = empty/skip
-//   2+ = leaf with polygon data
+// CollBvh4Node_t: 64 bytes. Type in packedMetaData nibble; index = packedMetaData[i] >> 8.
 //-----------------------------------------------------------------------------
 struct CollBvh4Node_t
 {
@@ -69,10 +51,7 @@ struct CollBvh4Node_t
 static_assert(sizeof(CollBvh4Node_t) == 64);
 
 //-----------------------------------------------------------------------------
-// CollBvh4_s - Full collision BVH structure (88 bytes)
-//
-// This is the main collision structure containing the BVH tree and metadata.
-// context struct instead (CollisionModelContext_t below).
+// CollBvh4_t: 88-byte collision BVH. Use CollisionModelContext_t for the live table.
 //-----------------------------------------------------------------------------
 struct CollBvh4_t
 {
@@ -96,27 +75,7 @@ struct CollBvh4_t
 static_assert(sizeof(CollBvh4_t) == 88);
 
 //-----------------------------------------------------------------------------
-// CollisionModelContext_t - 72-byte collision context
-//
-// This is the per-model collision context structure used in older game versions.
-// Array accessed via qword_1634F1638 + 72 * modelIndex
-//
-// Populated from packed collision data as shown in sub_14020FBE0:
-//   ctx[0] = data + data[5]     (BVH nodes)
-//   ctx[8] = data + data[1]     (surface properties)
-//   ctx[16] = data + data[7]    (leaf data stream)
-//   ctx[24] = data + data[6]    (vertices - packed or float depending on model)
-//   ctx[32] = data + data[0]    (content masks)
-//   ctx[40] = data + data[2]    (unknown - may be unused)
-//   ctx[48] = data[4]           (int)
-//   ctx[52] = 0                 (int)
-//   ctx[56] = *(qword*)(data+32)(scale origin as packed float2 or 2 floats)
-//   ctx[64] = data[10]          (float - scale origin z)
-//   ctx[68] = data[11]          (float - quantization scale)
-//
-// Note: In the 88-byte CollBvh4_s struct, offset 32 holds vertices and the
-// bvhFlags bit 0 indicates packed vs float. The 72-byte struct may use
-// offset 24 for vertices similarly.
+// CollisionModelContext_t: 72 bytes per modelIndex. verts at +24, bvh at +0.
 //-----------------------------------------------------------------------------
 struct CollisionModelContext_t
 {
@@ -137,27 +96,27 @@ static_assert(sizeof(CollisionModelContext_t) == 72);
 
 //-----------------------------------------------------------------------------
 // Full collision BSP data structure
-// Loaded by sub_14020F2F0 from the BSP file
+// Loaded by from the BSP file
 //-----------------------------------------------------------------------------
 struct CollisionBSPData_t
 {
-	char name[96];                   // +0x00  offset 0 - map name (0x60 bytes)
-	int version;                     // +0x60  offset 96 - BSP version
-	int numVertices;                 // +0x64  offset 100
-	int numPackedVertices;           // +0x68  offset 104
-	int numContentMasks;             // +0x6C  offset 108
-	int numSurfaceProperties;        // +0x70  offset 112
-	int numLeafData;                 // +0x74  offset 116
-	int numBvhNodes;                 // +0x78  offset 120
-	int numBvhLeafData;              // +0x7C  offset 124
-	void* vertices;                  // +0x80  offset 128 - Vector3D array
-	void* packedVertices;            // +0x88  offset 136 - packed 6-byte vertices
-	void* contentMasks;              // +0x90  offset 144
-	void* surfaceProperties;         // +0x98  offset 152 - 8 bytes each
-	void* leafData;                  // +0xA0  offset 160
-	CollBvh4Node_t* bvhNodes;        // +0xA8  offset 168 - BVH node array (64 bytes each)
-	void* bvhLeafData;               // +0xB0  offset 176
-	// ... more fields follow
+	char name[96];                   // +0x00 offset 0 - map name (0x60 bytes)
+	int version;                     // +0x60 offset 96 - BSP version
+	int numVertices;                 // +0x64 offset 100
+	int numPackedVertices;           // +0x68 offset 104
+	int numContentMasks;             // +0x6C offset 108
+	int numSurfaceProperties;        // +0x70 offset 112
+	int numLeafData;                 // +0x74 offset 116
+	int numBvhNodes;                 // +0x78 offset 120
+	int numBvhLeafData;              // +0x7C offset 124
+	void* vertices;                  // +0x80 offset 128 - Vector3D array
+	void* packedVertices;            // +0x88 offset 136 - packed 6-byte vertices
+	void* contentMasks;              // +0x90 offset 144
+	void* surfaceProperties;         // +0x98 offset 152 - 8 bytes each
+	void* leafData;                  // +0xA0 offset 160
+	CollBvh4Node_t* bvhNodes;        // +0xA8 offset 168 - BVH node array (64 bytes each)
+	void* bvhLeafData;               // +0xB0 offset 176
+	//... more fields follow
 };
 
 //-----------------------------------------------------------------------------
@@ -188,9 +147,6 @@ public:
 	// Draw collision triangles around a specific position
 	static void DrawBVHNodesAroundPoint(const Vector3D& pos, float radius, int maxDepth = -1);
 
-	// Console command
-	static void CC_DrawBSPCollision(const CCommand& args);
-
 private:
 	static void DrawNodeRecursive(const CollBvh4Node_t* nodes, int nodeIndex, 
 		const Vector3D& origin, float scale, int depth, int maxDepth,
@@ -203,8 +159,6 @@ private:
 		const Vector3D& origin, Vector3D& outMins, Vector3D& outMaxs);
 
 	// Triangle geometry decoding and drawing
-	static Vector3D DecodePackedVertex(const int16_t* packedVerts, int vertexIndex,
-		const Vector3D& origin, float quantScale);
 	static Vector3D DecodeFloatVertex(const float* floatVerts, int vertexIndex,
 		const Vector3D& origin);
 	static void DrawTriangle(const Vector3D& v0, const Vector3D& v1, const Vector3D& v2, const Color& color, int renderMode = 1);

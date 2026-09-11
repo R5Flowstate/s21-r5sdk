@@ -1,9 +1,9 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
-// $Workfile:     $
-// $Date:         $
+// $Workfile: $
+// $Date: $
 // $NoKeywords: $
 //===========================================================================//
 #if !defined( IENGINEVGUI_H )
@@ -45,7 +45,7 @@ enum PaintMode_t
 	PAINT_INGAMEPANELS = (1 << 1),
 };
 
-// Might not be complete:
+// Might not be complete
 enum LevelLoadingProgress_e
 {
 	PROGRESS_INVALID = -2,
@@ -111,9 +111,7 @@ public:
 
 //#if defined(_STATIC_LINKED) && defined(CLIENT_DLL)
 //namespace Client
-//{
 //	extern IEngineVGui* enginevgui;
-//}
 //#else
 //extern IEngineVGui* enginevgui;
 //#endif

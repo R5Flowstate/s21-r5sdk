@@ -93,7 +93,7 @@ static_assert(sizeof(AILocalMoveGoal_t) == 0xD8);
 
 //-----------------------------------------------------------------------------
 // Purpose: The set of callbacks used by lower-level movement classes to
-//			notify and receive guidance from higher level-classes
+// notify and receive guidance from higher level-classes
 //-----------------------------------------------------------------------------
 
 abstract_class IAI_MovementSink

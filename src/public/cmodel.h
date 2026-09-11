@@ -1,9 +1,9 @@
-﻿//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
-// Purpose: 
+// Purpose
 //
-// $Workfile:     $
-// $Date:         $
+// $Workfile: $
+// $Date: $
 // $NoKeywords: $
 //=============================================================================//
 
@@ -14,26 +14,26 @@
 #endif
 #include "mathlib/mathlib.h"
 
+// S21 Ray_t layout: sizeof == 0x70. m_Extents.w is a derived term
+// (extents.z - extents.x) the sweep relies on; a hull ray built by hand must
+// set it or the collision walk runs on a bad bound.
 struct Ray_t
 {
 	VectorAligned m_Start;
 	VectorAligned m_Delta;
 	VectorAligned m_StartOffset;
-	int m_nUnk30;
-	int m_nUnk34;
-	int m_nUnk38;
-	int m_nUnk3C;
-	int m_nUnk40;
-	int m_nUnk44;
-	int m_nFlags;
+	VectorAligned m_Extents;  // half-extents; .w = m_Extents.z - m_Extents.x
+	VectorAligned m_upDir;    // hull orientation axis, (0,0,1) for an axis-aligned box
 	const matrix3x4_t* m_pWorldAxisTransform;
-	int m_nUnk58;
+	float m_flHitboxRadius;
 	bool m_IsRay;
 	bool m_IsSwept;
-	int m_nFlags2; // Unsure what these do yet.
-	int m_nUnk68;
+	int m_nSolidType;
+	int m_nDetailLevel;       // TraceDetailLevel: 0 NORMAL, 1 HIGH_AT_RAY_START, 2 HIGH
 
 	Ray_t() : m_pWorldAxisTransform(nullptr) {};
+	// nFlags1/nFlags2 keep their historical names at the call sites; they are really
+	// m_upDir.z (0x3f800000 == 1.0f, the world-up default) and m_nSolidType.
 	Ray_t(Vector3D const& start, Vector3D const& end, int nFlags1 = 0x3f800000, int nFlags2 = NULL) { Init(start, end, nFlags1, nFlags2); };
 
 	void Init(Vector3D const& start, Vector3D const& end, int nFlags1, int nFlags2)
@@ -41,27 +41,32 @@ struct Ray_t
 		VectorSubtract(end, start, m_Delta);
 		m_IsSwept = (m_Delta.LengthSqr() != 0);
 
-		m_nUnk30 = NULL;
-		m_nUnk34 = NULL;
-		m_nUnk38 = NULL;
-		m_nUnk3C = NULL;
-		m_nUnk40 = NULL;
-		m_nUnk44 = NULL;
+		m_Extents.x = 0.0f;
+		m_Extents.y = 0.0f;
+		m_Extents.z = 0.0f;
+		m_Extents.w = 0.0f;
 
-		m_nFlags = nFlags1; // !TODO: Reverse these flags!
+		m_upDir.x = 0.0f;
+		m_upDir.y = 0.0f;
+		*reinterpret_cast<int*>(&m_upDir.z) = nFlags1;
+		m_upDir.w = 0.0f;
 
 		m_pWorldAxisTransform = nullptr;
 		m_IsRay = true;
 
-		m_nUnk58 = NULL;
-		m_nFlags2 = nFlags2; // !TODO: Reverse these flags!
-		m_nUnk68 = NULL;
+		m_flHitboxRadius = 0.0f;
+		m_nSolidType = nFlags2;
+		m_nDetailLevel = NULL;
 
 		VectorClear(m_StartOffset);
 		VectorCopy(start, m_Start);
 	}
 };
 static_assert(sizeof(Ray_t) == 0x70);
+static_assert(offsetof(Ray_t, m_Extents) == 0x30);
+static_assert(offsetof(Ray_t, m_upDir) == 0x40);
+static_assert(offsetof(Ray_t, m_IsRay) == 0x5C);
+static_assert(offsetof(Ray_t, m_nDetailLevel) == 0x64);
 
 struct csurface_t
 {

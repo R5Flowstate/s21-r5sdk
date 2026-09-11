@@ -8,22 +8,49 @@
 #include "shared_rcon.h"
 #include "protoc/netcon.pb.h"
 
+enum NetconDirection_e : u8
+{
+	NETCON_DIR_TO_CLIENT, // Frame travelling from the RCON server to a console.
+	NETCON_DIR_TO_SERVER  // Frame travelling from a console to the RCON server.
+};
+
+// Bound into the AEAD tag so a frame cannot be replayed, reordered, or reflected
+// back down the opposite direction of the connection it was captured on.
+struct NetconAadBlock_s
+{
+	NetconAadBlock_s(const u64 seqNr, const u64 sessionId, const NetconDirection_e direction)
+	{
+		// Fixed byte order: both ends must build a bit-identical block.
+		m_SeqNr = _byteswap_uint64(seqNr);
+		m_SessionId = _byteswap_uint64(sessionId);
+		m_Direction = direction;
+
+		memset(m_Padding, 0, sizeof(m_Padding));
+	}
+
+	u64 m_SeqNr;
+	u64 m_SessionId;
+	NetconDirection_e m_Direction;
+	u8 m_Padding[7];
+};
+
 //-----------------------------------------------------------------------------
 // Purpose: serialize message to vector
-// Input  : *pBase - 
-//			&vecBuf - 
-//			*pResponseMsg - 
-//			nResponseMsgLen - 
-//			*pResponseVal - 
-//			nResponseValLen - 
-//			responseType - 
-//			nMessageId - 
-//			nMessageType - 
-//			bEncrypt - 
-//			bDebug - 
-// Output : true on success, false otherwise
+// Input: *pBase - 
+// &data - 
+// &vecBuf - 
+// *pResponseMsg - 
+// nResponseMsgLen - 
+// *pResponseVal - 
+// nResponseValLen - 
+// responseType - 
+// nMessageId - 
+// nMessageType - 
+// bEncrypt - 
+// bDebug - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
-bool NetconServer_Serialize(const CNetConBase* pBase, vector<byte>& vecBuf,
+bool NetconServer_Serialize(const CNetConBase* pBase, ConnectedNetConsoleData_s& data, vector<byte>& vecBuf,
 	const char* pResponseMsg, const size_t nResponseMsgLen, const char* pResponseVal, const size_t nResponseValLen,
 	const netcon::response_e responseType, const int nMessageId, const int nMessageType, const bool bEncrypt, const bool bDebug)
 {
@@ -35,7 +62,7 @@ bool NetconServer_Serialize(const CNetConBase* pBase, vector<byte>& vecBuf,
 	response.set_responsemsg(pResponseMsg, nResponseMsgLen);
 	response.set_responseval(pResponseVal, nResponseValLen);
 
-	if (!NetconShared_PackEnvelope(pBase, vecBuf, (u32)response.ByteSizeLong(), &response, bEncrypt, bDebug))
+	if (!NetconShared_PackEnvelope(pBase, data, vecBuf, (u32)response.ByteSizeLong(), &response, bEncrypt, bDebug))
 	{
 		return false;
 	}
@@ -45,18 +72,19 @@ bool NetconServer_Serialize(const CNetConBase* pBase, vector<byte>& vecBuf,
 
 //-----------------------------------------------------------------------------
 // Purpose: serialize message to vector
-// Input  : *pBase - 
-//			&vecBuf - 
-//			*szReqBuf - 
-//			nReqMsgLen - 
-//			*szReqVal - 
-//			nReqValLen - 
-//			*requestType - 
-//			bEncrypt - 
-//			bDebug - 
-// Output : true on success, false otherwise
+// Input: *pBase - 
+// &data - 
+// &vecBuf - 
+// *szReqBuf - 
+// nReqMsgLen - 
+// *szReqVal - 
+// nReqValLen - 
+// *requestType - 
+// bEncrypt - 
+// bDebug - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
-bool NetconClient_Serialize(const CNetConBase* pBase, vector<byte>& vecBuf, const char* szReqBuf, const size_t nReqMsgLen,
+bool NetconClient_Serialize(const CNetConBase* pBase, ConnectedNetConsoleData_s& data, vector<byte>& vecBuf, const char* szReqBuf, const size_t nReqMsgLen,
 	const char* szReqVal, const size_t nReqValLen, const netcon::request_e requestType, const bool bEncrypt, const bool bDebug)
 {
 	netcon::request request;
@@ -66,7 +94,7 @@ bool NetconClient_Serialize(const CNetConBase* pBase, vector<byte>& vecBuf, cons
 	request.set_requestmsg(szReqBuf, nReqMsgLen);
 	request.set_requestval(szReqVal, nReqValLen);
 
-	if (!NetconShared_PackEnvelope(pBase, vecBuf, (u32)request.ByteSizeLong(), &request, bEncrypt, bDebug))
+	if (!NetconShared_PackEnvelope(pBase, data, vecBuf, (u32)request.ByteSizeLong(), &request, bEncrypt, bDebug))
 	{
 		return false;
 	}
@@ -76,12 +104,12 @@ bool NetconClient_Serialize(const CNetConBase* pBase, vector<byte>& vecBuf, cons
 
 //-----------------------------------------------------------------------------
 // Purpose: attempt to connect to remote
-// Input  : *pBase - 
-//			*pHostAdr - 
-//			nHostPort - 
-// Output : true on success, false otherwise
+// Input: *pBase - 
+// *pHostAdr - 
+// nHostPort - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
-bool NetconClient_Connect(CNetConBase* pBase, const char* pHostAdr, const int nHostPort)
+bool NetconClient_Connect(CNetConBase* pBase, const char* pHostAdr, const int nHostPort, float flTimeoutSec)
 {
 	string svLocalHost;
 	const bool bValidSocket = nHostPort != SOCKET_ERROR;
@@ -110,7 +138,7 @@ bool NetconClient_Connect(CNetConBase* pBase, const char* pHostAdr, const int nH
 	}
 
 	CSocketCreator* pCreator = pBase->GetSocketCreator();
-	if (pCreator->ConnectSocket(*pNetAdr, true) == SOCKET_ERROR)
+	if (pCreator->ConnectSocket(*pNetAdr, true, flTimeoutSec) == SOCKET_ERROR)
 	{
 		return false;
 	}
@@ -121,15 +149,17 @@ bool NetconClient_Connect(CNetConBase* pBase, const char* pHostAdr, const int nH
 
 //-----------------------------------------------------------------------------
 // Purpose: packs a message envelope
-// Input  : *pBase - 
-//			&outMsgBuf - 
-//			nMsgLen - 
-//			*inMsg - 
-//			bEncrypt - 
-//			bDebug - 
-// Output : true on success, false otherwise
+// Input: *pBase - 
+// &data - 
+// &outMsgBuf - 
+// nMsgLen - 
+// *inMsg - 
+// bEncrypt - 
+// bDebug - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
-bool NetconShared_PackEnvelope(const CNetConBase* pBase, vector<byte>& outMsgBuf, const u32 nMsgLen,
+bool NetconShared_PackEnvelope(const CNetConBase* pBase, ConnectedNetConsoleData_s& data,
+	vector<byte>& outMsgBuf, const u32 nMsgLen,
 	google::protobuf::MessageLite* const inMsg, const bool bEncrypt, const bool bDebug)
 {
 	byte* const encodeBuf = new byte[nMsgLen];
@@ -145,19 +175,41 @@ bool NetconShared_PackEnvelope(const CNetConBase* pBase, vector<byte>& outMsgBuf
 		return false;
 	}
 
+	const NetconDirection_e sendDir = data.peerIsServer
+		? NETCON_DIR_TO_SERVER
+		: NETCON_DIR_TO_CLIENT;
+
+	NetconAadBlock_s aad(data.sendSeqNr, data.sendSessionId, sendDir);
+
 	netcon::envelope envelope;
-	envelope.set_encrypted(bEncrypt);
+
+	netcon::header* const header = envelope.mutable_header();
+	header->set_seqnr(data.sendSeqNr);
+	header->set_sessionid(data.sendSessionId);
 
 	const byte* dataBuf = encodeBuf;
 	std::unique_ptr<byte[]> container;
 
 	if (bEncrypt)
 	{
+		// Fail closed: the public demo key is not an operator key.
+		if (pBase->IsUsingDefaultEncryptionKey())
+		{
+			static bool s_bLoggedDemoKeyRefuse = false;
+			if (!s_bLoggedDemoKeyRefuse)
+			{
+				s_bLoggedDemoKeyRefuse = true;
+				Warning(eDLL_T::ENGINE, "[RCON] refuse encrypted frame on public demo key; set rcon_key to an operator key\n");
+			}
+
+			return false;
+		}
+
 		byte* encryptBuf = new byte[nMsgLen];
 		container.reset(encryptBuf);
 
 		CryptoContext_s ctx;
-		if (!pBase->Encrypt(ctx, encodeBuf, encryptBuf, nMsgLen))
+		if (!pBase->Encrypt(ctx, encodeBuf, encryptBuf, nMsgLen, (const u8*)&aad, sizeof(aad)))
 		{
 			if (bDebug)
 			{
@@ -167,7 +219,8 @@ bool NetconShared_PackEnvelope(const CNetConBase* pBase, vector<byte>& outMsgBuf
 			return false;
 		}
 
-		envelope.set_nonce(ctx.ivData, sizeof(ctx.ivData));
+		envelope.set_iv(ctx.iv, sizeof(ctx.iv));
+		envelope.set_tag(ctx.authTag, sizeof(ctx.authTag));
 		dataBuf = encryptBuf;
 	}
 
@@ -187,32 +240,33 @@ bool NetconShared_PackEnvelope(const CNetConBase* pBase, vector<byte>& outMsgBuf
 		return false;
 	}
 
-	NetConFrameHeader_s* const header = reinterpret_cast<NetConFrameHeader_s*>(scratch);
+	NetConFrameHeader_s* const frameHeader = reinterpret_cast<NetConFrameHeader_s*>(scratch);
 
 	// Write out magic and frame size in network byte order.
-	header->magic = htonl(RCON_FRAME_MAGIC);
-	header->length = htonl(u32(envelopeSize));
+	frameHeader->magic = htonl(RCON_FRAME_MAGIC);
+	frameHeader->length = htonl(u32(envelopeSize));
 
+	data.sendSeqNr++;
 	return true;
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: unpacks a message envelope
-// Input  : *pBase - 
-//			*pMsgBuf - 
-//			nMsgLen - 
-//			nMaxLen - 
-//			*outMsg - 
-//			bEncrypt - 
-//			bDebug - 
-// Output : true on success, false otherwise
+// Input: *pBase - 
+// &data - 
+// nMaxLen - 
+// *outMsg - 
+// bDecrypt - 
+// bDebug - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
-bool NetconShared_UnpackEnvelope(const CNetConBase* pBase, const byte* pMsgBuf, const u32 nMsgLen,
-	const u32 nMaxLen, google::protobuf::MessageLite* const outMsg, const bool bDebug)
+bool NetconShared_UnpackEnvelope(const CNetConBase* pBase, ConnectedNetConsoleData_s& data,
+	const u32 nMaxLen, google::protobuf::MessageLite* const outMsg,
+	const bool bDecrypt, const bool bDebug)
 {
 	netcon::envelope envelope;
 
-	if (!pBase->Decode(&envelope, pMsgBuf, nMsgLen))
+	if (!pBase->Decode(&envelope, data.recvBuffer.data(), data.payloadLen))
 	{
 		if (bDebug)
 		{
@@ -232,33 +286,67 @@ bool NetconShared_UnpackEnvelope(const CNetConBase* pBase, const byte* pMsgBuf, 
 		return false;
 	}
 
+	const netcon::header& header = envelope.header();
+
+	const NetconDirection_e recvDir = data.peerIsServer
+		? NETCON_DIR_TO_CLIENT
+		: NETCON_DIR_TO_SERVER;
+
+	NetconAadBlock_s aad(header.seqnr(), header.sessionid(), recvDir);
+
 	const byte* netMsg = reinterpret_cast<const byte*>(envelope.data().c_str());
 	const byte* dataBuf = netMsg;
 
 	std::unique_ptr<byte[]> container;
 
-	if (envelope.encrypted())
+	if (bDecrypt)
 	{
-		byte* decryptBuf = new byte[msgLen];
-		container.reset(decryptBuf);
+		// Fail closed: the public demo key is not an operator key.
+		if (pBase->IsUsingDefaultEncryptionKey())
+		{
+			static bool s_bLoggedDemoKeyDecryptRefuse = false;
+			if (!s_bLoggedDemoKeyDecryptRefuse)
+			{
+				s_bLoggedDemoKeyDecryptRefuse = true;
+				Warning(eDLL_T::ENGINE, "[RCON] refuse encrypted frame decrypt on public demo key; set rcon_key to an operator key\n");
+			}
 
-		const u32 ivLen = (u32)envelope.nonce().size();
+			return false;
+		}
+
+		const u32 ivLen = (u32)envelope.iv().size();
+		const u32 tagLen = (u32)envelope.tag().size();
 
 		if (ivLen != sizeof(CryptoIV_t))
 		{
 			if (bDebug)
 			{
-				Error(eDLL_T::ENGINE, NO_ERROR, "Nonce in RCON message envelope is invalid (%u != %u)\n",
+				Error(eDLL_T::ENGINE, NO_ERROR, "IV in RCON message envelope is invalid (%u != %u)\n",
 					ivLen, sizeof(CryptoIV_t));
 			}
 
 			return false;
 		}
 
-		CryptoContext_s ctx;
-		memcpy(ctx.ivData, envelope.nonce().data(), ivLen);
+		if (tagLen != sizeof(CryptoAuthTag_t))
+		{
+			if (bDebug)
+			{
+				Error(eDLL_T::ENGINE, NO_ERROR, "Tag in RCON message envelope is invalid (%u != %u)\n",
+					tagLen, sizeof(CryptoAuthTag_t));
+			}
 
-		if (!pBase->Decrypt(ctx, netMsg, decryptBuf, msgLen))
+			return false;
+		}
+
+		byte* decryptBuf = new byte[msgLen];
+		container.reset(decryptBuf);
+
+		CryptoContext_s ctx;
+		memcpy(ctx.iv, envelope.iv().data(), ivLen);
+		memcpy(ctx.authTag, envelope.tag().data(), tagLen);
+
+		if (!pBase->Decrypt(ctx, netMsg, decryptBuf, msgLen, (const u8*)&aad, sizeof(aad)))
 		{
 			if (bDebug)
 			{
@@ -270,6 +358,31 @@ bool NetconShared_UnpackEnvelope(const CNetConBase* pBase, const byte* pMsgBuf, 
 
 		dataBuf = decryptBuf;
 	}
+
+	// Sequence/session are connection state: only advance after auth decrypt.
+	if (header.seqnr() != data.recvSeqNr + 1)
+	{
+		Error(eDLL_T::ENGINE, NO_ERROR, "Out-of-sequence RCON frame #%llu; expected #%llu\n",
+			header.seqnr(), data.recvSeqNr + 1);
+
+		return false;
+	}
+
+	if (data.recvSessionKnown)
+	{
+		if (header.sessionid() != data.recvSessionId)
+		{
+			Error(eDLL_T::ENGINE, NO_ERROR, "RCON frame carries a foreign session id\n");
+			return false;
+		}
+	}
+	else
+	{
+		data.recvSessionId = header.sessionid();
+		data.recvSessionKnown = true;
+	}
+
+	data.recvSeqNr = header.seqnr();
 
 	Assert(dataBuf);
 
@@ -288,9 +401,9 @@ bool NetconShared_UnpackEnvelope(const CNetConBase* pBase, const byte* pMsgBuf, 
 
 //-----------------------------------------------------------------------------
 // Purpose: gets the netconsole data
-// Input  : *pBase - 
-//			iSocket - 
-// Output : nullptr on failure
+// Input: *pBase - 
+// iSocket - 
+// Output: nullptr on failure
 //-----------------------------------------------------------------------------
 ConnectedNetConsoleData_s* NetconShared_GetConnData(CNetConBase* pBase, const int iSocket)
 {
@@ -308,9 +421,9 @@ ConnectedNetConsoleData_s* NetconShared_GetConnData(CNetConBase* pBase, const in
 
 //-----------------------------------------------------------------------------
 // Purpose: gets the netconsole socket
-// Input  : *pBase - 
-//			iSocket - 
-// Output : SOCKET_ERROR (-1) on failure
+// Input: *pBase - 
+// iSocket - 
+// Output: SOCKET_ERROR (-1) on failure
 //-----------------------------------------------------------------------------
 SocketHandle_t NetconShared_GetSocketHandle(CNetConBase* pBase, const int iSocket)
 {
@@ -335,10 +448,10 @@ SocketHandle_t NetconShared_GetSocketHandle(CNetConBase* pBase, const int iSocke
 void RCON_KeyChanged_f(IConVar* pConVar, const char* pOldString, float flOldValue, ChangeUserData_t pUserData);
 void RCON_PasswordChanged_f(IConVar* pConVar, const char* pOldString, float flOldValue, ChangeUserData_t pUserData);
 
-ConVar rcon_debug("rcon_debug", "0", FCVAR_RELEASE, "Show rcon debug information ( !slower! )");
+ConVar rcon_debug("rcon_debug", "0", FCVAR_RELEASE, "Show RCON debug information ( !slower! )");
 ConVar rcon_encryptframes("rcon_encryptframes", "1", FCVAR_RELEASE, "Whether to encrypt RCON messages");
-ConVar rcon_key("rcon_key", "", FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_RELEASE, "Base64 remote server access encryption key (random if empty or invalid)", &RCON_KeyChanged_f);
-ConVar rcon_maxframesize("rcon_maxframesize", "2048", FCVAR_RELEASE, "Max number of bytes allowed in a RCON message", true, 128.f, true, 4096.f);
+ConVar rcon_key("rcon_key", "", FCVAR_RELEASE | FCVAR_PROTECTED | FCVAR_DONTRECORD | FCVAR_SERVER_CANNOT_QUERY, "Base64 remote server access encryption key (random if empty or invalid)", &RCON_KeyChanged_f);
+ConVar rcon_maxframesize("rcon_maxframesize", "2048", FCVAR_RELEASE, "Max number of bytes allowed in an RCON message", true, 128.f, true, 4096.f);
 
 //-----------------------------------------------------------------------------
 // Purpose: change RCON key on server and client

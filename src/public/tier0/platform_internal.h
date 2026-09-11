@@ -4,7 +4,9 @@
 inline void(*v_InitTime)(void);
 inline double(*v_Plat_FloatTime)(void);
 inline uint64_t(*v_Plat_MSTime)(void);
+#if defined(CLIENT_DLL)
 inline void(*v_Plat_LaunchExternalWebBrowser)(const char* urlText, unsigned int flags);
+#endif // CLIENT_DLL
 
 inline bool* s_pbTimeInitted = nullptr;
 inline double* g_pPerformanceCounterToMS = nullptr;
@@ -20,7 +22,9 @@ class VPlatform : public IDetour
 		LogFunAdr("InitTime", v_InitTime);
 		LogFunAdr("Plat_FloatTime", v_Plat_FloatTime);
 		LogFunAdr("Plat_MSTime", v_Plat_MSTime);
+#if defined(CLIENT_DLL)
 		LogFunAdr("Plat_LaunchExternalWebBrowser", v_Plat_LaunchExternalWebBrowser);
+#endif // CLIENT_DLL
 		LogVarAdr("s_bTimeInitted", s_pbTimeInitted);
 		LogVarAdr("g_PerformanceCounterToMS", g_pPerformanceCounterToMS);
 		LogVarAdr("g_PerformanceFrequency", g_pPerformanceFrequency);
@@ -32,7 +36,13 @@ class VPlatform : public IDetour
 		Module_FindPattern(g_GameDll, "48 83 EC 28 80 3D ?? ?? ?? ?? ?? 75 4C").GetPtr(v_InitTime);
 		Module_FindPattern(g_GameDll, "48 83 EC 28 80 3D ?? ?? ?? ?? ?? 75 05 E8 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? ?? 74 1D").GetPtr(v_Plat_FloatTime);
 		Module_FindPattern(g_GameDll, "48 83 EC 28 80 3D ?? ?? ?? ?? ?? 75 05 E8 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? ?? 74 2A").GetPtr(v_Plat_MSTime);
-		Module_FindPattern(g_GameDll, "40 53 48 83 EC 30 80 3D ?? ?? ?? ?? 00 8B DA 0F 84 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 0F 84 ?? ?? ?? ?? F6 C3 02").GetPtr(v_Plat_LaunchExternalWebBrowser);
+#if defined(CLIENT_DLL)
+		// S21: Origin/Steam platform dword, not the overlay-flag prologue.
+		Module_FindPattern(g_GameDll,
+			"48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 30 "
+			"8B 05 ?? ?? ?? ?? 8B FA 48 8B F1 83 F8 01")
+			.GetPtr(v_Plat_LaunchExternalWebBrowser);
+#endif // CLIENT_DLL
 	}
 	virtual void GetVar(void) const
 	{

@@ -38,14 +38,9 @@ void vgui::RichTextCommon::SetText(const char* text)
     }
     else
     {
-        this->SetText((const char*)nullptr);
+        this->SetText((wchar_t*)nullptr);
     }
 }
 
-///////////////////////////////////////////////////////////////////////////////
-void VVGUIRichTextCommon::Detour(const bool bAttach) const
-{
-    DetourSetup(&vgui__RichTextCommon__SetText, &RichTextCommon_SetText, bAttach);
-}
 
 ///////////////////////////////////////////////////////////////////////////////

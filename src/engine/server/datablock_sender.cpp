@@ -6,6 +6,9 @@
 #include "engine/client/client.h"
 #include "common/proto_oob.h"
 #include "datablock_sender.h"
+#include <stdlib.h>
+#include "engine/shared/s21_bridge_compat.h"
+#include "engine/server/datablock_oversized.h"
 
 static ConVar net_compressDataBlockLzAcceleration("net_compressDataBlockLzAcceleration", "1", FCVAR_DEVELOPMENTONLY, "The acceleration value for LZ4 data block compression");
 
@@ -38,13 +41,13 @@ void ServerDataBlockSender::SendDataBlock(const short transferId, const int tran
 	buf.WriteLong(CONNECTIONLESS_HEADER);
 	buf.WriteByte(S2C_DATABLOCK_FRAGMENT);
 
-	// transfer info
-	buf.WriteByte(transferId);
+	// transfer info -- S3 wire is shorts (client parser at 0x4F)
+	buf.WriteShort(transferId);
 	buf.WriteLong(transferSize);
-	buf.WriteByte(transferNr);
+	buf.WriteShort(transferNr);
 
 	// block info
-	buf.WriteByte(blockNr);
+	buf.WriteShort(blockNr);
 	buf.WriteLong(blockSize);
 
 	// block data
@@ -101,48 +104,89 @@ void ServerDataBlockSender::WriteDataBlock(const uint8_t* const sourceData, cons
 {
 	AcquireSRWLockExclusive(&m_Lock);
 
-	ServerDataBlockHeader_s* const pHeader = reinterpret_cast<ServerDataBlockHeader_s*>(m_pScratchBuffer);
-	bool copyRaw = true;
+	const int headerSize = (int)sizeof(ServerDataBlockHeader_s);
+	const int engineCap = SNAPSHOT_SCRATCH_BUFFER_SIZE - headerSize;
+	const int sdkCap = DATABLOCK_SDK_SCRATCH_SIZE - headerSize;
 
+	if (!sourceData || dataSize <= 0 || dataSize > sdkCap || !m_pScratchBuffer)
+	{
+		Warning(eDLL_T::SERVER, "[DATABLOCK] data block size %d rejected (sdk cap %d).\n",
+			dataSize, sdkCap);
+		ReleaseSRWLockExclusive(&m_Lock);
+		return;
+	}
+
+	uint8_t* scratch = m_pScratchBuffer;
+	int cap = engineCap;
+	uint8_t* bigScratch = nullptr;
+	if (dataSize > engineCap)
+	{
+		bigScratch = static_cast<uint8_t*>(malloc(DATABLOCK_SDK_SCRATCH_SIZE));
+		if (!bigScratch)
+		{
+			Warning(eDLL_T::SERVER, "[DATABLOCK] oversized scratch alloc failed (%d bytes).\n", dataSize);
+			ReleaseSRWLockExclusive(&m_Lock);
+			return;
+		}
+		scratch = bigScratch;
+		cap = sdkCap;
+	}
+
+	ServerDataBlockHeader_s* const pHeader = reinterpret_cast<ServerDataBlockHeader_s*>(scratch);
+	bool copyRaw = true;
 	int actualDataSize = dataSize;
 
 	if (net_compressDataBlock->GetBool())
 	{
-		const int encodedSize = LZ4_compress_fast((const char*)sourceData, (char*)m_pScratchBuffer + sizeof(ServerDataBlockHeader_s),
-			dataSize, SNAPSHOT_SCRATCH_BUFFER_SIZE, net_compressDataBlockLzAcceleration.GetInt());
+		const int encodedSize = LZ4_compress_fast((const char*)sourceData,
+			(char*)scratch + headerSize, dataSize, cap,
+			net_compressDataBlockLzAcceleration.GetInt());
 
-		// this shouldn't happen at all
-		if (!encodedSize)
-		{
-			Assert(0);
-			Error(eDLL_T::SERVER, 0, "LZ4 error compressing data block for client.\n");
-		}
-
-		// make sure the encoded data is smaller than the raw data, in some cases
-		// this might turn larger which means we should just send raw data
-		else if (encodedSize < dataSize)
+		if (encodedSize > 0 && encodedSize < dataSize)
 		{
 			actualDataSize = encodedSize;
-
 			pHeader->isCompressed = true;
 			copyRaw = false;
 		}
+		else if (!encodedSize)
+		{
+			Warning(eDLL_T::SERVER,
+				"[DATABLOCK] LZ4 produced 0 for size %d -- sending raw.\n", dataSize);
+		}
 	}
 
-	// in case no compression was performed, we send the raw data
+	if (actualDataSize <= 0 || actualDataSize > cap)
+	{
+		Warning(eDLL_T::SERVER, "[DATABLOCK] data block size %d exceeds scratch cap %d.\n",
+			actualDataSize, cap);
+		free(bigScratch);
+		ReleaseSRWLockExclusive(&m_Lock);
+		return;
+	}
+
 	if (copyRaw)
 	{
-		// this should equal the dataSize at this point, even if compression failed
-		Assert(actualDataSize == dataSize);
-
 		pHeader->isCompressed = false;
-		memcpy(m_pScratchBuffer + sizeof(ServerDataBlockHeader_s), sourceData, actualDataSize);
+		memcpy(scratch + headerSize, sourceData, actualDataSize);
 	}
 
-	// NOTE: we copy data in the scratch buffer with an offset of
-	// sizeof(ServerDataBlockHeader_s), the header gets send up as well so we
-	// have to take this into account !!!
-	StartBlockSender(actualDataSize + sizeof(ServerDataBlockHeader_s), isMultiplayer, debugName);
+	const int transferSize = actualDataSize + headerSize;
+	if (transferSize <= SNAPSHOT_SCRATCH_BUFFER_SIZE)
+	{
+		if (scratch != m_pScratchBuffer)
+			memcpy(m_pScratchBuffer, scratch, transferSize);
+		StartBlockSender(transferSize, isMultiplayer, debugName);
+	}
+	else
+	{
+		ResetBlockSender();
+		++m_nTransferNr;
+		if (DataBlockOversized_Begin(this, m_pClient, bigScratch, transferSize, m_nTransferId, m_nTransferNr))
+			bigScratch = nullptr;
+		else
+			Warning(eDLL_T::SERVER, "[DATABLOCK] oversized transfer %d bytes not started.\n", transferSize);
+	}
 
+	free(bigScratch);
 	ReleaseSRWLockExclusive(&m_Lock);
 }

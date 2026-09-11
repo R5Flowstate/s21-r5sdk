@@ -1,9 +1,26 @@
 # Source SDK
 * This repository houses the source code for the development package targeting the game **Apex Legends**.
 
+This tree builds two products from one source:
+
+| product | injects into | output |
+|---------|--------------|--------|
+| `client` | the Season 21 client executable | `game/client.dll` |
+| `server` | the Season 3 dedicated server executable | `game/server.dll` |
+
+`loader.dll` selects the matching product from the host executable name.
+Agent and contributor notes live in `CLAUDE.md`.
+
+The shipping branch of the public tree is `s21-unify`. `main` and
+`S16-S21-MERGE` are upstream credit.
+
+Licence: our additions are AGPL-3.0 (see `LICENSE.txt` and `NOTICE`). Valve
+Source SDK terms stay in `license/`. This project is unaffiliated with, and
+not endorsed by, Respawn Entertainment or Electronic Arts.
+
 ## Building
 R5sdk uses the CMake project generation and build tools. For more information, visit [CMake](https://cmake.org/).<br />
-In order to compile the SDK, you will need to install Visual Studio 2017, 2019 or 2022 with:
+In order to compile the SDK, you will need to install Visual Studio 2017, 2019, 2022 or 2026 with:
 * Desktop Development with C++ Package.
 * Windows SDK 10.0.10240.0 or higher.
 * C++ MFC build tools for x86 and x64.
@@ -12,76 +29,22 @@ In order to compile the SDK, you will need to install Visual Studio 2017, 2019 o
 Steps:
 1. Download or clone the project to anywhere on your disk.
     1. Run `CreateSolution.bat` in the root folder, this will generate the files in `build_intermediate`.
-    2. Move all the game files in the `game` folder so that the path `game/r5apex(_ds).exe` is valid.
-2. Open `r5sdk.sln` in Visual Studio and compile the solution.
+       The batch file is the recipe (`OPTION_RETAIL=ON`, `OPTION_CERTAIN=OFF`,
+       `OPTION_LTCG_MODE=ALL`, `OPTION_WARNINGS_AS_ERRORS=OFF`,
+       `BOOST_REGEX_STANDALONE=OFF`). Re-run it after adding or removing source
+       files; CMake lists them at configure time.
+2. Open `r5sdk.slnx` (Visual Studio 2026) or `r5sdk.sln` (older generators) and compile the `Release` configuration.
     1. All binaries and symbols are compiled to the `game` folder.
-    2. Run `launcher.exe`, toggle and set the desired options and hit the `Launch Game` button.
-
-## Steamworks Integration [OPTIONAL]
-The SDK includes optional Steam integration for features like authentication, user profiles, and overlay support. **This is completely optional** - the SDK works without Steam.
-
-### Setting up Steamworks (Optional)
-Due to licensing restrictions, the Steamworks SDK is not included in this repository. If you want Steam features:
-
-1. **Download the Steamworks SDK:**
-   - Visit [Steamworks SDK](https://partner.steamgames.com/) (requires Steam partner account)
-   - Download the latest Steamworks SDK
-
-2. **Install the SDK:**
-   - Extract the SDK to `src/thirdparty/steamworks/sdk/`
-   - The folder structure should look like:
-     ```
-     src/thirdparty/steamworks/sdk/
-     ├── public/steam/
-     ├── redistributable_bin/
-     └── Readme.txt
-     ```
-
-3. **Enable Steam features:**
-   - Add `#define USE_STEAMWORKS` to your project or compiler flags
-   - The build system will automatically link against Steam libraries when available
-
-### Steam Features
-When Steamworks is enabled, the SDK provides:
-- **Steam Authentication**: Session tickets for server authentication
-- **User Profiles**: Access to Steam username and user ID
-- **Steam Overlay**: Integration with Steam's in-game overlay
-- **Safe Integration**: Automatic fallbacks when Steam is unavailable
-
-### Console Commands (with Steam)
-- `steam_overlay_info` - Display Steam overlay status and settings
-- `steam_overlay_pos <0-3>` - Set overlay notification position
-- `steam_safe_callbacks <0/1>` - Enable/disable safe callback processing
-
-### Building without Steam
-The SDK compiles and runs perfectly without Steamworks. All Steam-related code is conditionally compiled and safely disabled when the SDK is not available.
-
-## Debugging
-The tools and libraries offered by the SDK could be debugged right after they are compiled.
-
-Steps:
-1. Set the target project as **Startup Project**.
-    1. Select `Project -> Set as Startup Project`.
-2. Configure the project's debugging settings.
-    1. Debug settings are found in `Project -> Properties -> Configuration Properties -> Debugging`.
-    2. Additional command line arguments could be set in the `Command Arguments` field.
-
-## Launch Parameters
-- The `-wconsole` parameter toggles the external console window to which output of the game is getting logged to.
-- The `-ansicolor` parameter enables colored console output to enhance readability (NOTE: unsupported for some OS versions!).
-- The `-nosmap` parameter instructs the SDK to always compute the RVA's of each function signature on launch (!! slow !!).
-- The `-noworkerdll` parameter prevents the GameSDK DLL from initializing (workaround as the DLL is imported by the game executable).
-
-Launch parameters can be added to the `startup_*.cfg` files,<br />
-which are located in `<gamedir>\platform\cfg\startup_*.cfg`.
+    2. The launcher is a separate project and is not built from this tree.
 
 ## Note [IMPORTANT]
 This is not a cheat or hack; attempting to use the SDK on the live version of the game could result in a permanent account ban. The supported game versions are:
 
- * S3 `R5pc_r5launch_N1094_CL456479_2019_10_30_05_20_PM`.
+ * S3 `R5pc_r5launch_N1094_CL456479_2019_10_30_05_20_PM` (dedicated server).
+ * S21 `R5pc_r5-211_J12_CL6933961_2024_06_14_13_58` (client).
 
-## Pylon [DISCLAIMER]
-When you host game servers on the Server Browser (Pylon) you will stream your IP address to the database,
+## Spire [DISCLAIMER]
+When you host game servers on the Server Browser (Spire) you will stream your IP address to the database,
 which will be stored there until you stop hosting the server; this is needed so other people can connect to your server.
 
 There is a checkbox in the Server Browser called `Server Visibility` that defaults to `Offline`.

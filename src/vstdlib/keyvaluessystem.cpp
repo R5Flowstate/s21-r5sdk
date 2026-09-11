@@ -1,6 +1,6 @@
-﻿//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //=============================================================================//
@@ -19,7 +19,7 @@
 #include "ps3/ps3_core.h"
 #endif
 
-// memdbgon must be the last include file in a .cpp file!!!
+// memdbgon must be the last include file in a.cpp file!!!
 #include <tier0/memdbgon.h>
 
 #ifdef NO_SBH // no need to pool if using tier0 small block heap
@@ -27,12 +27,12 @@
 #endif
 
 //
-// Defines platform-endian-specific macros:
-// MEM_4BYTES_AS_0_AND_3BYTES :  present a 4 byte uint32 as a memory
-//                               layout where first memory byte is zero
-//                               and the other 3 bytes represent value
+// Defines platform-endian-specific macros
+// MEM_4BYTES_AS_0_AND_3BYTES: present a 4 byte uint32 as a memory
+// layout where first memory byte is zero
+// and the other 3 bytes represent value
 // MEM_4BYTES_FROM_0_AND_3BYTES: unpack from memory with first zero byte
-//                               and 3 value bytes the original uint32 value
+// and 3 value bytes the original uint32 value
 //
 // used for efficiently reading/writing storing 3 byte values into memory
 // region immediately following a null-byte-terminated string, essentially
@@ -71,7 +71,7 @@ CKeyValuesSystem::CKeyValuesSystem() :
 
 	m_Strings.Init("CKeyValuesSystem::m_Strings", 4 * 1024 * 1024, 64 * 1024, 0, 4);
 	// Make 0 stringIndex to never be returned, by allocating
-	// and wasting minimal number of alignment bytes now:
+	// and wasting minimal number of alignment bytes now
 	char* pszEmpty = ((char*)m_Strings.Alloc(1));
 	*pszEmpty = 0;
 
@@ -110,8 +110,8 @@ CKeyValuesSystem::~CKeyValuesSystem()
 
 //-----------------------------------------------------------------------------
 // Purpose: registers the size of the KeyValues in the specified instance
-//			so it can build a properly sized memory pool for the KeyValues objects
-//			the sizes will usually never differ but this is for versioning safety
+// so it can build a properly sized memory pool for the KeyValues objects
+// the sizes will usually never differ but this is for versioning safety
 //-----------------------------------------------------------------------------
 void CKeyValuesSystem::RegisterSizeofKeyValues(const ssize_t size)
 {
@@ -457,67 +457,53 @@ bool CKeyValuesSystem::GetKeyValuesExpressionSymbol(const char* const name)
 	//
 
 //	if (!V_stricmp(pName, "GAMECONSOLESPLITSCREEN"))
-//	{
 //#if defined( _GAMECONSOLE )
-//		return (XBX_GetNumGameUsers() > 1);
+// return (XBX_GetNumGameUsers > 1);
 //#else
-//		return false;
+// return false;
 //#endif
-//	}
 //
 //	if (!V_stricmp(pName, "GAMECONSOLEGUEST"))
-//	{
 //#if defined( _GAMECONSOLE )
-//		return (XBX_GetPrimaryUserIsGuest() != 0);
+// return (XBX_GetPrimaryUserIsGuest != 0);
 //#else
-//		return false;
+// return false;
 //#endif
-//	}
 //
 //	if (!V_stricmp(pName, "ENGLISH") ||
-//		!V_stricmp(pName, "JAPANESE") ||
-//		!V_stricmp(pName, "GERMAN") ||
-//		!V_stricmp(pName, "FRENCH") ||
-//		!V_stricmp(pName, "SPANISH") ||
-//		!V_stricmp(pName, "ITALIAN") ||
-//		!V_stricmp(pName, "KOREAN") ||
-//		!V_stricmp(pName, "TCHINESE") ||
-//		!V_stricmp(pName, "PORTUGUESE") ||
-//		!V_stricmp(pName, "SCHINESE") ||
-//		!V_stricmp(pName, "POLISH") ||
-//		!V_stricmp(pName, "RUSSIAN") ||
-//		!V_stricmp(pName, "TURKISH"))
-//	{
-//		// the language symbols are true if we are in that language
-//		// english is assumed when no language is present
-//		const char* pLanguageString;
+// !V_stricmp(pName, "JAPANESE") ||
+// !V_stricmp(pName, "GERMAN") ||
+// !V_stricmp(pName, "FRENCH") ||
+// !V_stricmp(pName, "SPANISH") ||
+// !V_stricmp(pName, "ITALIAN") ||
+// !V_stricmp(pName, "KOREAN") ||
+// !V_stricmp(pName, "TCHINESE") ||
+// !V_stricmp(pName, "PORTUGUESE") ||
+// !V_stricmp(pName, "SCHINESE") ||
+// !V_stricmp(pName, "POLISH") ||
+// !V_stricmp(pName, "RUSSIAN") ||
+// !V_stricmp(pName, "TURKISH"))
+// // the language symbols are true if we are in that language
+// // english is assumed when no language is present
+// const char* pLanguageString;
 //#ifdef _GAMECONSOLE
-//		pLanguageString = XBX_GetLanguageString();
+// pLanguageString = XBX_GetLanguageString;
 //#else
-//		static ConVarRef cl_language("cl_language");
-//		pLanguageString = cl_language.GetString();
+// static ConVarRef cl_language("cl_language");
+// pLanguageString = cl_language.GetString;
 //#endif
-//		if (!pLanguageString || !pLanguageString[0])
-//		{
-//			pLanguageString = "english";
-//		}
-//		if (!V_stricmp(pName, pLanguageString))
-//		{
-//			return true;
-//		}
-//		else
-//		{
-//			return false;
-//		}
-//	}
+// if (!pLanguageString || !pLanguageString[0])
+// pLanguageString = "english";
+// if (!V_stricmp(pName, pLanguageString))
+// return true;
+// else
+// return false;
 //
 //	// very expensive, back door for DLC updates
 //	if (!V_strnicmp(pName, "CVAR_", 5))
-//	{
-//		ConVarRef cvRef(name + 5);
-//		if (cvRef.IsValid())
-//			return cvRef.GetBool();
-//	}
+// ConVarRef cvRef(name + 5);
+// if (cvRef.IsValid)
+// return cvRef.GetBool;
 
 	// purposely warn on these to prevent syntax errors
 	// need to get these fixed asap, otherwise unintended false behavior

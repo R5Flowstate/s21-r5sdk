@@ -73,7 +73,7 @@ bool V_isspace(int c);
 inline bool V_isalnum(char c) { return isalnum((unsigned char)c) != 0; }
 bool V_IsAllDigit(const char* pString);
 
-// this is locale-unaware and therefore faster version of standard isdigit()
+// this is locale-unaware and therefore faster version of standard isdigit
 // It also avoids sign-extension errors.
 inline bool V_isdigit(char c)
 {

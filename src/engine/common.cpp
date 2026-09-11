@@ -1,6 +1,6 @@
 //=====================================================================================//
 //
-// Purpose: 
+// Purpose
 //
 //=====================================================================================//
 
@@ -79,10 +79,10 @@ void COM_ExplainDisconnection(bool bPrint, const char* fmt, ...)
 
 	if (bPrint)
 	{
-		if (szBuf[0] == '#')
+		if (szBuf[0] == '#' && g_ppVGuiLocalize && *g_ppVGuiLocalize)
 		{
 			wchar_t formatStr[1024];
-			const wchar_t* wpchReason = (*g_ppVGuiLocalize) ? (*g_ppVGuiLocalize)->Find(szBuf) : nullptr;
+			const wchar_t* wpchReason = (*g_ppVGuiLocalize)->Find(szBuf);
 			if (wpchReason)
 			{
 				wcsncpy(formatStr, wpchReason, sizeof(formatStr) / sizeof(wchar_t));
@@ -100,9 +100,10 @@ void COM_ExplainDisconnection(bool bPrint, const char* fmt, ...)
 		}
 	}
 
-	v_COM_ExplainDisconnection(bPrint, szBuf);
+	v_COM_ExplainDisconnection(bPrint, "%s", szBuf);
 }
 
+#ifndef CLIENT_DLL
 void VCommon::Detour(const bool bAttach) const
 {
 	DetourSetup(&v_COM_ExplainDisconnection, COM_ExplainDisconnection, bAttach);
@@ -111,6 +112,7 @@ void VCommon::Detour(const bool bAttach) const
 		DetourSetup(&v_COM_Notify, H_COM_Notify, bAttach);
 	}
 }
+#endif // !CLIENT_DLL
 
 __int64 __fastcall H_COM_Notify(void* a1, unsigned int a2, __int64 a3, const char* fmt, ...)
 {

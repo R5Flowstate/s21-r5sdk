@@ -67,7 +67,7 @@
 #endif // _X360
 #elif defined(_PS3)
 
-// Adding IsPlatformOpenGL() to help fix a bunch of code that was using IsPosix() to infer if the DX->GL translation layer was being used.
+// Adding IsPlatformOpenGL to help fix a bunch of code that was using IsPosix to infer if the DX->GL translation layer was being used.
 #if defined( DX_TO_GL_ABSTRACTION )
 #define IsPlatformOpenGL() true
 #else
@@ -255,7 +255,7 @@
 #define ALIGN_N_POST( _align_ )
 #endif
 
-// !!! NOTE: if you get a compile error here, you are using VALIGNOF on an abstract type :NOTE !!!
+// !!! NOTE: if you get a compile error here, you are using VALIGNOF on an abstract type:NOTE !!!
 #define VALIGNOF_PORTABLE( type ) ( sizeof( AlignOf_t<type> ) - sizeof( type ) )
 
 #if defined( COMPILER_GCC ) || defined( COMPILER_MSVC )
@@ -277,7 +277,6 @@ inline void ValidateAlignmentExplicit(void)
 	// Alignment must be a multiple of the size of the object type, or elements will *NOT* be aligned!
 	ALIGN_ASSERT((sizeof(T) % ALIGN) == 0);
 	// Alignment should be a multiple of the base alignment of T
-//	ALIGN_ASSERT((ALIGN % VALIGNOF(T)) == 0);
 }
 template< class T > inline void ValidateAlignment(void) { ValidateAlignmentExplicit<T, VALIGNOF(T)>(); }
 
@@ -311,19 +310,17 @@ template < size_t NUM, class T > struct AlignedByteArray_t : public AlignedByteA
 #define ASSERT_INVARIANT( pred )	COMPILE_TIME_ASSERT( pred )
 
 // This can be used to declare an abstract (interface only) class.
-// Classes marked abstract should not be instantiated.  If they are, and access violation will occur.
+// Classes marked abstract should not be instantiated. If they are, and access violation will occur.
 //
-// Example of use:
+// Example of use
 //
 // abstract_class CFoo
-// {
 //      ...
-// }
 //
 // MSDN __declspec(novtable) documentation: http://msdn.microsoft.com/library/default.asp?url=/library/en-us/vclang/html/_langref_novtable.asp
 //
 // Note: NJS: This is not enabled for regular PC, due to not knowing the implications of exporting a class with no no vtable.
-//       It's probable that this shouldn't be an issue, but an experiment should be done to verify this.
+// It's probable that this shouldn't be an issue, but an experiment should be done to verify this.
 //
 #ifndef COMPILER_MSVCX360
 #define abstract_class class
@@ -406,6 +403,27 @@ uint64_t Plat_MSTime();
 const char* Plat_GetProcessUpTime();
 void Plat_GetProcessUpTime(char* szBuf, size_t nSize);
 
+// Per-thread stall time subtracted from work measurements. Monotonic; snapshot then diff.
+void Plat_AccumulateStallTime(double flSeconds);
+double Plat_GetThreadStallTime();
+
+// QueryPerformanceCounter seconds, not Plat_FloatTime (null until detours resolve). Differences only.
+double Plat_StallClockSeconds();
+
+// Crash handler drains async log sinks through this hook so the explaining lines hit disk.
+inline void (*g_pfnPlatLogDrain)(void) = nullptr;
+
+// Scoped helper for the blocking regions themselves.
+class CPlatStallScope
+{
+public:
+	CPlatStallScope() : m_flStart(Plat_StallClockSeconds()) {}
+	~CPlatStallScope() { Plat_AccumulateStallTime(Plat_StallClockSeconds() - m_flStart); }
+
+private:
+	double m_flStart;
+};
+
 inline bool Plat_IsInDebugSession()
 {
 #if defined( _X360 )
@@ -475,7 +493,7 @@ inline int64 CastPtrToInt64(const void* p)
 #define stackalloc_aligned( _size, _align )		(void*)( ( ((uintp)alloca( ALIGN_VALUE( ( _size ) + (_align ),  ( _align ) ) )) + ( _align ) ) & ~_align )
 
 // We should probably always just align to 16 bytes, stackalloc just causes too many problems without this behavior. Source2 does it already.
-// #define stackalloc( _size )							stackalloc_aligned( _size, 16 )
+// #define stackalloc( _size ) stackalloc_aligned( _size, 16 )
 
 #define  stackfree( _p )			0
 // two-argument ( type, #elements) stackalloc
@@ -524,11 +542,11 @@ inline int64 CastPtrToInt64(const void* p)
 #define DLL_GLOBAL_IMPORT		extern __declspec( dllimport )
 
 // Pass hints to the compiler to prevent it from generating unnecessary / stupid code
-// in certain situations.  Several compilers other than MSVC also have an equivalent
+// in certain situations. Several compilers other than MSVC also have an equivalent
 // construct.
 //
 // Essentially the 'Hint' is that the condition specified is assumed to be true at
-// that point in the compilation.  If '0' is passed, then the compiler assumes that
+// that point in the compilation. If '0' is passed, then the compiler assumes that
 // any subsequent code in the same 'basic block' is unreachable, and thus usually
 // removed.
 #define HINT(THE_HINT)			__assume((THE_HINT))
@@ -537,7 +555,7 @@ inline int64 CastPtrToInt64(const void* p)
 #define DECL_ALIGN(x)			__declspec( align( x ) )
 
 // GCC had a few areas where it didn't construct objects in the same order 
-// that Windows does. So when CVProfile::CVProfile() would access g_pMemAlloc,
+// that Windows does. So when CVProfile::CVProfile would access g_pMemAlloc,
 // it would crash because the allocator wasn't initialized yet.
 #define CONSTRUCT_EARLY
 
@@ -574,7 +592,7 @@ inline int64 CastPtrToInt64(const void* p)
 #else
 #ifdef _PS3
 	// [IESTYN 7/29/2010] As of SDK 3.4.0, this causes bad code generation in NET_Tick::ReadFromBuffer in netmessages.cpp,
-	//                    which caused (seeming) random network packet corruption. It probably causes other bugs too.
+	// which caused (seeming) random network packet corruption. It probably causes other bugs too.
 #define  FORCEINLINE inline /* __attribute__ ((always_inline)) */
 #else
 #define  FORCEINLINE inline __attribute__ ((always_inline))

@@ -19,7 +19,7 @@ public:
 	virtual IClientUnknown*     GetClientUnknownFromHandle(const CBaseHandle& handle) = 0;
 
 	// NOTE: This function is only a convenience wrapper.
-	// It returns GetClientNetworkable( entnum )->GetIClientEntity().
+	// It returns GetClientNetworkable( entnum )->GetIClientEntity.
 	virtual IClientEntity*      GetClientEntity(const int entNum) = 0;
 	virtual IClientEntity*      GetClientEntityFromHandle(const CBaseHandle& handle) = 0;
 

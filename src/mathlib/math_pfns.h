@@ -1,6 +1,6 @@
-﻿//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose
 //
 //=====================================================================================//
 
@@ -96,8 +96,8 @@ FORCEINLINE float VECTORCALL FastRSqrtFast(float x)
 	__m128 rroot = _mm_rsqrt_ss(_mm_load_ss(&x));
 	return *(reinterpret_cast<float*>(&rroot));
 }
-// Single iteration NewtonRaphson reciprocal square root:
-// 0.5 * rsqrtps * (3 - x * rsqrtps(x) * rsqrtps(x)) 	
+// Single iteration NewtonRaphson reciprocal square root
+// 0.5 * rsqrtps * (3 - x * rsqrtps(x) * rsqrtps(x)) 
 // Very low error, and fine to use in place of 1.f / sqrtf(x).	
 FORCEINLINE float VECTORCALL FastRSqrt(float x)
 {
@@ -111,8 +111,8 @@ float FastCos(float x);
 
 
 inline float FastRecip(float x) { return 1.0f / x; }
-// Simple SSE rsqrt.  Usually accurate to around 6 (relative) decimal places 
-// or so, so ok for closed transforms.  (ie, computing lighting normals)
+// Simple SSE rsqrt. Usually accurate to around 6 (relative) decimal places 
+// or so, so ok for closed transforms. (ie, computing lighting normals)
 inline float FastSqrtEst(float x) { return FastRSqrtFast(x) * x; }
 
 
@@ -188,8 +188,8 @@ inline int _rotl(int a, int count)
 
 #else
 
-// extern float cosvf(float);      /* single precision cosine      */
-// extern float sinvf(float);      /* single precision sine        */
+// extern float cosvf(float); /* single precision cosine */
+// extern float sinvf(float); /* single precision sine */
 // TODO: need a faster single precision equivalent
 #define cosvf cosf
 #define sinvf sinf
@@ -254,11 +254,11 @@ FORCEINLINE float _VMX_Cos(float a)
 
 // the 360 has fixed hw and calls directly
 /*
-#define FastSqrt(x)			_VMX_Sqrt(x)
-#define	FastRSqrt(x)		_VMX_RSqrt(x)
+#define FastSqrt(x) _VMX_Sqrt(x)
+#define	FastRSqrt(x) _VMX_RSqrt(x)
 #define FastRSqrtFast(x)	_VMX_RSqrtFast(x)
 #define FastSinCos(x,s,c)	_VMX_SinCos(x,s,c)
-#define FastCos(x)			_VMX_Cos(x)
+#define FastCos(x) _VMX_Cos(x)
 */
 
 #endif

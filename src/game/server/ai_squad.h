@@ -19,10 +19,10 @@ struct SquadSlotTimer
 struct AISquadEnemyInfo_t
 {
 	// todo: reverse engineer and verify this!
-	//EHANDLE 						hEnemy;
-	//CBitVec<MAX_SQUADSLOTS>	slots;									// What squad slots are filled?
+	//EHANDLE hEnemy;
+	//CBitVec<MAX_SQUADSLOTS>	slots; // What squad slots are filled?
 
-	//DECLARE_SIMPLE_DATADESC();
+	//DECLARE_SIMPLE_DATADESC;
 };
 
 class CAI_Squad

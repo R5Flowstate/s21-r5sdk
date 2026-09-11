@@ -34,7 +34,7 @@ if not exist "%BINDIR%" (
 )
 
 cd "%BUILDDIR%"
-cmake .. -G"%CMAKE_GENERATOR%" -A"x64"
+cmake .. -G"%CMAKE_GENERATOR%" -A"x64" -DOPTION_RETAIL=ON -DOPTION_CERTAIN=OFF -DOPTION_LTCG_MODE=ALL -DOPTION_WARNINGS_AS_ERRORS=OFF -DBOOST_REGEX_STANDALONE=OFF
 cd ..
 
 echo Finished generating solution files.

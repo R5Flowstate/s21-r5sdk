@@ -320,6 +320,11 @@ playlists
 		{
 			inherit defaults
 		}
+
+		freedm
+		{
+			inherit defaults
+		}
 	}
 
 // START OF MP GAMEMODES LINE --------------------------------------------------
@@ -717,7 +722,7 @@ playlists
 			inherit survival
 			vars
 			{
-				r5reloaded_aimtrainer 1
+				r5f_aimtrainer 1
 				solo_mode                                      1
 				
 				visible                                        1
@@ -1018,6 +1023,84 @@ playlists
 			}
 		}
 
+		freedm
+		{
+			inherit defaults
+			vars
+			{
+				visible                                        1
+				name                                           "Free For All"
+				description                                    "Every player for themselves"
+				abbreviation                                   "Free For All"
+				lobbytitle                                     "Free For All"
+
+				pin_match_type                                 survival
+				max_teams                                      30
+				max_team_size                                  1
+				max_players                                    30
+				min_players                                    1
+
+				solo_mode                                      1
+				solo_mode_intro_presentation                   1
+				solo_mode_ingame_presentation                  1
+				solo_mode_postgame_presentation                1
+
+				survival_shields                               1
+				respawn_kit_enabled                            1
+				respawn_kit_primary_weapon                     "mp_weapon_volt_smg energy_mag_l3"
+				respawn_kit_secondary_weapon                   ""
+
+				ground_loot_enable                             0
+				lootbin_loot_enable                            0
+				jump_from_plane_enabled                        0
+				sur_circle_start_paused                        1
+				survival_enable_gladiator_intros               0
+				survival_enable_squad_intro                    0
+				character_select_time_max                      4.0
+				character_select_time_min                      4.0
+
+				scorelimit                                     30
+				match_ending_enabled                           0
+				survival_infinite_ammo                         1
+			}
+			gamemodes { freedm { maps {
+				mp_rr_canyonlands_64k_x_64k                    1
+				mp_rr_desertlands_64k_x_64k                    1
+				mp_rr_canyonlands_mu1                          1
+				mp_rr_aqueduct                                 1
+				mp_rr_arena_composite                          1
+			} } }
+		}
+
+		freedm_gungame
+		{
+			inherit freedm
+			vars
+			{
+				name                                           "Gun Game"
+				visible                                        1
+				tdm_gungame                                    1
+				scorelimit                                     20
+				respawn_kit_primary_weapon                     ""
+				respawn_kit_secondary_weapon                   ""
+			}
+		}
+
+		freedm_tdm
+		{
+			inherit freedm
+			vars
+			{
+				name                                           "Team Deathmatch"
+				visible                                        1
+				solo_mode                                      0
+				max_teams                                      2
+				max_team_size                                  9
+				max_players                                    18
+				scorelimit                                     50
+			}
+		}
+
 		///////////////////////////////////
 		//////////////  DEV  //////////////
 		///////////////////////////////////
@@ -1175,12 +1258,12 @@ playlists
 				"KCAD"                                "Kings Canyon After Dark"
 				"Playtest"                            "Playtest"
 				"Playtest_Only"                       "Playtest"
-				"BETA_BUILD_WATERMARK"                "R5Reloaded [v2.2]"
+				"BETA_BUILD_WATERMARK"                "R5Flowstate [v2.2]"
 
-				"MOTD"                                "R5Reloaded is a mod for Apex Legends that allows you to create custom gamemodes, loadouts, servers and more!"
+				"MOTD"                                "R5Flowstate is a mod for Apex Legends that allows you to create custom gamemodes, loadouts, servers and more!"
 
-				"PROMO_LARGE_TITLE"                   "Welcome To R5Reloaded!"
-				"PROMO_LARGE_DESCRIPTION"             "Make sure to join the discord! discord.gg/r5reloaded"
+				"PROMO_LARGE_TITLE"                   "Welcome To R5Flowstate!"
+				"PROMO_LARGE_DESCRIPTION"             "Welcome to R5Flowstate."
 				"PROMO_LEFT_TITLE"                    "Yes"
 				"PROMO_LEFT_DESCRIPTION"              "Your ad could be here"
 				"PROMO_RIGHT_TITLE"                   "Yes2"

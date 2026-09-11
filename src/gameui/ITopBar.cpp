@@ -1,5 +1,9 @@
+//=============================================================================//
+//
+// Purpose: In-game top bar UI
+//
+//=============================================================================//
 #include "core/stdafx.h"
-#ifndef DEDICATED
 #include "tier1/cvar.h"
 #include "engine/cmd.h"
 #include "windows/id3dx.h"
@@ -65,7 +69,7 @@ bool CTopBar::DrawSurface()
 		ImGui::EndMainMenuBar();
 	}
 
-	//ImGui::End();
+	//ImGui::End;
 	ImGui::PopStyleVar(styleVarsPushed);
 	return true;
 }
@@ -78,17 +82,17 @@ void CTopBar::DrawMenuBar()
 		{
 			
 		}
-		ImGui::EndMenu();
+		ImGui::EndMenu;
 	}
 
 	if (ImGui::BeginMenu("View"))
 	{
-		bool enabled = ui_topbar_enable.GetBool();
+		bool enabled = ui_topbar_enable.GetBool;
 		if (ImGui::MenuItem("Show Top Bar", nullptr, &enabled))
 		{
 			ui_topbar_enable.SetValue(enabled);
 		}
-		ImGui::EndMenu();
+		ImGui::EndMenu;
 	}*/
 
 	// Draw developer preset commands if any
@@ -236,6 +240,5 @@ void CTopBar::DevMenuClear_f(const CCommand& args)
 
 CTopBar g_TopBar;
 
-#endif // !DEDICATED
 
 

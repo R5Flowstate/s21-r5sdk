@@ -40,9 +40,9 @@ static std::ios_base::openmode GetInternalStreamMode(const CIOStream::Mode_e mod
 
 //-----------------------------------------------------------------------------
 // Purpose: opens the file in specified mode
-// Input  : *filePath - 
-//			mode - 
-// Output : true if operation is successful
+// Input: *filePath - 
+// mode - 
+// Output: true if operation is successful
 //-----------------------------------------------------------------------------
 bool CIOStream::Open(const char* const filePath, const Mode_e mode)
 {
@@ -106,7 +106,7 @@ void CIOStream::Flush()
 
 //-----------------------------------------------------------------------------
 // Purpose: gets the position of the current character in the stream
-// Output : std::streampos
+// Output: std::streampos
 //-----------------------------------------------------------------------------
 std::streamoff CIOStream::TellGet()
 {
@@ -121,8 +121,8 @@ std::streamoff CIOStream::TellPut()
 
 //-----------------------------------------------------------------------------
 // Purpose: sets the position of the current character in the stream
-// Input  : offset - 
-//			way - 
+// Input: offset - 
+// way - 
 //-----------------------------------------------------------------------------
 void CIOStream::SeekGet(const std::streamoff offset, const std::ios_base::seekdir way)
 {
@@ -131,7 +131,7 @@ void CIOStream::SeekGet(const std::streamoff offset, const std::ios_base::seekdi
 }
 //-----------------------------------------------------------------------------
 // NOTE: if you seek beyond the end of the file to try and pad it out, use the
-// Pad() method instead as the behavior of seek is operating system dependent
+// Pad method instead as the behavior of seek is operating system dependent
 //-----------------------------------------------------------------------------
 void CIOStream::SeekPut(const std::streamoff offset, const std::ios_base::seekdir way)
 {
@@ -150,7 +150,7 @@ void CIOStream::Seek(const std::streamoff offset, const std::ios_base::seekdir w
 
 //-----------------------------------------------------------------------------
 // Purpose: returns the data
-// Output : std::filebuf*
+// Output: std::filebuf*
 //-----------------------------------------------------------------------------
 const std::filebuf* CIOStream::GetData() const
 {
@@ -159,7 +159,7 @@ const std::filebuf* CIOStream::GetData() const
 
 //-----------------------------------------------------------------------------
 // Purpose: returns the data size
-// Output : std::streampos
+// Output: std::streampos
 //-----------------------------------------------------------------------------
 const std::streamoff CIOStream::GetSize() const
 {
@@ -178,7 +178,7 @@ bool CIOStream::IsWriteMode() const
 
 //-----------------------------------------------------------------------------
 // Purpose: checks if we are able to read the file
-// Output : true on success, false otherwise
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CIOStream::IsReadable() const
 {
@@ -190,7 +190,7 @@ bool CIOStream::IsReadable() const
 
 //-----------------------------------------------------------------------------
 // Purpose: checks if we are able to write to file
-// Output : true on success, false otherwise
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CIOStream::IsWritable() const
 {
@@ -202,7 +202,7 @@ bool CIOStream::IsWritable() const
 
 //-----------------------------------------------------------------------------
 // Purpose: checks if we hit the end of file
-// Output : true on success, false otherwise
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CIOStream::IsEof() const
 {
@@ -211,8 +211,8 @@ bool CIOStream::IsEof() const
 
 //-----------------------------------------------------------------------------
 // Purpose: reads a string from the file
-// Input  : &svOut - 
-// Output : true on success, false otherwise
+// Input: &svOut - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CIOStream::ReadString(std::string& out)
 {
@@ -234,10 +234,10 @@ bool CIOStream::ReadString(std::string& out)
 
 //-----------------------------------------------------------------------------
 // Purpose: reads a string from the file into a fixed size buffer
-// Input  : *buf - 
-//			len - 
-//			nullterminate - 
-// Output : the length of the string read
+// Input: *buf - 
+// len - 
+// nullterminate - 
+// Output: the length of the string read
 //-----------------------------------------------------------------------------
 size_t CIOStream::ReadString(char* const buf, const size_t len, const bool nullterminate)
 {
@@ -264,8 +264,8 @@ size_t CIOStream::ReadString(char* const buf, const size_t len, const bool nullt
 
 //-----------------------------------------------------------------------------
 // Purpose: writes a string to the file
-// Input  : &input - 
-// Output : true on success, false otherwise
+// Input: &input - 
+// Output: true on success, false otherwise
 //-----------------------------------------------------------------------------
 bool CIOStream::WriteString(const std::string& input, const bool nullterminate)
 {
@@ -288,7 +288,7 @@ const static char s_padBuf[PAD_BUF_SIZE];
 
 //-----------------------------------------------------------------------------
 // Purpose: pads the out stream up to count bytes
-// Input  : count - 
+// Input: count - 
 //-----------------------------------------------------------------------------
 void CIOStream::Pad(const size_t count)
 {
@@ -306,7 +306,7 @@ void CIOStream::Pad(const size_t count)
 
 //-----------------------------------------------------------------------------
 // Purpose: makes sure that the size gets incremented if we exceeded the end of
-//          the stream with the delta amount
+// the stream with the delta amount
 //-----------------------------------------------------------------------------
 void CIOStream::CalcAddDelta(const size_t count)
 {
@@ -326,9 +326,9 @@ void CIOStream::CalcAddDelta(const size_t count)
 
 //-----------------------------------------------------------------------------
 // Purpose: if we seek backwards, and then write new data, we should not add
-//          this to the total output size of the stream as we modify and not
-//          add. we have to keep by how much we shifted backwards and advanced
-//          forward until we can start adding again.
+// this to the total output size of the stream as we modify and not
+// add. we have to keep by how much we shifted backwards and advanced
+// forward until we can start adding again.
 //-----------------------------------------------------------------------------
 void CIOStream::CalcSkipDelta(const std::streamoff offset, const std::ios_base::seekdir way)
 {

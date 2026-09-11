@@ -83,6 +83,8 @@ struct Player_AnimViewEntityData
 };
 
 inline int(*CStudioHdr__LookupSequence)(CStudioHdr* pStudio, const char* pszName);
+inline int(*CBaseAnimating__LookupSequence)(void* pEntity, const char* pszName);
+int Hook_CBaseAnimating_LookupSequence(void* pEntity, const char* pszName);
 
 ///////////////////////////////////////////////////////////////////////////////
 class VAnimation : public IDetour
@@ -90,10 +92,17 @@ class VAnimation : public IDetour
 	virtual void GetAdr(void) const
 	{
 		LogFunAdr("CStudioHdr::LookupSequence", CStudioHdr__LookupSequence);
+		LogFunAdr("CBaseAnimating::LookupSequence", CBaseAnimating__LookupSequence);
 	}
 	virtual void GetFun(void) const
 	{
 		Module_FindPattern(g_GameDll, "40 53 48 83 EC 20 48 8B D9 4C 8B C2 48 8B 89 ?? ?? ?? ??").GetPtr(CStudioHdr__LookupSequence);
+		Module_FindPattern(g_GameDll,
+			"48 89 5C 24 08 57 48 83 EC 20 48 83 B9 D8 0F 00 00 00 48 8B FA 48 8B D9 75 ?? "
+			"0F BF 91 DE 00 00 00 48 8B 0D ?? ?? ?? ?? 48 8B 01 FF 50 08 48 85 C0 74 ?? "
+			"48 8B CB E8 ?? ?? ?? ?? 48 8B 9B D8 0F 00 00 48 85 DB 74 ?? 48 83 7B 08 00 "
+			"75 ?? 33 DB 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B D7 48 8B CB "
+			"48 8B 5C 24 30 48 83 C4 20 5F E9").GetPtr(CBaseAnimating__LookupSequence);
 	}
 	virtual void GetVar(void) const { }
 	virtual void GetCon(void) const { }

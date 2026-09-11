@@ -1,6 +1,6 @@
 //====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -557,7 +557,7 @@ public:
 
 		UtlHashFastIterator_t(int _bucket, const UtlHashFastHandle_t &_handle) 
 			: bucket(_bucket), handle(_handle) {};
-		// inline operator UtlHashFastHandle_t() const { return handle; };
+		// inline operator UtlHashFastHandle_t const { return handle; };
 	};
 	inline UtlHashFastIterator_t First() const;
 	inline UtlHashFastIterator_t Next( const UtlHashFastIterator_t &hHash ) const;
@@ -565,7 +565,7 @@ public:
 	inline Data &operator[]( const UtlHashFastIterator_t &iter ) { return (*this)[iter.handle];  }
 	inline Data const &operator[]( const UtlHashFastIterator_t &iter ) const { return (*this)[iter.handle];  }
 
-//protected:
+//protected
 
 	// Templatized for memory tracking purposes
 	template <typename HashData>
@@ -637,18 +637,18 @@ template<class Data, class HashFuncs> bool CUtlHashFast<Data,HashFuncs>::Init( i
 
 //-----------------------------------------------------------------------------
 // Purpose: Return the number of elements in the hash.
-//          Not available because count isn't accurately maintained for multilists.
+// Not available because count isn't accurately maintained for multilists.
 //-----------------------------------------------------------------------------
 /*
 template<class Data, class HashFuncs> inline int CUtlHashFast<Data,HashFuncs>::Count( void ) const
 {
-	return m_aDataPool.Count();
+	return m_aDataPool.Count;
 }
 */
 
 //-----------------------------------------------------------------------------
 // Purpose: Insert data into the hash table given its key (uintp), with
-//          a check to see if the element already exists within the tree.
+// a check to see if the element already exists within the tree.
 //-----------------------------------------------------------------------------
 template<class Data, class HashFuncs> inline UtlHashFastHandle_t CUtlHashFast<Data,HashFuncs>::Insert( uintp uiKey, const Data &data )
 {
@@ -662,7 +662,7 @@ template<class Data, class HashFuncs> inline UtlHashFastHandle_t CUtlHashFast<Da
 
 //-----------------------------------------------------------------------------
 // Purpose: Insert data into the hash table given its key (uintp),
-//          without a check to see if the element already exists within the tree.
+// without a check to see if the element already exists within the tree.
 //-----------------------------------------------------------------------------
 template<class Data, class HashFuncs> inline UtlHashFastHandle_t CUtlHashFast<Data,HashFuncs>::FastInsert( uintp uiKey, const Data &data )
 {
@@ -887,7 +887,7 @@ public:
 	Data &operator[]( UtlHashFixedHandle_t hHash );
 	Data const &operator[]( UtlHashFixedHandle_t hHash ) const;
 
-	//protected:
+	//protected
 
 	// Templatized for memory tracking purposes
 	template <typename Data_t>
@@ -941,7 +941,7 @@ template<class Data, int NUM_BUCKETS, class HashFuncs> inline int CUtlHashFixed<
 
 //-----------------------------------------------------------------------------
 // Purpose: Insert data into the hash table given its key (unsigned int), with
-//          a check to see if the element already exists within the tree.
+// a check to see if the element already exists within the tree.
 //-----------------------------------------------------------------------------
 template<class Data, int NUM_BUCKETS, class HashFuncs> inline UtlHashFixedHandle_t CUtlHashFixed<Data,NUM_BUCKETS,HashFuncs>::Insert( unsigned int uiKey, const Data &data )
 {
@@ -955,7 +955,7 @@ template<class Data, int NUM_BUCKETS, class HashFuncs> inline UtlHashFixedHandle
 
 //-----------------------------------------------------------------------------
 // Purpose: Insert data into the hash table given its key (unsigned int),
-//          without a check to see if the element already exists within the tree.
+// without a check to see if the element already exists within the tree.
 //-----------------------------------------------------------------------------
 template<class Data, int NUM_BUCKETS, class HashFuncs> inline UtlHashFixedHandle_t CUtlHashFixed<Data,NUM_BUCKETS,HashFuncs>::FastInsert( unsigned int uiKey, const Data &data )
 {
@@ -1118,7 +1118,7 @@ public:
 		return nUnusedListElement;
 	}
 
-	//protected:
+	//protected
 
 	struct HashScalarData_t
 	{
@@ -1217,7 +1217,6 @@ template<class Data, class CHashFunction> void CUtlScalarHash<Data, CHashFunctio
 	{
 		int ideal = CHashFunction::HashKey32(m_pData[index].m_uiKey) & m_uiBucketMask;
 
-		// is the ideal index for this element <= (in a wrapped buffer sense) the ideal index of the removed element?
 		// if so, swap
 		int diff = ideal - lastRemoveIndex;
 		if ( diff > mid )

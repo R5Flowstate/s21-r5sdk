@@ -30,11 +30,17 @@ class VMatSystemSurface : public IDetour
 	}
 	virtual void GetVar(void) const
 	{
+#if defined(CLIENT_DLL)
+		const CMemory paint(Module_FindPattern(g_GameDll, "48 8B C4 89 50 10 48 89 48 08 55 56 57 48 8D 68 A1 48 81 EC C0 00 00 00"));
+		g_pVGuiSurface = paint.Offset(0xB0).FindPattern("48 8B 0D", CMemory::Direction::DOWN, 32).ResolveRelativeAddress(0x3, 0x7).RCast<CMatSystemSurface*>();
+		g_pMatSystemSurface = g_pVGuiSurface;
+#else
 		g_pMatSystemSurface = Module_FindPattern(g_GameDll, "48 83 EC 28 48 83 3D ?? ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ??")
 			.FindPatternSelf("48 83 3D", CMemory::Direction::DOWN, 40).ResolveRelativeAddressSelf(0x3, 0x8).RCast<CMatSystemSurface*>();
 
 		g_pVGuiSurface = Module_FindPattern(g_GameDll, "48 8B 05 ?? ?? ?? ?? C3 CC CC CC CC CC CC CC CC 48 8B 05 ?? ?? ?? ?? C3 CC CC CC CC CC CC CC CC 8B 81 ?? ?? ?? ??")
 			.ResolveRelativeAddressSelf(0x3, 0x7).RCast<CMatSystemSurface*>();
+#endif // CLIENT_DLL
 	}
 	virtual void GetCon(void) const { }
 	virtual void Detour(const bool bAttach) const { }

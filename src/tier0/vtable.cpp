@@ -1,17 +1,15 @@
 //===========================================================================//
 //
-// Purpose: Implementation of the CVTableHelper class, used to assist in
-//          function rebuilding and reverse engineering.
-//          DO NOT USE FOR SHIPPING CODE!!!!!!!!!!
+// CVTableHelper: debug helper for vtable dump/inspection. Not for shipping paths.
 //
 //===========================================================================//
 #include "tier0/vtable.h"
 
 //-----------------------------------------------------------------------------
 // Purpose: create class instance from passed module and virtual table name
-// Input  : CModule* -
-//          const std::string& -
-//          uint32_t
+// Input: CModule* -
+// const std::string& -
+// uint32_t
 //-----------------------------------------------------------------------------
 CVTableHelper::CVTableHelper(CModule* module, const char* tableName, uint32_t refIndex)
 	: m_svVirtualTableName(tableName)
@@ -24,8 +22,8 @@ CVTableHelper::CVTableHelper(CModule* module, const char* tableName, uint32_t re
 
 //-----------------------------------------------------------------------------
 // Purpose: create class instance from passed pointer
-// Input  : uintptr_t -
-//          const std::string& -
+// Input: uintptr_t -
+// const std::string& -
 //-----------------------------------------------------------------------------
 CVTableHelper::CVTableHelper(uintptr_t virtualTable, const char* tableName)
 	: m_pVirtualTable(virtualTable), m_svVirtualTableName(tableName)
@@ -37,8 +35,8 @@ CVTableHelper::CVTableHelper(uintptr_t virtualTable, const char* tableName)
 
 //-----------------------------------------------------------------------------
 // Purpose: create class instance from passed pointer
-// Input  : void* -
-//          const std::string& -
+// Input: void* -
+// const std::string& -
 //-----------------------------------------------------------------------------
 CVTableHelper::CVTableHelper(void* virtualTable, const char* tableName)
 	: m_pVirtualTable(uintptr_t(virtualTable)), m_svVirtualTableName(tableName)
@@ -49,7 +47,7 @@ CVTableHelper::CVTableHelper(void* virtualTable, const char* tableName)
 
 //-----------------------------------------------------------------------------
 // Purpose: gets function count of m_pVirtualTable
-// Output : ptrdiff_t
+// Output: ptrdiff_t
 //-----------------------------------------------------------------------------
 ptrdiff_t CVTableHelper::GetVTableLength()
 {
@@ -78,10 +76,10 @@ void CVTableHelper::GetAllVTableFunctions()
 
 //-----------------------------------------------------------------------------
 // Purpose: call function from m_vVirtualFunctions with passed index
-// Input  : int -
-//          void* -
-//          arg_list -
-// Output : Assigned template return type
+// Input: int -
+// void* -
+// arg_list -
+// Output: Assigned template return type
 //-----------------------------------------------------------------------------
 template <typename ReturnType, typename ...Args>
 ReturnType CVTableHelper::Call(int index, void* thisPtr, Args... args)

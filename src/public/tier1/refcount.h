@@ -1,7 +1,7 @@
 //========== Copyright © 2005, Valve Corporation, All rights reserved. ========
 //
 // Purpose: Tools for correctly implementing & handling reference counted
-//			objects
+// objects
 //
 //=============================================================================
 
@@ -16,8 +16,8 @@
 
 //-----------------------------------------------------------------------------
 // Purpose:	Implement a standard reference counted interface. Use of this
-//			is optional insofar as all the concrete tools only require
-//			at compile time that the function signatures match.
+// is optional insofar as all the concrete tools only require
+// at compile time that the function signatures match.
 //-----------------------------------------------------------------------------
 
 class IRefCounted
@@ -73,7 +73,7 @@ private:
 
 //-----------------------------------------------------------------------------
 // Purpose:	Do a an inline AddRef then return the pointer, useful when
-//			returning an object from a function
+// returning an object from a function
 //-----------------------------------------------------------------------------
 
 #define RetAddRef( p ) ( (p)->AddRef(), (p) )
@@ -82,7 +82,7 @@ private:
 
 //-----------------------------------------------------------------------------
 // Purpose:	A class to both hold a pointer to an object and its reference.
-//			Base exists to support other cleanup models
+// Base exists to support other cleanup models
 //-----------------------------------------------------------------------------
 
 template <class T>
@@ -172,7 +172,7 @@ public:
 
 //-----------------------------------------------------------------------------
 // Purpose:	Actual reference counting implementation. Pulled out to reduce
-//			code bloat.
+// code bloat.
 //-----------------------------------------------------------------------------
 
 template <const bool bSelfDelete, typename CRefThreading = CRefMT>
@@ -345,7 +345,7 @@ public:
 
 //-----------------------------------------------------------------------------
 // Purpose:	Class to throw around a reference counted item to debug
-//			referencing problems
+// referencing problems
 //-----------------------------------------------------------------------------
 
 #if defined( __clang__ )

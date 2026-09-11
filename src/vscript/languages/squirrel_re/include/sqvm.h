@@ -6,7 +6,7 @@
 class CSquirrelVM;
 
 //-----------------------------------------------------------------------------
-// 
+//
 //-----------------------------------------------------------------------------
 enum class SQCONTEXT : SQInteger
 {
@@ -66,7 +66,86 @@ struct SQVM : public CHAINABLE_OBJ
 static_assert(offsetof(SQVM, _top) == 0x78);
 static_assert(offsetof(SQVM, _nnativecalls) == 0x130);
 
+#if defined(CLIENT_DLL)
+// S21: _stackbase +0x48, _stackdata +0x78, _top +0x68 (32-bit, not SQInteger), _bottom +0x44.
+static const size_t SQVM_S21_STACKBASE = 0x48;
+static const size_t SQVM_S21_STACKDATA = 0x78;
+static const size_t SQVM_S21_TOP       = 0x68;
+// The engine inlines gettop as (_top - _bottom): "mov eax,[rcx+68h]; sub eax,[rcx+44h]".
+static const size_t SQVM_S21_BOTTOM    = 0x44;
+// Read as a 16-byte object by the engine's own sq_pushroottable, which tests the
+// type at +0xD0 and takes the value from +0xD8.
+static const size_t SQVM_S21_ROOTTABLE = 0xD0;
+// S21 _sharedstate at +0x50, not the S3 field in SQVM above.
+static const size_t SQVM_S21_SHAREDSTATE = 0x50;
+
+inline SQObjectPtr* SQVM_S21_Field(HSQUIRRELVM v, size_t offset)
+{
+	return *reinterpret_cast<SQObjectPtr**>(reinterpret_cast<unsigned char*>(v) + offset);
+}
+
+inline SQSharedState* SQVM_S21_SharedState(HSQUIRRELVM v)
+{
+	return *reinterpret_cast<SQSharedState**>(
+		reinterpret_cast<unsigned char*>(v) + SQVM_S21_SHAREDSTATE);
+}
+
+inline int& SQVM_S21_Top(HSQUIRRELVM v)
+{
+	return *reinterpret_cast<int*>(reinterpret_cast<unsigned char*>(v) + SQVM_S21_TOP);
+}
+
+inline int& SQVM_S21_Bottom(HSQUIRRELVM v)
+{
+	return *reinterpret_cast<int*>(reinterpret_cast<unsigned char*>(v) + SQVM_S21_BOTTOM);
+}
+
+inline SQObjectPtr& stack_get(HSQUIRRELVM v, SQInteger idx)
+{
+	if (idx >= 0)
+		return SQVM_S21_Field(v, SQVM_S21_STACKBASE)[idx - 1];
+
+	return SQVM_S21_Field(v, SQVM_S21_STACKDATA)[SQVM_S21_Top(v) + idx];
+}
+
+// Push/Pop use _stack[_top] via the S21 fields, not the S3 SQVM members.
+inline void SQVM_S21_Push(HSQUIRRELVM v, const SQObjectPtr& o)
+{
+	SQVM_S21_Field(v, SQVM_S21_STACKDATA)[SQVM_S21_Top(v)++] = o;
+}
+
+inline SQObjectPtr& SQVM_S21_RootTable(HSQUIRRELVM v)
+{
+	return *reinterpret_cast<SQObjectPtr*>(reinterpret_cast<unsigned char*>(v) + SQVM_S21_ROOTTABLE);
+}
+
+inline void SQVM_S21_Pop(HSQUIRRELVM v, SQInteger count)
+{
+	SQObjectPtr* vals = SQVM_S21_Field(v, SQVM_S21_STACKDATA);
+	int& top = SQVM_S21_Top(v);
+
+	while (count-- > 0 && top > 0)
+		vals[--top] = _null_;
+}
+#else
+// The engine inlines gettop as (_top - _bottom): "mov eax,[rcx+78h]; sub eax,[rcx+54h]".
+// Both are 32-bit. The SQVM members above declare them as SQInteger, and _bottom
+// lands at 0x50, so reading them through the struct spans the wrong bytes.
+static const size_t SQVM_S3_TOP    = 0x78;
+static const size_t SQVM_S3_BOTTOM = 0x54;
+
+inline int& SQVM_S3_Top(HSQUIRRELVM v)
+{
+	return *reinterpret_cast<int*>(reinterpret_cast<unsigned char*>(v) + SQVM_S3_TOP);
+}
+
+inline int& SQVM_S3_Bottom(HSQUIRRELVM v)
+{
+	return *reinterpret_cast<int*>(reinterpret_cast<unsigned char*>(v) + SQVM_S3_BOTTOM);
+}
+
 inline SQObjectPtr& stack_get(HSQUIRRELVM v, SQInteger idx) { return ((idx >= 0) ? (v->_stackbase[idx-1]) : (v->GetUp(idx))); }
+#endif
 #define _ss(_vm_) (_vm_)->_sharedstate
 
 /* ==== SQUIRREL ======================================================================================================================================================== */

@@ -1,4 +1,4 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: Debug overlay engine interface.
 //
@@ -45,7 +45,7 @@ public:
 	virtual void ClearDeadTextOverlays(void) = 0;
 	virtual void ClearAllOverlays(void) = 0;
 
-	virtual void stub_3() = 0; // This is DebugDebugOverlays(), parameters need reversing but that can only be done once this entire interface is mapped out.
+	virtual void stub_3() = 0; // This is DebugDebugOverlays, parameters need reversing but that can only be done once this entire interface is mapped out.
 	virtual void stub_4() = 0; // Increments 'g_nOverlayStage' if not paused and when a2 > 0.
 	virtual void stub_5() = 0; // Sets 'g_nRenderTickCount' to 'g_ClientGlobalVariables.frameCount' if not paused.
 

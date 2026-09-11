@@ -5,7 +5,7 @@
 #include "core/logdef.h"
 #include "tier0/utility.h"
 
-// These are used for the 'stat()' and 'access()' in ::IsDirectory().
+// These are used for the 'stat' and 'access' in::IsDirectory.
 #include <io.h>
 #include <sys/types.h>
 #include <sys/stat.h> 
@@ -632,16 +632,12 @@ string UTF8Encode(const wstring& wsvInput)
 ///////////////////////////////////////////////////////////////////////////////
 // For decoding data in UTF-8.
 //string UTF8Decode(const string& svInput)
-//{
-//    struct destructible_codecvt : public std::codecvt<char32_t, char, std::mbstate_t>
-//    {
-//        using std::codecvt<char32_t, char, std::mbstate_t>::codecvt;
-//        ~destructible_codecvt() = default;
-//    };
-//    std::wstring_convert<destructible_codecvt, char32_t> utf32_converter;
-//    return utf32_converter.from_bytes(svInput);
-//    return "";
-//}
+// struct destructible_codecvt: public std::codecvt<char32_t, char, std::mbstate_t>
+// using std::codecvt<char32_t, char, std::mbstate_t>::codecvt;
+// ~destructible_codecvt = default;
+// std::wstring_convert<destructible_codecvt, char32_t> utf32_converter;
+// return utf32_converter.from_bytes(svInput);
+// return "";
 
 ///////////////////////////////////////////////////////////////////////////////
 // For checking if a string is a number.
@@ -722,7 +718,7 @@ string StringEscape(const string& svInput)
     {
         switch (c)
         {
-        //case '\'':  result += "\\'";  break;
+        //case '\'': result += "\\'"; break;
         case '\a':  result += "\\a";  break;
         case '\b':  result += "\\b";  break;
         case '\f':  result += "\\f";  break;
@@ -1079,7 +1075,7 @@ string FormatV(const char* szFormat, va_list args)
         // NOTE: reserve enough buffer size for the string + the terminating
         // NULL character, then resize it to just the string len so we don't
         // count the NULL character in the string's size (i.e. when calling
-        // string::size()).
+        // string::size).
         result.reserve(iLen+1);
         result.resize(iLen);
 

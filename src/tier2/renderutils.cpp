@@ -1,4 +1,4 @@
-﻿//===== Copyright © 2005-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 2005-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: A set of utilities to render standard shapes
 //
@@ -37,15 +37,62 @@ static IMaterial* s_transNormalZBoth;
 
 static bool s_standardMaterialsInitialized = false;
 
+#if defined(CLIENT_DLL)
+static bool s_standardMaterialsOk = false;
+#endif // CLIENT_DLL
+
 //-----------------------------------------------------------------------------
 // Purpose: initializes the standard materials; these must always be available
 //-----------------------------------------------------------------------------
 static void InitializeStandardMaterials()
 {
-    // Load engine materials first before proceeding with the SDK.
-    // The engine's impl handles LOCAL_THREAD_LOCK internally.
+    // Engine impl loads the startup paks and initializes its own standard
+    // materials first.
     v_InitializeStandardMaterials();
 
+#if defined(CLIENT_DLL)
+    if (s_standardMaterialsInitialized)
+        return;
+
+    s_standardMaterialsInitialized = true;
+
+    if (!v_InitializeStandardMaterials)
+    {
+        Warning(eDLL_T::MS, "[DBGDRAW] InitializeStandardMaterials unresolved; cannot bind standard materials\n");
+        return;
+    }
+
+    if (!s_engineWireMaterialSlots[0] || !s_engineWireMaterialSlots[1] ||
+        !s_engineWireMaterialSlots[2] || !s_engineWireMaterialSlots[3])
+    {
+        Warning(eDLL_T::MS, "[DBGDRAW] standard wire material slots unresolved\n");
+        return;
+    }
+
+    s_opaqueIgnoreZWire = *s_engineWireMaterialSlots[0];
+    s_opaqueNormalZWire = *s_engineWireMaterialSlots[1];
+    s_transIgnoreZWire  = *s_engineWireMaterialSlots[2];
+    s_transNormalZWire  = *s_engineWireMaterialSlots[3];
+
+    if (!s_opaqueIgnoreZWire || !s_opaqueNormalZWire || !s_transIgnoreZWire || !s_transNormalZWire)
+    {
+        Warning(eDLL_T::MS, "[DBGDRAW] standard wire materials unresolved\n");
+        return;
+    }
+
+    // Solid-face materials are not used on this build (faces degrade to
+    // wireframe); alias them so no code path ever binds a null material.
+    s_opaqueIgnoreZFront = s_opaqueIgnoreZWire;
+    s_transIgnoreZFront  = s_transIgnoreZWire;
+    s_opaqueNormalZFront = s_opaqueNormalZWire;
+    s_transNormalZFront  = s_transNormalZWire;
+    s_opaqueIgnoreZBoth  = s_opaqueIgnoreZWire;
+    s_transIgnoreZBoth   = s_transIgnoreZWire;
+    s_opaqueNormalZBoth  = s_opaqueNormalZWire;
+    s_transNormalZBoth   = s_transNormalZWire;
+
+    s_standardMaterialsOk = true;
+#else
     LOCAL_THREAD_LOCK();
 
     if (s_standardMaterialsInitialized)
@@ -91,6 +138,54 @@ static void InitializeStandardMaterials()
 
     Assert(s_opaqueNormalZBoth);
     Assert(s_transNormalZBoth);
+#endif // CLIENT_DLL
+}
+
+#if defined(CLIENT_DLL)
+static CMaterialSystem* EngineMaterialSystem()
+{
+    return s_engineMaterialSystemSlot ? *s_engineMaterialSystemSlot : nullptr;
+}
+#endif // CLIENT_DLL
+
+//-----------------------------------------------------------------------------
+// Purpose: single gate for every draw path; boot-time pattern work can fail and
+//          a missing engine global has to degrade to a no-op rather than a null
+//          dereference on the render thread
+//-----------------------------------------------------------------------------
+static bool DebugDrawReady()
+{
+    InitializeStandardMaterials();
+
+#if defined(CLIENT_DLL)
+    if (!s_standardMaterialsOk)
+        return false;
+
+    if (!g_fnHasRenderCallQueue || !g_fnAddRenderCallQueueItem ||
+        !g_fnAdvanceRenderCallQueue || !EngineMaterialSystem())
+    {
+        static bool s_warned = false;
+
+        if (!s_warned)
+        {
+            s_warned = true;
+            Warning(eDLL_T::MS, "[DBGDRAW] render context unavailable; debug drawing disabled\n");
+        }
+
+        return false;
+    }
+#endif // CLIENT_DLL
+
+    return true;
+}
+
+static CMatRenderContext* DebugDrawRenderContext()
+{
+#if defined(CLIENT_DLL)
+    return EngineMaterialSystem()->GetRenderContext();
+#else
+    return g_pMaterialSystem->GetRenderContext();
+#endif // CLIENT_DLL
 }
 
 struct RenderLineQueue_s
@@ -115,19 +210,20 @@ static void RenderLineQueueFunctor(CallQueue_s* const queue)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: renders a line:
-//        _+v1
+// Purpose: renders a line
+// _+v1
 //        /|
 //       /
 //      /
 //     /
 //    /
 //  |/
-//   -+v2
+// -+v2
 //-----------------------------------------------------------------------------
 static void RenderLineInternal(const Vector3D& v1, const Vector3D& v2, const Color c, IMaterial* const pMaterial)
 {
-    InitializeStandardMaterials();
+    if (!pMaterial || !DebugDrawReady())
+        return;
 
     // Queue it off if this is called outside the render thread.
     if ((*g_fnHasRenderCallQueue)())
@@ -145,7 +241,7 @@ static void RenderLineInternal(const Vector3D& v1, const Vector3D& v2, const Col
         return;
     }
 
-    CMatRenderContext* const ctx = g_pMaterialSystem->GetRenderContext();
+    CMatRenderContext* const ctx = DebugDrawRenderContext();
     CMeshVertexBuilder vertexBuilder;
 
     if (vertexBuilder.Begin(ctx, 2))
@@ -168,20 +264,20 @@ static void RenderLineInternal(const Vector3D& v1, const Vector3D& v2, const Col
 //-----------------------------------------------------------------------------
 static const int s_boxFaceIndices[6][4] =
 {
-    { 0, 4, 6, 2 }, // -x
+    { 0, 4, 6, 2 },
     { 5, 1, 3, 7 }, // +x
-    { 0, 1, 5, 4 }, // -y
+    { 0, 1, 5, 4 },
     { 2, 6, 7, 3 }, // +y
-    { 0, 2, 3, 1 },	// -z
+    { 0, 2, 3, 1 },
     { 4, 5, 7, 6 }	// +z
 };
 static const int s_boxFaceIndicesInsideOut[6][4] =
 {
-    { 0, 2, 6, 4 }, // -x
+    { 0, 2, 6, 4 },
     { 5, 7, 3, 1 }, // +x
-    { 0, 4, 5, 1 }, // -y
+    { 0, 4, 5, 1 },
     { 2, 3, 7, 6 }, // +y
-    { 0, 1, 3, 2 },	// -z
+    { 0, 1, 3, 2 },
     { 4, 6, 7, 5 }	// +z
 };
 
@@ -225,22 +321,22 @@ static void RenderBoxQueueFunctor(CallQueue_s* const queue)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: renders a solid box:
-// +z              _+y
-// ^               /|
+// Purpose: renders a solid box
+// +z _+y
+// ^ /|
 // |              /
 // |  +----------+
 // | /::::::::::/|
-//  /::::::::::/:|
-// +----------+::|
+// +------+::|
 // |::::::::::|::+
 // |::::::::::|:/
 // |::::::::::|/
-// +----------+ --> +x
+// +------+ --> +x
 //-----------------------------------------------------------------------------
 static void RenderBoxInternal(const matrix3x4_t& fTransformMatrix, const Vector3D& vMins, const Vector3D& vMaxs, const Color c, IMaterial* const pMaterial, const bool bInsideOut)
 {
-    InitializeStandardMaterials();
+    if (!pMaterial || !DebugDrawReady())
+        return;
 
     if ((*g_fnHasRenderCallQueue)())
     {
@@ -259,7 +355,7 @@ static void RenderBoxInternal(const matrix3x4_t& fTransformMatrix, const Vector3
         return;
     }
 
-    CMatRenderContext* const ctx = g_pMaterialSystem->GetRenderContext();
+    CMatRenderContext* const ctx = DebugDrawRenderContext();
     CMeshVertexBuilder vertexBuilder;
 
     if (vertexBuilder.Begin(ctx, 36))
@@ -313,9 +409,9 @@ static void RenderWireframeBoxQueueFunctor(CallQueue_s* const queue)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: renders a wireframe box:
-// +z              _+y
-// ^               /|
+// Purpose: renders a wireframe box
+// +z _+y
+// ^ /|
 // |              /
 // |  +----------+
 // | /|         /|
@@ -324,11 +420,12 @@ static void RenderWireframeBoxQueueFunctor(CallQueue_s* const queue)
 // |  +-------|--+
 // | /        | /
 // |/         |/
-// +----------+ --> +x
+// +------+ --> +x
 //-----------------------------------------------------------------------------
 static void RenderWireframeBoxInternal(const matrix3x4_t& fTransformMatrix, const Vector3D& vMins, const Vector3D& vMaxs, const Color c, IMaterial* const pMaterial)
 {
-    InitializeStandardMaterials();
+    if (!pMaterial || !DebugDrawReady())
+        return;
 
     if ((*g_fnHasRenderCallQueue)())
     {
@@ -346,7 +443,7 @@ static void RenderWireframeBoxInternal(const matrix3x4_t& fTransformMatrix, cons
         return;
     }
 
-    CMatRenderContext* const ctx = g_pMaterialSystem->GetRenderContext();
+    CMatRenderContext* const ctx = DebugDrawRenderContext();
     CMeshVertexBuilder vertexBuilder;
 
     if (vertexBuilder.Begin(ctx, 48))
@@ -455,8 +552,8 @@ static void RenderSweptBoxQueueFunctor(CallQueue_s* const queue)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: renders an extruded box:
-//            +----------+ --> vStart
+// Purpose: renders an extruded box
+// +------+ --> vStart
 //           /|         /|
 //          / |        / |
 //         +----------+  |
@@ -466,7 +563,7 @@ static void RenderSweptBoxQueueFunctor(CallQueue_s* const queue)
 //     /   +------/---+
 //    /   /      /   /
 //   /   /      /   /
-//  +----------+ --/--> angles
+// +------+ --/--> angles
 // |   /      |   /
 // |  +-------|--+
 // | /|       | /|
@@ -475,12 +572,13 @@ static void RenderSweptBoxQueueFunctor(CallQueue_s* const queue)
 // |  +-------|--+
 // | /        | /
 // |/         |/
-// +----------+ --> vEnd
+// +------+ --> vEnd
 //-----------------------------------------------------------------------------
 static void RenderWireframeSweptBoxInternal(const Vector3D& vStart, const Vector3D& vEnd,
     const QAngle& angles, const Vector3D& vMins, const Vector3D& vMaxs, const Color c, IMaterial* const pMaterial)
 {
-    InitializeStandardMaterials();
+    if (!pMaterial || !DebugDrawReady())
+        return;
 
     // Queue it off if this is called outside the render thread.
     if ((*g_fnHasRenderCallQueue)())
@@ -501,7 +599,7 @@ static void RenderWireframeSweptBoxInternal(const Vector3D& vStart, const Vector
         return;
     }
 
-    CMatRenderContext* const ctx = g_pMaterialSystem->GetRenderContext();
+    CMatRenderContext* const ctx = DebugDrawRenderContext();
     CMeshVertexBuilder vertexBuilder;
 
     if (vertexBuilder.Begin(ctx, 60))
@@ -589,21 +687,21 @@ static void RenderTriangleQueueFunctor(CallQueue_s* const queue)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: renders a triangle:
-// +z              _+y
+// Purpose: renders a triangle
+// +z _+y
 // |               /|
 // |      /\      /
-// |     /::\    /
-// |    /::::\  /
-// |   /::::::\
-// |  /::::::::\
+// | /::\ /
+// | /::::\ /
+// | /::::::\
+// | /::::::::\
 // | /::::::::::\
-//  /::::::::::::\
-// '--------------' --> +x
+// '--------' --> +x
 //-----------------------------------------------------------------------------
 static void RenderTriangleInternal(const Vector3D& p1, const Vector3D& p2, const Vector3D& p3, const Color c, IMaterial* const pMaterial)
 {
-    InitializeStandardMaterials();
+    if (!pMaterial || !DebugDrawReady())
+        return;
 
     // Queue it off if this is called outside the render thread.
     if ((*g_fnHasRenderCallQueue)())
@@ -622,7 +720,7 @@ static void RenderTriangleInternal(const Vector3D& p1, const Vector3D& p2, const
         return;
     }
 
-    CMatRenderContext* const ctx = g_pMaterialSystem->GetRenderContext();
+    CMatRenderContext* const ctx = DebugDrawRenderContext();
     CMeshVertexBuilder vertexBuilder;
 
     if (vertexBuilder.Begin(ctx, 3))
@@ -666,22 +764,23 @@ static void RenderSphereQueueFunctor(CallQueue_s* const queue)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: render a sphere:
-// +z                _+y
-// ^                 /|
+// Purpose: render a sphere
+// +z _+y
+// ^ /|
 // |                /
-// |   .--"|"--.   /
-//  .'     |     '.
+// |.--"|"--. /
+//.' | '.
 // /       |       \
-// | <----( )---->-|--> +r
+// | <---->-|--> +r
 // \       |       /
-//  '.     |     .'
-//    "-.._|_..-"   --> +x
+// '. |.'
+// "-.._|_..-" --> +x
 //-----------------------------------------------------------------------------
 static void RenderSphereInternal(const Vector3D& vCenter, const float flRadius, const int nTheta,
     const int nPhi, const Color c, IMaterial* const pMaterial)
 {
-    InitializeStandardMaterials();
+    if (!pMaterial || !DebugDrawReady())
+        return;
 
     // Queue it off if this is called outside the render thread.
     if ((*g_fnHasRenderCallQueue)())
@@ -701,7 +800,7 @@ static void RenderSphereInternal(const Vector3D& vCenter, const float flRadius, 
         return;
     }
 
-    CMatRenderContext* const ctx = g_pMaterialSystem->GetRenderContext();
+    CMatRenderContext* const ctx = DebugDrawRenderContext();
     CMeshVertexBuilder vertexBuilder;
 
     if (vertexBuilder.Begin(ctx, nPhi * (nTheta + 1)))
@@ -783,10 +882,10 @@ static const int g_capsuleLineIndices[CAPSULE_LINES] = { -1,
     14,		0,	4,	16,	28,	40,	52,	64,	73,	70,	58,	46,	34,	22,	10,		-1,
     12,		25,	26,	27,	28,	29,	30,	31,	32,	33,	34,	35,	36,				-1,
     12,		37,	38,	39,	40,	41,	42,	43,	44,	45,	46,	47,	48,				-1,
-//    12,		13,	14,	15,	16,	17,	18,	19,	20,	21,	22,	23,	24,				-1,
-//    12,		49,	50,	51,	52,	53,	54,	55,	56,	57,	58,	59,	60,				-1,
-//    12,		1,	2,	3,	4,	5,	6,	7,	8,	9,	10,	11,	12,				-1,
-//    12,		61,	62,	63,	64,	65,	66,	67,	68,	69,	70,	71,	72,				-1,
+// 12, 13,	14,	15,	16,	17,	18,	19,	20,	21,	22,	23,	24, -1,
+// 12, 49,	50,	51,	52,	53,	54,	55,	56,	57,	58,	59,	60, -1,
+// 12, 1,	2,	3,	4,	5,	6,	7,	8,	9,	10,	11,	12, -1,
+// 12, 61,	62,	63,	64,	65,	66,	67,	68,	69,	70,	71,	72, -1,
 };
 
 struct RenderCapsuleQueue_s
@@ -812,9 +911,9 @@ static void RenderCapsuleQueueFunctor(CallQueue_s* const queue)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: render a capsule:
-// +z           _+y
-// ^            /|
+// Purpose: render a capsule
+// +z _+y
+// ^ /|
 // |           /
 // |.-'"|"'-. /
 // |----|----|
@@ -824,11 +923,12 @@ static void RenderCapsuleQueueFunctor(CallQueue_s* const queue)
 // |    |    |
 // |    |    |
 // |----|----|
-//  "-..|..-" --> +x
+// "-..|..-" --> +x
 //-----------------------------------------------------------------------------
 static void RenderCapsuleInternal(const Vector3D& vStart, const Vector3D& vEnd, const float flRadius, const Color c, IMaterial* const pMaterial)
 {
-    InitializeStandardMaterials();
+    if (!pMaterial || !DebugDrawReady())
+        return;
 
     // Queue it off if this is called outside the render thread.
     if ((*g_fnHasRenderCallQueue)())
@@ -875,7 +975,7 @@ static void RenderCapsuleInternal(const Vector3D& vStart, const Vector3D& vEnd, 
         v[i] = vecCapsuleVert + vStart;
     }
 
-    CMatRenderContext* const ctx = g_pMaterialSystem->GetRenderContext();
+    CMatRenderContext* const ctx = DebugDrawRenderContext();
     CMeshVertexBuilder vertexBuilder;
 
     // note(kawe): see comment at the 'CAPSULE_LINES' define,
@@ -935,6 +1035,9 @@ static void RenderCapsuleInternal(const Vector3D& vStart, const Vector3D& vEnd, 
 
 static inline IMaterial* DetermineWireframeMaterial(const Color c, const bool bZBuffer)
 {
+    if (!DebugDrawReady())
+        return nullptr;
+
     if (c.a() == 255)
         return bZBuffer ? s_opaqueNormalZWire : s_opaqueIgnoreZWire;
     else
@@ -943,6 +1046,9 @@ static inline IMaterial* DetermineWireframeMaterial(const Color c, const bool bZ
 
 static inline IMaterial* DetermineFaceMaterial(const Color c, const bool bZBuffer)
 {
+    if (!DebugDrawReady())
+        return nullptr;
+
     if (c.a() == 255)
         return bZBuffer ? s_opaqueNormalZFront : s_opaqueIgnoreZFront;
     else
@@ -951,6 +1057,9 @@ static inline IMaterial* DetermineFaceMaterial(const Color c, const bool bZBuffe
 
 static inline IMaterial* DetermineTriangleMaterial(Color& c, const bool bZBuffer)
 {
+    if (!DebugDrawReady())
+        return nullptr;
+
     if (c.a() == 0)
     {
         c[3] = 255;
@@ -970,7 +1079,16 @@ static inline IMaterial* DetermineTriangleMaterial(Color& c, const bool bZBuffer
 //-----------------------------------------------------------------------------
 void RenderLine(const Vector3D& v1, const Vector3D& v2, const Color color, const bool bZBuffer)
 {
+#if defined(CLIENT_DLL)
+    if (v_RenderLine)
+    {
+        v_RenderLine(v1, v2, color, bZBuffer);
+        return;
+    }
+    IMaterial* const pMaterial = DetermineWireframeMaterial(color, bZBuffer);
+#else
     IMaterial* const pMaterial = DetermineFaceMaterial(color, bZBuffer);
+#endif // CLIENT_DLL
     RenderLineInternal(v1, v2, color, pMaterial);
 }
 
@@ -979,8 +1097,18 @@ void RenderLine(const Vector3D& v1, const Vector3D& v2, const Color color, const
 //-----------------------------------------------------------------------------
 void RenderBox(const matrix3x4_t& vTransforms, const Vector3D& vMins, const Vector3D& vMaxs, const Color c, const bool bZBuffer)
 {
+#if defined(CLIENT_DLL)
+    static bool s_warned = false;
+    if (!s_warned)
+    {
+        Warning(eDLL_T::MS, "[DBGDRAW] solid faces disabled until triangle draws are verified on this build; degrading to wireframe\n");
+        s_warned = true;
+    }
+    RenderWireframeBoxInternal(vTransforms, vMins, vMaxs, c, DetermineWireframeMaterial(c, bZBuffer));
+#else
     IMaterial* const pMaterial = DetermineFaceMaterial(c, bZBuffer);
     RenderBoxInternal(vTransforms, vMins, vMaxs, c, pMaterial, false);
+#endif // CLIENT_DLL
 }
 void RenderWireframeBox(const matrix3x4_t& vTransforms, const Vector3D& vMins, const Vector3D& vMaxs, const Color c, const bool bZBuffer)
 {
@@ -1003,8 +1131,18 @@ void RenderWireframeSweptBox(const Vector3D& vStart, const Vector3D& vEnd, const
 //-----------------------------------------------------------------------------
 void RenderTriangle(const Vector3D& p1, const Vector3D& p2, const Vector3D& p3, Color c, const bool bZBuffer)
 {
+#if defined(CLIENT_DLL)
+    static bool s_warned = false;
+    if (!s_warned)
+    {
+        Warning(eDLL_T::MS, "[DBGDRAW] solid faces disabled until triangle draws are verified on this build; skipping RenderTriangle\n");
+        s_warned = true;
+    }
+    return;
+#else
     IMaterial* const pMaterial = DetermineTriangleMaterial(c, bZBuffer);
     RenderTriangleInternal(p1, p2, p3, c, pMaterial);
+#endif // CLIENT_DLL
 }
 
 //-----------------------------------------------------------------------------
@@ -1012,13 +1150,30 @@ void RenderTriangle(const Vector3D& p1, const Vector3D& p2, const Vector3D& p3, 
 //-----------------------------------------------------------------------------
 void RenderSphere(const Vector3D& vCenter, const float flRadius, const int nTheta, const int nPhi, const Color c, const bool bZBuffer)
 {
+#if defined(CLIENT_DLL)
+    static bool s_warned = false;
+    if (!s_warned)
+    {
+        Warning(eDLL_T::MS, "[DBGDRAW] solid faces disabled until triangle draws are verified on this build; degrading to wireframe sphere\n");
+        s_warned = true;
+    }
+    RenderWireframeSphere(vCenter, flRadius, nTheta, nPhi, c, bZBuffer);
+#else
     IMaterial* const pMaterial = DetermineFaceMaterial(c, bZBuffer);
     RenderSphereInternal(vCenter, flRadius, nTheta, nPhi, c, pMaterial);
+#endif // CLIENT_DLL
 }
 void RenderWireframeSphere(const Vector3D& vCenter, const float flRadius, const int nTheta, const int nPhi, const Color c, const bool bZBuffer)
 {
+#if defined(CLIENT_DLL)
+    const int nSegs = nTheta >= 8 ? nTheta : 16;
+    DebugDrawCircle(vCenter, { 90.f, 0.f, 0.f }, flRadius, c, nSegs, bZBuffer);
+    DebugDrawCircle(vCenter, { 0.f, 90.f, 0.f }, flRadius, c, nSegs, bZBuffer);
+    DebugDrawCircle(vCenter, { 0.f, 0.f, 90.f }, flRadius, c, nSegs, bZBuffer);
+#else
     IMaterial* const pMaterial = DetermineWireframeMaterial(c, bZBuffer);
     RenderSphereInternal(vCenter, flRadius, nTheta, nPhi, c, pMaterial);
+#endif // CLIENT_DLL
 }
 
 //-----------------------------------------------------------------------------
@@ -1035,9 +1190,9 @@ void RenderCapsule(const Vector3D& vStart, const Vector3D& vEnd, const float flR
 ///////////////////////////////////////////////////////////////////////////////
 
 //-----------------------------------------------------------------------------
-// Purpose: render angled box:
-// +z              _+y
-// ^               /|
+// Purpose: render angled box
+// +z _+y
+// ^ /|
 // |              /
 // |  +----------+
 // | /|         /|
@@ -1046,7 +1201,7 @@ void RenderCapsule(const Vector3D& vStart, const Vector3D& vEnd, const float flR
 // |  +-------|--+
 // | /        | /
 // |/         |/
-// +----------+ --> +x
+// +------+ --> +x
 //-----------------------------------------------------------------------------
 void DebugDrawBox(const Vector3D& vOrigin, const QAngle& vAngles, const Vector3D& vMins, const Vector3D& vMaxs, const Color color, const bool bZBuffer)
 {
@@ -1070,19 +1225,19 @@ void DebugDrawBox(const Vector3D& vOrigin, const QAngle& vAngles, const Vector3D
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: render cylinder:
-// +z           _+y
-// ^            /|
+// Purpose: render cylinder
+// +z _+y
+// ^ /|
 // |           /
 // |.-'"|"'-. /
-// (----|----)
+// (--|--)
 // |'-._|_.-'|
 // |    |    |
 // |    |    |
 // | <--+--> |--> +r
 // |    |    |
 // |    |    |
-//  "-._|_.-" --> +x
+// "-._|_.-" --> +x
 //-----------------------------------------------------------------------------
 void DebugDrawCylinder(const Vector3D& vOrigin, const QAngle& vAngles, const float flRadius, const float flHeight, const Color color, const int nSides, const bool bZBuffer)
 {
@@ -1115,17 +1270,17 @@ void DebugDrawCylinder(const Vector3D& vOrigin, const QAngle& vAngles, const flo
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: render sphere:
-// +z                _+y
-// ^                 /|
+// Purpose: render sphere
+// +z _+y
+// ^ /|
 // |                /
-// |   .--"|"--.   /
-//  .'     |     '.
+// |.--"|"--. /
+//.' | '.
 // /       |       \
-// | <----( )---->-|--> +r
+// | <---->-|--> +r
 // \       |       /
-//  '.     |     .'
-//    "-.._|_..-"   --> +x
+// '. |.'
+// "-.._|_..-" --> +x
 //-----------------------------------------------------------------------------
 void DebugDrawSphere(const Vector3D& vOrigin, const float flRadius, const Color color, const int nSegments, const bool bZBuffer)
 {
@@ -1135,14 +1290,14 @@ void DebugDrawSphere(const Vector3D& vOrigin, const float flRadius, const Color 
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: render hemisphere:
-// +z                _+y
-// ^                 /|
+// Purpose: render hemisphere
+// +z _+y
+// ^ /|
 // |                /
-// |   .--"|"--.   /
-//  .'     |     '.
-// /       |       \ /--> +r
-// | <----( )---->-|/ --> +x
+// |.--"|"--. /
+//.' | '.
+// / | \ /--> +r
+// | <---->-|/ --> +x
 //-----------------------------------------------------------------------------
 void DebugDrawHemiSphere(const Vector3D& vOrigin, const QAngle& vAngles, const Vector3D& vRadius, const Color color, const int nSegments, const bool bZBuffer)
 {
@@ -1189,17 +1344,17 @@ void DebugDrawHemiSphere(const Vector3D& vOrigin, const QAngle& vAngles, const V
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: render circle:
-// +z                _+y
-// ^                 /|
+// Purpose: render circle
+// +z _+y
+// ^ /|
 // |                /
-// |   .--"""--.   /
-//  .'           '.
+// |.--"""--. /
+//.' '.
 // /               \
-// | <----( )---->-|--> +r
+// | <---->-|--> +r
 // \               /
-//  '.           .'
-//    "-..___..-"   --> +x
+// '..'
+// "-..___..-" --> +x
 //-----------------------------------------------------------------------------
 void DebugDrawCircle(const Vector3D& vOrigin, const QAngle& vAngles, const float flRadius, const Color color, const int nSegments, const bool bZBuffer)
 {
@@ -1231,8 +1386,8 @@ void DebugDrawCircle(const Vector3D& vOrigin, const QAngle& vAngles, const float
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: render square:
-// +z              _+y
+// Purpose: render square
+// +z _+y
 // |               /|
 // .--------------.
 // |              |
@@ -1241,7 +1396,7 @@ void DebugDrawCircle(const Vector3D& vOrigin, const QAngle& vAngles, const float
 // |              |
 // |              |
 // |              |
-// '--------------' --> +x
+// '--------' --> +x
 //-----------------------------------------------------------------------------
 void DebugDrawSquare(const Vector3D& vOrigin, const QAngle& vAngles, const float flSquareSize, const Color color, const bool bZBuffer)
 {
@@ -1249,8 +1404,8 @@ void DebugDrawSquare(const Vector3D& vOrigin, const QAngle& vAngles, const float
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: render triangle:
-// +z              _+y
+// Purpose: render triangle
+// +z _+y
 // |               /|
 // |      /\      /
 // |     /  \    /
@@ -1259,7 +1414,7 @@ void DebugDrawSquare(const Vector3D& vOrigin, const QAngle& vAngles, const float
 // |  /        \
 // | /          \
 //  /            \
-// '--------------' --> +x
+// '--------' --> +x
 //-----------------------------------------------------------------------------
 void DebugDrawTriangle(const Vector3D& vOrigin, const QAngle& vAngles, const float flTriangleSize, const Color color, const bool bZBuffer)
 {
@@ -1267,15 +1422,15 @@ void DebugDrawTriangle(const Vector3D& vOrigin, const QAngle& vAngles, const flo
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: render mark:
-// +z     _+y
+// Purpose: render mark
+// +z _+y
 // |      /|
 // |     /
-//   \  /--> +r
+// \ /--> +r
 // ___\/___
 //    /\
 //   /  \
-//  /    --> +x
+// / --> +x
 //-----------------------------------------------------------------------------
 void DebugDrawMark(const Vector3D& vOrigin, float flRadius, const Color c, const bool bZBuffer)
 {
@@ -1285,15 +1440,15 @@ void DebugDrawMark(const Vector3D& vOrigin, float flRadius, const Color c, const
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: render star:
-// +z     _+y
+// Purpose: render star
+// +z _+y
 // |      /|
 // |     /
-//   \  /--> +r
+// \ /--> +r
 // ___\/___
 //    /\
 //   /  \
-//       --> +x
+// --> +x
 //-----------------------------------------------------------------------------
 void DrawStar(const Vector3D& vOrigin, const float flRadius, const bool bZBuffer)
 {
@@ -1306,8 +1461,8 @@ void DrawStar(const Vector3D& vOrigin, const float flRadius, const bool bZBuffer
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: render arrow:
-// +z     _+y
+// Purpose: render arrow
+// +z _+y
 // |      /|
 // |  .  /
 // | / \
@@ -1315,7 +1470,7 @@ void DrawStar(const Vector3D& vOrigin, const float flRadius, const bool bZBuffer
 // /_____\ --> r
 //    |
 //    |
-//    |   --> +x
+// | --> +x
 //-----------------------------------------------------------------------------
 void DebugDrawArrow(const Vector3D& vOrigin, const Vector3D& vEnd, const float flArraySize, const Color color, const bool bZBuffer)
 {
@@ -1327,15 +1482,14 @@ void DebugDrawArrow(const Vector3D& vOrigin, const Vector3D& vEnd, const float f
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: render 3d axis:
+// Purpose: render 3d axis
 // +z
-// ^
-// |   _+y
+// | _+y
 // |   /|
 // |  /
 // | /
 // |/
-// +----------> +x
+// +------> +x
 //-----------------------------------------------------------------------------
 void DebugDrawAxis(const Vector3D& vOrigin, const QAngle& vAngles, const float flScale, const bool bZBuffer)
 {

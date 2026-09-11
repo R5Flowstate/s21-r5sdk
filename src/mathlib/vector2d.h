@@ -1,6 +1,6 @@
-﻿//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //
@@ -19,7 +19,7 @@
 // For vec_t, put this somewhere else?
 #include "tier0/basetypes.h"
 
-// For RandomFloat()
+// For RandomFloat
 #include "vstdlib/random.h"
 
 #include "tier0/dbg.h"

@@ -72,7 +72,7 @@ enum netsocket_e
 	NS_SERVER,		// server socket
 
 	// unknown as this seems unused in R5, but if the socket equals to this in
-	// CServer::ConnectionlessPacketHandler() in case C2S_Challenge, the packet
+	// CServer::ConnectionlessPacketHandler in case C2S_Challenge, the packet
 	// sent back won't be encrypted
 	NS_UNK0,
 

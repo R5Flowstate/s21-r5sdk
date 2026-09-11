@@ -1,6 +1,6 @@
-﻿//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
-// Purpose:
+// Purpose
 //
 //=============================================================================//
 
@@ -365,7 +365,7 @@ void CMemoryStack::SetAllocOwner( const char *pszAllocOwner )
 
 void CMemoryStack::RegisterAllocation()
 {
-	// 'physical' allocations on PS3 come from RSX local memory, so we don't count them here:
+	// 'physical' allocations on PS3 come from RSX local memory, so we don't count them here
 	if ( IsPS3() && m_bPhysical )
 		return;
 
@@ -387,7 +387,7 @@ void CMemoryStack::RegisterAllocation()
 
 void CMemoryStack::RegisterDeallocation( bool bShouldSpewSize )
 {
-	// 'physical' allocations on PS3 come from RSX local memory, so we don't count them here:
+	// 'physical' allocations on PS3 come from RSX local memory, so we don't count them here
 	if ( IsPS3() && m_bPhysical )
 		return;
 
@@ -441,31 +441,21 @@ void CMemoryStack::Access( void **ppRegion, uint64 *pBytes )
 	*pBytes = ( m_pNextAlloc - m_pBase);
 }
 
-//const char* CMemoryStack::GetMemoryName() const
-//{
+//const char* CMemoryStack::GetMemoryName const
 //	return m_pszAllocOwner;
-//}
 //
-//size_t CMemoryStack::GetAllocatedBytes() const
-//{
-//	return GetUsed();
-//}
+//size_t CMemoryStack::GetAllocatedBytes const
+//	return GetUsed;
 //
-//size_t CMemoryStack::GetCommittedBytes() const
-//{
-//	return GetSize();
-//}
+//size_t CMemoryStack::GetCommittedBytes const
+//	return GetSize;
 //
-//size_t CMemoryStack::GetReservedBytes() const
-//{
-//	return GetMaxSize();
-//}
+//size_t CMemoryStack::GetReservedBytes const
+//	return GetMaxSize;
 
-//size_t CMemoryStack::GetHighestBytes() const
-//{
+//size_t CMemoryStack::GetHighestBytes const
 //	size_t highest = m_pHighestAllocLimit - m_pBase;
 //	return highest;
-//}
 
 //-------------------------------------
 

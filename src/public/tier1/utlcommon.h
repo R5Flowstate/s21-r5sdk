@@ -102,14 +102,14 @@ template <typename T> struct DefaultEqualFunctor;
 // into the hash table. If you do roll your own, please read up on
 // bit-mixing and the avalanche property; be sure that your values
 // are reasonably well-distributed across the entire 32-bit range.
-//  http://en.wikipedia.org/wiki/Avalanche_effect
-//  http://home.comcast.net/~bretm/hash/5.html
+// http://en.wikipedia.org/wiki/Avalanche_effect
+// http://home.comcast.net/~bretm/hash/5.html
 // 
 template <typename T> struct DefaultHashFunctor;
 
-// Argument type information. Struct currently contains one or two typedefs:
-//   typename Arg_t = primary argument type. Usually const T&, sometimes T.
-//   typename Alt_t = optional alternate type. Usually *undefined*.
+// Argument type information. Struct currently contains one or two typedefs
+// typename Arg_t = primary argument type. Usually const T&, sometimes T.
+// typename Alt_t = optional alternate type. Usually *undefined*.
 //
 // Any specializations should be implemented via simple inheritance
 // from ArgumentTypeInfoImpl< BestArgType, [optional] AlternateArgType >
@@ -210,7 +210,7 @@ template < typename T > struct DefaultLessFunctor< CUtlConstStringBase<T> > : St
 template < typename T > struct DefaultHashFunctor< CUtlConstStringBase<T> > : StringHashFunctor { };
 
 
-// Helpers to deduce if a type defines a public AltArgumentType_t typedef:
+// Helpers to deduce if a type defines a public AltArgumentType_t typedef
 template < typename T >
 struct HasClassAltArgumentType
 {
@@ -373,7 +373,7 @@ inline unsigned int CaselessStringHashFunctor::operator()( const char* s ) const
 	for ( ; *s; ++s )
 	{
 		uint32 c = (unsigned char) *s;
-		// Brutally fast branchless ASCII tolower():
+		// Brutally fast branchless ASCII tolower
 		// if ((c >= 'A') && (c <= 'Z')) c += ('a' - 'A');
 		c += (((('A'-1) - c) & (c - ('Z'+1))) >> 26) & 32;
 		h = (h ^ c) * 16777619;

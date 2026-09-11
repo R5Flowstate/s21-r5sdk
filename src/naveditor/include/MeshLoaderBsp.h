@@ -32,6 +32,17 @@ public:
 
 	bool load(const std::string& fileName);
 
+	/// Directory of extracted `.rmdl` models, laid out the way RSX writes them
+	/// (`<dir>/<name>/<name>.rmdl`). Empty disables static prop collision, in
+	/// which case a type-9 leaf is counted and skipped.
+	static void setPropModelDir(const std::string& dir);
+	static const std::string& getPropModelDir();
+
+	/// Emit a prop's full detail collision instead of just the coarse hull that
+	/// encases it. Off by default: the envelope is what obstructs an agent, and
+	/// it is ~50x cheaper.
+	static void setPropDetail(bool detail);
+
 	const rdVec3D* getVerts() const { return m_verts.data(); }
 	const rdVec3D* getNormals() const { return m_normals.data(); }
 	const int* getTris() const { return m_tris.data(); }

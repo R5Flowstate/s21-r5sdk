@@ -1,6 +1,6 @@
-﻿//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
-// Purpose: 
+// Purpose
 //
 // $Header: $
 // $NoKeywords: $
@@ -53,7 +53,7 @@ public:
 	// constructor, destructor
 	// Left at growSize = 0, the memory will first allocate 1 element and double in size
 	// at each increment.
-	// LessFunc_t is required, but may be set after the constructor using SetLessFunc() below
+	// LessFunc_t is required, but may be set after the constructor using SetLessFunc below
 	CUtlMap( IndexType_t growSize = 0, IndexType_t initSize = 0, const LessFunc_t &lessfunc = 0 )
 		: m_Tree( growSize, initSize, CKeyLess( lessfunc ) )
 	{
@@ -113,7 +113,7 @@ public:
 	}
 
 	// API to match src2 for Panorama
-	// Note in src2 straight Insert() calls will assert on duplicates
+	// Note in src2 straight Insert calls will assert on duplicates
 	// Choosing not to take that change until discussed further 
 
 	IndexType_t  InsertWithDupes( const KeyType_t &key, const ElemType_t &insert )

@@ -10,6 +10,7 @@ add_sources( SOURCE_GROUP "Engine"
     "clockdriftmgr.h"
     "cmd.cpp"
     "cmd.h"
+    "cmd_frame_queue.h"
     "common.cpp"
     "common.h"
 )
@@ -30,17 +31,14 @@ add_sources( SOURCE_GROUP "Debug"
 )
 
 if( NOT ${PROJECT_NAME} STREQUAL "engine_ds" )
-add_sources( SOURCE_GROUP "Input"
-    "keys.cpp"
-    "keys.h"
+add_sources( SOURCE_GROUP "Debug"
 )
+endif()
 
+if( NOT ${PROJECT_NAME} STREQUAL "engine_ds" )
 add_sources( SOURCE_GROUP "Render"
     "framelimit.cpp"
     "framelimit.h"
-    "gl_drawlights.cpp"
-    "gl_drawlights.h"
-    "gl_matsysiface.h"
     "gl_model_private.h"
     "gl_rmain.cpp"
     "gl_rmain.h"
@@ -48,14 +46,11 @@ add_sources( SOURCE_GROUP "Render"
     "gl_rsurf.h"
     "gl_screen.cpp"
     "gl_screen.h"
-    "matsys_interface.cpp"
-    "matsys_interface.h"
 )
 endif()
 
 add_sources( SOURCE_GROUP "Network"
     "dt_recv.cpp"
-    "datamap.cpp"
     "framesnapshot.h"
     "net.cpp"
     "net.h"
@@ -64,12 +59,54 @@ add_sources( SOURCE_GROUP "Network"
     "networkstringtable.cpp"
     "networkstringtable.h"
     "packed_entity.h"
+    "splitpacket_recv_clamp.cpp"
+    "splitpacket_recv_clamp.h"
     "staticpropmgr.cpp"
     "staticpropmgr.h"
     "staticprop_bounds_debug.cpp"
     "staticprop_bounds_debug.h"
-    # "networkvar.cpp" # TODO: Enable?
 )
+
+if( NOT ${PROJECT_NAME} STREQUAL "engine_ds" )
+add_sources( SOURCE_GROUP "Network"
+    "stringtable_diag.cpp"
+    "stringtable_diag.h"
+    "skinnames_stub.cpp"
+    "skinnames_stub.h"
+    "weapon_precache_redirect.cpp"
+    "weapon_precache_redirect.h"
+)
+endif()
+
+if( ${PROJECT_NAME} STREQUAL "engine_cl" )
+add_sources( SOURCE_GROUP "Network"
+    "client/net_bridge_split.h"
+    "client/net_bridge_process.cpp"
+    "client/net_bridge_c2s.cpp"
+    "client/net_bridge_c2s_reliable.cpp"
+    "client/net_bridge_install.cpp"
+    "client/host_frame_probe.cpp"
+    "client/host_frame_probe.h"
+    "client/net_bridge_internal.h"
+    "client/net_bridge_addrs.h"
+    "client/net_bridge_addrs.cpp"
+    "client/net_bridge_frame.cpp"
+    "client/net_bridge_decode.cpp"
+    "client/net_observer.h"
+    "client/bridge_connect_cmd.cpp"
+    "client/bridge_join_auth.cpp"
+    "client/bridge_join_auth.h"
+    "client/bridge_connect_password.h"
+)
+add_sources( SOURCE_GROUP "Collision"
+    "cmodel_surfdata.cpp"
+    "cmodel_surfdata.h"
+)
+add_sources( SOURCE_GROUP "System"
+    "sys_integrity.cpp"
+    "sys_integrity.h"
+)
+endif()
 
 add_sources( SOURCE_GROUP "Model"
     "cmodel.cpp"
@@ -80,9 +117,14 @@ add_sources( SOURCE_GROUP "Model"
     "modelinfo.h"
     "modelloader.cpp"
     "modelloader.h"
-    "sv_model_precache_ext.cpp"
-    "sv_model_precache_ext.h"
 )
+
+if( NOT ${PROJECT_NAME} STREQUAL "engine_ds" )
+add_sources( SOURCE_GROUP "Model"
+    "mdl_precache_client_grow.cpp"
+    "mdl_precache_client_grow.h"
+)
+endif()
 
 add_sources( SOURCE_GROUP "Host"
     "host.cpp"
@@ -117,26 +159,63 @@ endif()
 
 if( NOT ${PROJECT_NAME} STREQUAL "engine_cl" )
 add_sources( SOURCE_GROUP "Server"
-    "server/persistence.cpp"
     "server/persistence.h"
     "server/server.cpp"
     "server/server.h"
     "server/sv_rcon.cpp"
     "server/sv_rcon.h"
+    "server/sv_rcon_launcher.cpp"
+    "server/sv_rcon_launcher.h"
     "server/sv_main.cpp"
     "server/sv_main.h"
     "server/vengineserver_impl.cpp"
     "server/vengineserver_impl.h"
     "server/datablock_sender.cpp"
     "server/datablock_sender.h"
+    "server/datablock_recv_clamp.cpp"
+    "server/datablock_recv_clamp.h"
+    "server/datablock_oversized.cpp"
+    "server/datablock_oversized.h"
+    "server/connect_password_gate.cpp"
+    "server/connect_password_gate.h"
+    "server/mod_policy_gate.cpp"
+    "server/mod_policy_gate.h"
+    "server/netchan_relrecv_free.cpp"
+    "server/netchan_relrecv_free.h"
+    "server/snapshot_diag.cpp"
+    "server/snapshot_diag.h"
+    "server/snapshot_dump.cpp"
+    "server/snapshot_dump.h"
+    "server/snapshot_send.cpp"
+    "server/snapshot_send.h"
+    "server/snapshot_ring.cpp"
+    "server/snapshot_ring.h"
+    "server/snapshot_ack_diag.cpp"
+    "server/snapshot_ack_diag.h"
+    "server/snapshot_writer.cpp"
+    "server/snapshot_writer.h"
+    "server/ack_gate_relax.cpp"
+    "server/ack_gate_relax.h"
+    "server/edict_reserve.cpp"
+    "server/edict_reserve.h"
+    "server/offhand_dt_resize.cpp"
+    "server/offhand_dt_resize.h"
+    "server/skinnames_table_inject.cpp"
+    "server/skinnames_table_inject.h"
+    "server/stringtable_baseline_grow.cpp"
+    "server/stringtable_baseline_grow.h"
+    "server/precache_natives.cpp"
+    "server/precache_natives.h"
+    "server/audio_digest_expand.cpp"
+    "server/audio_digest_expand.h"
+    "server/zipline_validation.cpp"
+    "server/zipline_validation.h"
 )
 endif()
 
 add_sources( SOURCE_GROUP "Client"
     "client/cdll_engine_int.cpp"
     "client/cdll_engine_int.h"
-    "client/cl_ents_parse.cpp"
-    "client/cl_ents_parse.h"
     "client/client.cpp"
     "client/client.h"
 )
@@ -149,33 +228,24 @@ add_sources( SOURCE_GROUP "Shared"
     "shared/datablock.cpp"
     "shared/datablock.h"
     "shared/ents_shared.h"
+    "shared/s21_bridge_compat.h"
 )
 
 if( NOT ${PROJECT_NAME} STREQUAL "engine_ds" )
 add_sources( SOURCE_GROUP "Client" # Client only.
     "client/clientstate.cpp"
     "client/clientstate.h"
-    "client/discord_ipc.cpp"
-    "client/discord_ipc.h"
-    "client/discord_presence.cpp"
-    "client/discord_presence.h"
-    "client/discord_rpc_wrapper.cpp"
-    "client/discord_rpc_wrapper.h"
-    "client/cl_main.cpp"
     "client/cl_main.h"
-    "client/cl_splitscreen.cpp"
     "client/cl_splitscreen.h"
     "client/cl_rcon.cpp"
     "client/cl_rcon.h"
+    "client/cl_rcon_launcher.cpp"
+    "client/cl_rcon_launcher.h"
     "client/vengineclient_impl.cpp"
     "client/vengineclient_impl.h"
     "client/datablock_receiver.cpp"
     "client/datablock_receiver.h"
-    "client/community_party.cpp"
-    "client/community_party.h"
-    "client/steam_integration.cpp"
-    "client/steam_integration.h"
-    "client/steam_api_wrapper.cpp"
+    "client/bridge_flag_set.h"
 )
 
 add_sources( SOURCE_GROUP "GameUI"
@@ -183,14 +253,14 @@ add_sources( SOURCE_GROUP "GameUI"
     "${ENGINE_SOURCE_DIR}/gameui/IBrowser.h"
     "${ENGINE_SOURCE_DIR}/gameui/IConsole.cpp"
     "${ENGINE_SOURCE_DIR}/gameui/IConsole.h"
-    "${ENGINE_SOURCE_DIR}/gameui/IParticleOverlay.cpp"
-    "${ENGINE_SOURCE_DIR}/gameui/IParticleOverlay.h"
     "${ENGINE_SOURCE_DIR}/gameui/IStreamOverlay.cpp"
     "${ENGINE_SOURCE_DIR}/gameui/IStreamOverlay.h"
 	"${ENGINE_SOURCE_DIR}/gameui/ITopBar.cpp"
 	"${ENGINE_SOURCE_DIR}/gameui/ITopBar.h"
 	"${ENGINE_SOURCE_DIR}/gameui/IDevMenu.cpp"
 	"${ENGINE_SOURCE_DIR}/gameui/IDevMenu.h"
+	"${ENGINE_SOURCE_DIR}/gameui/IDlssNrMenu.cpp"
+	"${ENGINE_SOURCE_DIR}/gameui/IDlssNrMenu.h"
 
     "${ENGINE_SOURCE_DIR}/gameui/imgui_system.cpp"
     "${ENGINE_SOURCE_DIR}/gameui/imgui_system.h"
@@ -211,6 +281,19 @@ add_sources( SOURCE_GROUP "Windows"
     "${ENGINE_SOURCE_DIR}/windows/system.cpp"
     "${ENGINE_SOURCE_DIR}/windows/system.h"
 )
+
+if( ${PROJECT_NAME} STREQUAL "engine_cl" )
+add_sources( SOURCE_GROUP "Windows"
+    "${ENGINE_SOURCE_DIR}/windows/framegen.cpp"
+    "${ENGINE_SOURCE_DIR}/windows/framegen.h"
+    "${ENGINE_SOURCE_DIR}/windows/dlssnr.cpp"
+    "${ENGINE_SOURCE_DIR}/windows/dlssnr.h"
+    "${ENGINE_SOURCE_DIR}/windows/dlss_sr.cpp"
+    "${ENGINE_SOURCE_DIR}/windows/dlss_sr.h"
+    "${ENGINE_SOURCE_DIR}/windows/pso_cache.cpp"
+    "${ENGINE_SOURCE_DIR}/windows/pso_cache.h"
+)
+endif()
 
 add_sources( SOURCE_GROUP "Common"
     "${ENGINE_SOURCE_DIR}/common/callback.cpp"
@@ -258,81 +341,13 @@ target_compile_definitions( ${PROJECT_NAME} PRIVATE
 )
 endif()
 
-# Auto-detect Steamworks support (checks for SDK availability)
-if( DEFINED ENV{STEAM_SDK_DIR} )
-    set(STEAM_SDK_DIR $ENV{STEAM_SDK_DIR})
-endif()
-
-if( NOT STEAM_SDK_DIR AND EXISTS "${THIRDPARTY_SOURCE_DIR}/steamworks/sdk" )
-    set(STEAM_SDK_DIR "${THIRDPARTY_SOURCE_DIR}/steamworks/sdk")
-endif()
-
-# Auto-enable Steamworks if SDK is found and required files exist
-set(USE_STEAMWORKS OFF)
-if( STEAM_SDK_DIR AND EXISTS "${STEAM_SDK_DIR}/public/steam/steam_api.h" )
-    if( WIN32 )
-        if( CMAKE_SIZEOF_VOID_P EQUAL 8 )
-            set(_STEAM_LIB_CHECK "${STEAM_SDK_DIR}/redistributable_bin/win64/steam_api64.lib")
-        else()
-            set(_STEAM_LIB_CHECK "${STEAM_SDK_DIR}/redistributable_bin/steam_api.lib")
-        endif()
-        if( EXISTS "${_STEAM_LIB_CHECK}" )
-            set(USE_STEAMWORKS ON)
-        endif()
-    else()
-        # For non-Windows platforms, just check for header existence
-        set(USE_STEAMWORKS ON)
-    endif()
-endif()
-
-if( USE_STEAMWORKS AND STEAM_SDK_DIR )
-    message(STATUS "Auto-detected Steamworks SDK - Building with Steamworks from: ${STEAM_SDK_DIR}")
-else()
-    message(STATUS "Steamworks SDK not found - Building without Steamworks support")
-endif()
-
-if( USE_STEAMWORKS AND STEAM_SDK_DIR )
-    if( NOT ${PROJECT_NAME} STREQUAL "engine_ds" )
-        # Add USE_STEAMWORKS define to all files in the target
-        target_compile_definitions(${PROJECT_NAME} PRIVATE USE_STEAMWORKS)
-        
-        # Exclude steam_api_wrapper.cpp from precompiled headers to avoid type conflicts
-        # between r5sdk's sdkint.h and Steam's steamtypes.h
-        set_source_files_properties(
-            "client/steam_api_wrapper.cpp"
-            PROPERTIES
-            SKIP_PRECOMPILE_HEADERS ON
-            INCLUDE_DIRECTORIES "${STEAM_SDK_DIR}/public;${STEAM_SDK_DIR}/public/steam"
-        )
-        if( WIN32 )
-            if( CMAKE_SIZEOF_VOID_P EQUAL 8 )
-                set(_STEAM_IMP "${STEAM_SDK_DIR}/redistributable_bin/win64/steam_api64.lib")
-            else()
-                set(_STEAM_IMP "${STEAM_SDK_DIR}/redistributable_bin/steam_api.lib")
-            endif()
-            if( EXISTS "${_STEAM_IMP}" )
-                if( NOT TARGET steamworks_api )
-                    add_library(steamworks_api SHARED IMPORTED GLOBAL)
-                    set_target_properties(steamworks_api PROPERTIES IMPORTED_IMPLIB "${_STEAM_IMP}")
-                endif()
-                # PUBLIC so dependents (e.g., gamesdk) pick up the absolute path to the import lib
-                target_link_libraries( ${PROJECT_NAME} PUBLIC steamworks_api )
-            else()
-                message(WARNING "Steamworks library not found at: ${_STEAM_IMP}")
-            endif()
-        endif()
-    endif()
-endif()
-
 target_include_directories( ${PROJECT_NAME} PRIVATE
     "${THIRDPARTY_SOURCE_DIR}/recast/"
     "${THIRDPARTY_SOURCE_DIR}/mbedtls/include"
+    "${THIRDPARTY_SOURCE_DIR}/fidelityfx/"
 )
-
-# Discord Rich Presence is built-in using native IPC (no external DLL required)
 
 endmacro()
 
-add_engine_project( "engine" )
 add_engine_project( "engine_ds" )
 add_engine_project( "engine_cl" )

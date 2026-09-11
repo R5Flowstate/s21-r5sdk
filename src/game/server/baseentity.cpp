@@ -5,8 +5,11 @@
 //===============================================================================
 #include "core/stdafx.h"
 #include "baseentity.h"
+#include "baseanimating.h"
+#include "entitylist.h"
 #include "engine/gl_model_private.h"
 #include "engine/modelinfo.h"
+#include "tier1/convar.h"
 
 //-----------------------------------------------------------------------------
 // 

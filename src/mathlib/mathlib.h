@@ -1,6 +1,6 @@
-﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 //===========================================================================//
 
@@ -167,7 +167,7 @@ struct matrix3x4_t
 
 	inline void SetToIdentity();
 
-	/// multiply the scale/rot part of the matrix by a constant. This doesn't init the matrix ,
+	/// multiply the scale/rot part of the matrix by a constant. This doesn't init the matrix,
 	/// just scale in place. So if you want to construct a scaling matrix, init to identity and
 	/// then call this.
 	FORCEINLINE void ScaleUpper3x3Matrix(float flScale);
@@ -264,7 +264,7 @@ class ALIGN16 matrix3x4a_t : public matrix3x4_t
 {
 public:
 	/*
-	matrix3x4a_t() { if (((size_t)Base()) % 16 != 0) { Error( "matrix3x4a_t missaligned" ); } }
+	matrix3x4a_t { if (((size_t)Base) % 16 != 0) { Error( "matrix3x4a_t missaligned" ); } }
 	*/
 	matrix3x4a_t(const matrix3x4_t& src) { *this = src; };
 	matrix3x4a_t& operator=(const matrix3x4_t& src) { memcpy(Base(), src.Base(), sizeof(float) * 3 * 4); return *this; };
@@ -394,7 +394,7 @@ FORCEINLINE void VectorScale(const float* in, vec_t scale, float* out)
 }
 
 
-// Cannot be forceinline as they have overloads:
+// Cannot be forceinline as they have overloads
 inline void VectorFill(vec_t* a, float b)
 {
 	a[0] = a[1] = a[2] = b;
@@ -408,7 +408,7 @@ inline void VectorNegate(vec_t* a)
 }
 
 
-//#define VectorMaximum(a)		( max( (a)[0], max( (a)[1], (a)[2] ) ) )
+//#define VectorMaximum(a) ( max( (a)[0], max( (a)[1], (a)[2] ) ) )
 #define Vector2Clear(x)			{(x)[0]=(x)[1]=0;}
 #define Vector2Negate(x)		{(x)[0]=-((x)[0]);(x)[1]=-((x)[1]);}
 #define Vector2Copy(a,b)		{(b)[0]=(a)[0];(b)[1]=(a)[1];}
@@ -500,7 +500,7 @@ void inline SinCos(float radians, float* RESTRICT sine, float* RESTRICT cosine)
 
 	*sine = s.f[0];
 	*cosine = c.f[0];
-#else //__GNUC__ == 4 && __GNUC_MINOR__ == 1 && __GNUC_PATCHLEVEL__ == 1
+#else
 	vector_float_union r;
 	vector_float_union s;
 	vector_float_union c;
@@ -519,7 +519,7 @@ void inline SinCos(float radians, float* RESTRICT sine, float* RESTRICT cosine)
 
 	*sine = s.f[0];
 	*cosine = c.f[0];
-#endif //__GNUC__ == 4 && __GNUC_MINOR__ == 1 && __GNUC_PATCHLEVEL__ == 1
+#endif
 #elif defined( COMPILER_MSVC32 )
 	_asm
 	{
@@ -597,7 +597,7 @@ FORCEINLINE bool IsPowerOfTwo(uint x)
 // return the smallest power of two >= x.
 // returns 0 if x == 0 or x > 0x80000000 (ie numbers that would be negative if x was signed)
 // NOTE: the old code took an int, and if you pass in an int of 0x80000000 casted to a uint,
-//       you'll get 0x80000000, which is correct for uints, instead of 0, which was correct for ints
+// you'll get 0x80000000, which is correct for uints, instead of 0, which was correct for ints
 FORCEINLINE uint SmallestPowerOfTwoGreaterOrEqual(uint x)
 {
 	x -= 1;
@@ -662,6 +662,10 @@ QAngle TransformAnglesToWorldSpace(const QAngle& angles, const matrix3x4_t& pare
 void MatrixInitialize(matrix3x4_t& mat, const Vector3D& vecOrigin, const Vector3D& vecXAxis, const Vector3D& vecYAxis, const Vector3D& vecZAxis);
 void MatrixCopy(const matrix3x4_t& in, matrix3x4_t& out);
 void MatrixInvert(const matrix3x4_t& in, matrix3x4_t& out);
+// MatrixInvert above is the transpose-invert: valid only for an orthonormal
+// input. This one is the adjugate/determinant inverse and handles a scaled or
+// sheared basis. (VMatrix has its own 4x4 MatrixInverseGeneral in vmatrix.h.)
+void MatrixInvertGeneral(const matrix3x4_t& in, matrix3x4_t& out);
 
 // Matrix equality test
 bool MatricesAreEqual(const matrix3x4_t& src1, const matrix3x4_t& src2, float flTolerance = 1e-5);
@@ -1055,14 +1059,14 @@ FORCEINLINE float Sqr(float f)
 
 // 5-argument floating point linear interpolation.
 // FLerp(f1,f2,i1,i2,x)=
-//    f1 at x=i1
-//    f2 at x=i2
-//   smooth lerp between f1 and f2 at x>i1 and x<i2
-//   extrapolation for x<i1 or x>i2
+// f1 at x=i1
+// f2 at x=i2
+// smooth lerp between f1 and f2 at x>i1 and x<i2
+// extrapolation for x<i1 or x>i2
 //
-//   If you know a function f(x)'s value (f1) at position i1, and its value (f2) at position i2,
-//   the function can be linearly interpolated with FLerp(f1,f2,i1,i2,x)
-//    i2=i1 will cause a divide by zero.
+// If you know a function f(x)'s value (f1) at position i1, and its value (f2) at position i2,
+// the function can be linearly interpolated with FLerp(f1,f2,i1,i2,x)
+// i2=i1 will cause a divide by zero.
 static inline float FLerp(float f1, float f2, float i1, float i2, float x)
 {
 	return f1 + (f2 - f1) * (x - i1) / (i2 - i1);
@@ -1071,7 +1075,7 @@ static inline float FLerp(float f1, float f2, float i1, float i2, float x)
 
 #ifndef VECTOR_NO_SLOW_OPERATIONS
 
-// YWB:  Specialization for interpolating euler angles via quaternions...
+// YWB: Specialization for interpolating euler angles via quaternions...
 template<> FORCEINLINE QAngle Lerp<QAngle>(float flPercent, const QAngle& q1, const QAngle& q2)
 {
 	// Avoid precision errors
@@ -1151,20 +1155,20 @@ template <class T> FORCEINLINE T AVG(T a, T b)
 
 inline float Sign(float x)
 {
-	return fsel(x, 1.0f, -1.0f); // x >= 0 ? 1.0f : -1.0f
-	//return (x <0.0f) ? -1.0f : 1.0f;
+	return fsel(x, 1.0f, -1.0f); // x >= 0 ? 1.0f: -1.0f
+	//return (x <0.0f) ? -1.0f: 1.0f;
 }
 
 //
 // Clamps the input integer to the given array bounds.
-// Equivalent to the following, but without using any branches:
+// Equivalent to the following, but without using any branches
 //
 // if( n < 0 ) return 0;
 // else if ( n > maxindex ) return maxindex;
 // else return n;
 //
 // This is not always a clear performance win, but when you have situations where a clamped 
-// value is thrashing against a boundary this is a big win. (ie, valid, invalid, valid, invalid, ...)
+// value is thrashing against a boundary this is a big win. (ie, valid, invalid, valid, invalid,...)
 //
 // Note: This code has been run against all possible integers.
 //
@@ -1315,7 +1319,7 @@ inline void VectorTransform(const Vector3D& in1, const matrix3x4_t& in2, Vector3
 }
 
 // MSVC folds the return value nicely and creates no temporaries on the stack,
-//    we need more experiments with different compilers and in different circumstances
+// we need more experiments with different compilers and in different circumstances
 inline const Vector3D VectorTransform(const Vector3D& in1, const matrix3x4_t& in2)
 {
 	Vector3D out;
@@ -1435,7 +1439,7 @@ void AddPointToBounds(const Vector3D& v, Vector3D& mins, Vector3D& maxs);
 
 //-----------------------------------------------------------------------------
 // Ensures that the min and max bounds values are valid. 
-// (ClearBounds() sets min > max, which is clearly invalid.)
+// (ClearBounds sets min > max, which is clearly invalid.)
 //-----------------------------------------------------------------------------
 bool AreBoundsValid(const Vector3D& vMin, const Vector3D& vMax);
 
@@ -1504,9 +1508,8 @@ void VectorYawRotate(const Vector3D& in, float flYaw, Vector3D& out);
 // The curve is biased towards 0 or 1 based on biasAmt, which is between 0 and 1.
 // Lower values of biasAmt bias the curve towards 0 and higher values bias it towards 1.
 //
-// For example, with biasAmt = 0.2, the curve looks like this:
+// For example, with biasAmt = 0.2, the curve looks like this
 //
-// 1
 // |                  *
 // |                  *
 // |                 *
@@ -1515,12 +1518,11 @@ void VectorYawRotate(const Vector3D& in, float flYaw, Vector3D& out);
 // |         ****
 // |*********
 // |___________________
-// 0                   1
+// 0 1
 //
 //
-// With biasAmt = 0.8, the curve looks like this:
+// With biasAmt = 0.8, the curve looks like this
 //
-// 1
 // |    **************
 // |  **
 // | * 
@@ -1529,7 +1531,7 @@ void VectorYawRotate(const Vector3D& in, float flYaw, Vector3D& out);
 // |* 
 // |*  
 // |___________________
-// 0                   1
+// 0 1
 //
 // With a biasAmt of 0.5, Bias returns X.
 float Bias(float x, float biasAmt);
@@ -1538,9 +1540,8 @@ float Bias(float x, float biasAmt);
 // Gain is similar to Bias, but biasAmt biases towards or away from 0.5.
 // Lower bias values bias towards 0.5 and higher bias values bias away from it.
 //
-// For example, with biasAmt = 0.2, the curve looks like this:
+// For example, with biasAmt = 0.2, the curve looks like this
 //
-// 1
 // |                  *
 // |                 *
 // |                **
@@ -1549,12 +1550,11 @@ float Bias(float x, float biasAmt);
 // | *
 // |*
 // |___________________
-// 0                   1
+// 0 1
 //
 //
-// With biasAmt = 0.8, the curve looks like this:
+// With biasAmt = 0.8, the curve looks like this
 //
-// 1
 // |            *****
 // |         ***
 // |        *
@@ -1563,7 +1563,7 @@ float Bias(float x, float biasAmt);
 // |     ***
 // |*****
 // |___________________
-// 0                   1
+// 0 1
 float Gain(float x, float biasAmt);
 
 
@@ -1571,9 +1571,8 @@ float Gain(float x, float biasAmt);
 // where the derivatives of the function at 0 and 1 (and 0.5) are 0. This is useful for
 // any fadein/fadeout effect where it should start and end smoothly.
 //
-// The curve looks like this:
+// The curve looks like this
 //
-// 1
 // |        **
 // |       *  *
 // |      *    *
@@ -1582,18 +1581,18 @@ float Gain(float x, float biasAmt);
 // |   **        **
 // |***            ***
 // |___________________
-// 0                   1
+// 0 1
 //
 float SmoothCurve(float x);
 
 
-// This works like SmoothCurve, with two changes:
+// This works like SmoothCurve, with two changes
 //
 // 1. Instead of the curve peaking at 0.5, it will peak at flPeakPos.
-//    (So if you specify flPeakPos=0.2, then the peak will slide to the left).
+// (So if you specify flPeakPos=0.2, then the peak will slide to the left).
 //
 // 2. flPeakSharpness is a 0-1 value controlling the sharpness of the peak.
-//    Low values blunt the peak and high values sharpen the peak.
+// Low values blunt the peak and high values sharpen the peak.
 float SmoothCurve_Tweak(float x, float flPeakPos = 0.5, float flPeakSharpness = 0.5);
 
 
@@ -1603,7 +1602,6 @@ float SmoothCurve_Tweak(float x, float flPeakPos = 0.5, float flPeakSharpness = 
 // halflife is time for value to reach 50%
 inline float ExponentialDecay(float halflife, float dt)
 {
-	// log(0.5) == -0.69314718055994530941723212145818
 	return expf(-0.69314718f / halflife * dt);
 }
 
@@ -1622,7 +1620,7 @@ inline float ExponentialDecayIntegral(float decayTo, float decayTime, float dt)
 }
 
 // hermite basis function for smooth interpolation
-// Similar to Gain() above, but very cheap to call
+// Similar to Gain above, but very cheap to call
 // value should be between 0 & 1 inclusive
 inline float SimpleSpline(float value)
 {
@@ -1795,7 +1793,7 @@ FORCEINLINE bool IsIntegralValue(float flValue, float flTolerance = 0.001f)
 	return fabs(RoundFloatToInt(flValue) - flValue) < flTolerance;
 }
 
-// Fast, accurate ftol:
+// Fast, accurate ftol
 FORCEINLINE int Float2Int(float a)
 {
 #if defined( _X360 )
@@ -1891,9 +1889,9 @@ FORCEINLINE unsigned char FastFToC(float c)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Bound input float to .001 (millisecond) boundary
-// Input  : in - 
-// Output : inline float
+// Purpose: Bound input float to.001 (millisecond) boundary
+// Input: in - 
+// Output: inline float
 //-----------------------------------------------------------------------------
 inline float ClampToMsec(float in)
 {
@@ -1952,7 +1950,7 @@ inline void GetBarycentricCoords2D(
 	float invTriArea = 1.0f / TriArea2DTimesTwo(A, B, C);
 
 	// NOTE: We assume here that the lightmap coordinate vertices go counterclockwise.
-	// If not, TriArea2D() is negated so this works out right.
+	// If not, TriArea2D is negated so this works out right.
 	bcCoords[0] = TriArea2DTimesTwo(B, C, pt) * invTriArea;
 	bcCoords[1] = TriArea2DTimesTwo(C, A, pt) * invTriArea;
 	bcCoords[2] = TriArea2DTimesTwo(A, B, pt) * invTriArea;
@@ -2008,7 +2006,7 @@ FORCEINLINE float LinearToVertexLight(float f)
 	// assume 0..4 range
 	int i = RoundFloatToInt(f * 1024.f);
 
-	// Presumably the common case will be not to clamp, so check that first:
+	// Presumably the common case will be not to clamp, so check that first
 	if ((unsigned)i > 4095)
 	{
 		if (i < 0)
@@ -2028,7 +2026,7 @@ FORCEINLINE unsigned char LinearToLightmap(float f)
 	// Gotta clamp before the multiply; could overflow...
 	int i = RoundFloatToInt(f * 1024.f);	// assume 0..4 range
 
-	// Presumably the common case will be not to clamp, so check that first:
+	// Presumably the common case will be not to clamp, so check that first
 	if ((unsigned)i > 4095)
 	{
 		if (i < 0)
@@ -2183,8 +2181,8 @@ void Hermite_Spline(
 
 // See http://en.wikipedia.org/wiki/Kochanek-Bartels_curves
 // 
-// Tension:  -1 = Round -> 1 = Tight
-// Bias:     -1 = Pre-shoot (bias left) -> 1 = Post-shoot (bias right)
+// Tension: -1 = Round -> 1 = Tight
+// Bias: -1 = Pre-shoot (bias left) -> 1 = Post-shoot (bias right)
 // Continuity: -1 = Box corners -> 1 = Inverted corners
 //
 // If T=B=C=0 it's the same matrix as Catmull-Rom.
@@ -2358,10 +2356,10 @@ void RotationDelta(const QAngle& srcAngles, const QAngle& destAngles, QAngle* ou
 
 //-----------------------------------------------------------------------------
 // Clips a line segment such that only the portion in the positive half-space
-// of the plane remains.  If the segment is entirely clipped, the vectors
+// of the plane remains. If the segment is entirely clipped, the vectors
 // are set to vec3_invalid (all components are FLT_MAX).
 //
-// flBias is added to the dot product with the normal.  A positive bias 
+// flBias is added to the dot product with the normal. A positive bias 
 // results in a more inclusive positive half-space, while a negative bias
 // results in a more exclusive positive half-space.
 //-----------------------------------------------------------------------------
@@ -2416,7 +2414,7 @@ void IRotateAABB(const matrix3x4_t& in1, const Vector3D& vecMinsIn, const Vector
 //-----------------------------------------------------------------------------
 inline void MatrixTransformPlane(const matrix3x4_t& src, const cplane_t& inPlane, cplane_t& outPlane)
 {
-	// What we want to do is the following:
+	// What we want to do is the following
 	// 1) transform the normal into the new space.
 	// 2) Determine a point on the old plane given by plane dist * plane normal
 	// 3) Transform that point into the new space
@@ -2584,7 +2582,7 @@ FORCEINLINE unsigned int* PackNormal_SHORT2(float nx, float ny, float nz, unsign
 
 	ny *= binormalSign;			// Set the sign bit for the binormal (use when encoding a tangent vector)
 
-	// FIXME: short math is slow on 360 - use ints here instead (bit-twiddle to deal w/ the sign bits), also use Float2Int()
+	// FIXME: short math is slow on 360 - use ints here instead (bit-twiddle to deal w/ the sign bits), also use Float2Int
 	short sX = (short)nx;		// signed short [1,32767]
 	short sY = (short)ny;
 
@@ -2716,10 +2714,10 @@ FORCEINLINE unsigned int* PackNormal_UBYTE4(const float* pNormal, unsigned int* 
 
 FORCEINLINE void RGB2YUV(int& nR, int& nG, int& nB, float& fY, float& fU, float& fV, bool bApplySaturationCurve)
 {
-	// YUV conversion:
-	//  |Y|   |  0.299f     0.587f     0.114f   |   |R|
-	//  |U| = | -0.14713f  -0.28886f   0.436f   | x |G|
-	//  |V|   |  0.615f    -0.51499f  -0.10001f |   |B|
+	// YUV conversion
+	// |Y| | 0.299f 0.587f 0.114f | |R|
+	// |U| = | -0.14713f -0.28886f 0.436f | x |G|
+	// |V| | 0.615f -0.51499f -0.10001f | |B|
 	//
 	// The coefficients in the first row sum to one, whereas the 2nd and 3rd rows each sum to zero (UV (0,0) means greyscale).
 	// Ranges are Y [0,1], U [-0.436,+0.436] and V [-0.615,+0.615].
@@ -2788,7 +2786,7 @@ inline float FastLog2(float i) { return logbf(i); }			// log2( i )
 inline float FastPow2(float i) { return exp2f(i); }			// 2^i
 inline float FastPow(float a, float b) { return powf(a, b); }	// a^b
 #define LOGBASE2OF10 3.3219280948873623478703194294893901758648313930
-inline float FastPow10(float i) { return exp2f(i * LOGBASE2OF10); }			// 10^i, transform to base two, so log2(10^y) = y log2(10) . log2(10) = 3.3219280948873623478703194294893901758648313930
+inline float FastPow10(float i) { return exp2f(i * LOGBASE2OF10); }			// 10^i, transform to base two, so log2(10^y) = y log2(10). log2(10) = 3.3219280948873623478703194294893901758648313930
 #endif
 
 //-----------------------------------------------------------------------------
@@ -2845,7 +2843,7 @@ inline float Approach(float target, float value, float speed)
 #if defined(_X360) || defined( _PS3 ) // use conditional move for speed on 360
 
 	return fsel(delta - speed,	// delta >= speed ?
-		value + speed,	// if delta == speed, then value + speed == value + delta == target  
+		value + speed,	// if delta == speed, then value + speed == value + delta == target 
 		fsel((-speed) - delta, // delta <= -speed
 			value - speed,
 			target)
@@ -3114,32 +3112,32 @@ inline float matrix3x4_t::GetSylvestersCriterion()const
 
 
 
-// Generate the corner points of a box:
-// +y       _+z
-// ^        /|
+// Generate the corner points of a box
+// +y _+z
+// ^ /|
 // |       /
-// |  3---7   
+// | 3---7 
 //   /|  /|
 //  / | / |
-// 2---6  |
-// |  1|--5
+// 2---6 |
+// | 1|--5
 // | / | /
 // |/  |/
-// 0---4   --> +x
+// 0---4 --> +x
 void PointsFromBox(const Vector3D& mins, const Vector3D& maxs, Vector3D* points);
 void BuildTransformedBox(Vector3D* v2, Vector3D const& bbmin, Vector3D const& bbmax, const matrix3x4_t& m);
-// generate the corner points of a angled box:
-// +y*r     _+z*u
-// ^        /|
+// generate the corner points of a angled box
+// +y*r _+z*u
+// ^ /|
 // |       /
-// |  3---7   
+// | 3---7 
 //   /|  /|
 //  / | / |
-// 2---6  |
-// |  1|--5
+// 2---6 |
+// | 1|--5
 // | / | /
 // |/  |/
-// 0---4   --> +x*f
+// 0---4 --> +x*f
 void PointsFromAngledBox(const QAngle& angles, const Vector3D& mins, const Vector3D& maxs, Vector3D* points);
 void BuildTransformedAngledBox(Vector3D* v2, const QAngle& a, Vector3D const& bbmin, Vector3D const& bbmax, const matrix3x4_t& m);
 

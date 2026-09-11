@@ -2,19 +2,10 @@
 //
 // Purpose: builds an intended movement command to send to the server
 //
-// $Workfile:     $
-// $Date:         $
+// $Workfile: $
+// $Date: $
 // $NoKeywords: $
 //=======================================================================================//
 #include "kbutton.h"
 #include "engine/client/cl_splitscreen.h"
 
-kbutton_t::Split_t& kbutton_t::GetPerUser( int nSlot /*=-1*/ )
-{
-	if ( nSlot == -1 )
-	{
-		ASSERT_LOCAL_PLAYER_RESOLVABLE();
-		nSlot = GET_ACTIVE_SPLITSCREEN_SLOT();
-	}
-	return m_PerUser[ nSlot ];
-}

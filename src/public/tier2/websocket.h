@@ -44,7 +44,7 @@ public:
 
 	//-------------------------------------------------------------------------
 	// Connection parameters for the system & each individual connection, if
-	// these are changed, call CWebSocket::UpdateParams() to apply the new
+	// these are changed, call CWebSocket::UpdateParams to apply the new
 	// parameters on the system and each connection
 	//-------------------------------------------------------------------------
 	struct ConnParams_s

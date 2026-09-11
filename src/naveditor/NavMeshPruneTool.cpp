@@ -250,6 +250,7 @@ void NavMeshPruneTool::handleMenu()
 	{
 		pruneUnvisitedTilesAndPolys(nav, m_flags);
 		m_editor->createStaticPathingData();
+		m_editor->invalidateNavMeshCache();
 
 		delete m_flags;
 		m_flags = 0;

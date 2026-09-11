@@ -1,9 +1,9 @@
-﻿//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
 //
-// Purpose: 
+// Purpose
 //
-// $Workfile:     $
-// $Date:         $
+// $Workfile: $
+// $Date: $
 // $NoKeywords: $
 //=============================================================================//
 
@@ -26,7 +26,7 @@
 #define	CONTENTS_SOLID			0x1		// an eye is never valid in a solid
 #define	CONTENTS_WINDOW			0x2		// translucent, but not watery (glass)
 #define	CONTENTS_AUX			0x4
-#define	CONTENTS_GRATE			0x8		// alpha-tested "grate" textures.  Bullets/sight pass through, but solids don't
+#define	CONTENTS_GRATE			0x8		// alpha-tested "grate" textures. Bullets/sight pass through, but solids don't
 #define	CONTENTS_SLIME			0x10
 #define	CONTENTS_WATER			0x20
 #define	CONTENTS_WINDOW_NOCOLLIDE 0x40	// block AI line of sight
@@ -71,7 +71,7 @@
 #define	CONTENTS_BLOCK_PING		0x20000000
 #define CONTENTS_HITBOX			0x40000000	// use accurate hitboxes on trace
 
-// NOTE: These are stored in a short in the engine now.  Don't use more than 16 bits
+// NOTE: These are stored in a short in the engine now. Don't use more than 16 bits
 #define	SURF_LIGHT		0x0001		// value will hold the light strength
 #define	SURF_SKY2D		0x0002		// don't draw, indicates we should skylight + draw 2d sky but not draw the 3D skybox
 #define	SURF_SKY		0x0004		// don't draw, but add to skybox

@@ -18,6 +18,11 @@
 
 #include "Shared/Include/SharedMath.h"
 #include "NavEditor/Include/ChunkyTriMesh.h"
+#include <thread>
+#include <atomic>
+#include <vector>
+#include <algorithm>
+#include <execution>
 
 struct BoundsItem
 {
@@ -25,39 +30,6 @@ struct BoundsItem
 	rdVec3D bmax;
 	int i;
 };
-
-static int compareItemX(const void* va, const void* vb)
-{
-	const BoundsItem* a = (const BoundsItem*)va;
-	const BoundsItem* b = (const BoundsItem*)vb;
-	if (a->bmin.x < b->bmin.x)
-		return -1;
-	if (a->bmin.x > b->bmin.x)
-		return 1;
-	return 0;
-}
-
-static int compareItemY(const void* va, const void* vb)
-{
-	const BoundsItem* a = (const BoundsItem*)va;
-	const BoundsItem* b = (const BoundsItem*)vb;
-	if (a->bmin.y < b->bmin.y)
-		return -1;
-	if (a->bmin.y > b->bmin.y)
-		return 1;
-	return 0;
-}
-
-static int compareItemZ(const void* va, const void* vb)
-{
-	const BoundsItem* a = (const BoundsItem*)va;
-	const BoundsItem* b = (const BoundsItem*)vb;
-	if (a->bmin.z < b->bmin.z)
-		return -1;
-	if (a->bmin.z > b->bmin.z)
-		return 1;
-	return 0;
-}
 
 static void calcExtends(const BoundsItem* items, const int /*nitems*/,
 						const int imin, const int imax,
@@ -100,27 +72,39 @@ inline int longestAxis(float x, float y, float z)
 	return axis;
 }
 
+// Pre-compute how many BVH nodes a subtree of 'count' items will produce.
+static int countSubtreeNodes(int count, int trisPerChunk)
+{
+	if (count <= trisPerChunk)
+		return 1;
+	const int half = count / 2;
+	return 1 + countSubtreeNodes(half, trisPerChunk) + countSubtreeNodes(count - half, trisPerChunk);
+}
+
+// Minimum items to justify spawning a parallel thread for a subtree.
+static const int PARALLEL_THRESHOLD = 32768;
+
 static void subdivide(BoundsItem* items, int nitems, int imin, int imax, int trisPerChunk,
 					  int& curNode, rcChunkyTriMeshNode* nodes, const int maxNodes,
-					  int& curTri, int* outTris, const int* inTris)
+					  int& curTri, int* outTris, const int* inTris, int depth = 0)
 {
 	int inum = imax - imin;
 	int icur = curNode;
-	
+
 	if (curNode >= maxNodes)
 		return;
 
 	rcChunkyTriMeshNode& node = nodes[curNode++];
-	
+
 	if (inum <= trisPerChunk)
 	{
 		// Leaf
 		calcExtends(items, nitems, imin, imax, &node.bmin, &node.bmax);
-		
+
 		// Copy triangles.
 		node.i = curTri;
 		node.n = inum;
-		
+
 		for (int i = imin; i < imax; ++i)
 		{
 			const int* src = &inTris[items[i].i*3];
@@ -135,34 +119,80 @@ static void subdivide(BoundsItem* items, int nitems, int imin, int imax, int tri
 	{
 		// Split
 		calcExtends(items, nitems, imin, imax, &node.bmin, &node.bmax);
-		
-		const int	axis = longestAxis(node.bmax.x - node.bmin.x,
+
+		const int axis = longestAxis(node.bmax.x - node.bmin.x,
 							   node.bmax.y - node.bmin.y,
 							   node.bmax.z - node.bmin.z);
-		
-		if (axis == 0)
+
+		if (inum >= PARALLEL_THRESHOLD)
 		{
-			// Sort along x-axis
-			qsort(items+imin, static_cast<size_t>(inum), sizeof(BoundsItem), compareItemX);
-		}
-		else if (axis == 1)
-		{
-			// Sort along y-axis
-			qsort(items+imin, static_cast<size_t>(inum), sizeof(BoundsItem), compareItemY);
+			// Parallel sort for large subarrays.
+			if (axis == 0)
+				std::sort(std::execution::par, items+imin, items+imax, [](const BoundsItem& a, const BoundsItem& b) { return a.bmin.x < b.bmin.x; });
+			else if (axis == 1)
+				std::sort(std::execution::par, items+imin, items+imax, [](const BoundsItem& a, const BoundsItem& b) { return a.bmin.y < b.bmin.y; });
+			else
+				std::sort(std::execution::par, items+imin, items+imax, [](const BoundsItem& a, const BoundsItem& b) { return a.bmin.z < b.bmin.z; });
 		}
 		else
 		{
-			// Sort along z-axis
-			qsort(items+imin, static_cast<size_t>(inum), sizeof(BoundsItem), compareItemZ);
+			if (axis == 0)
+				std::sort(items+imin, items+imax, [](const BoundsItem& a, const BoundsItem& b) { return a.bmin.x < b.bmin.x; });
+			else if (axis == 1)
+				std::sort(items+imin, items+imax, [](const BoundsItem& a, const BoundsItem& b) { return a.bmin.y < b.bmin.y; });
+			else
+				std::sort(items+imin, items+imax, [](const BoundsItem& a, const BoundsItem& b) { return a.bmin.z < b.bmin.z; });
 		}
-		
+
 		int isplit = imin+inum/2;
-		
-		// Left
-		subdivide(items, nitems, imin, isplit, trisPerChunk, curNode, nodes, maxNodes, curTri, outTris, inTris);
-		// Right
-		subdivide(items, nitems, isplit, imax, trisPerChunk, curNode, nodes, maxNodes, curTri, outTris, inTris);
-		
+
+		const int leftCount = isplit - imin;
+		const int rightCount = imax - isplit;
+
+		// For large subtrees near the top of the tree, recurse in parallel.
+		// Pre-compute node/tri counts so each side writes to non-overlapping ranges.
+		const int leftNodeCount = (leftCount >= PARALLEL_THRESHOLD && depth < 4)
+			? countSubtreeNodes(leftCount, trisPerChunk) : 0;
+		const int rightNodeCount = (leftNodeCount > 0)
+			? countSubtreeNodes(rightCount, trisPerChunk) : 0;
+
+		if (leftNodeCount > 0 && curNode + leftNodeCount + rightNodeCount <= maxNodes)
+		{
+			// Left subtree gets: nodes [curNode .. curNode+leftNodeCount), tris [curTri .. curTri+leftCount)
+			int leftNodeStart = curNode;
+			int leftTriStart = curTri;
+
+			// Right subtree gets: nodes [curNode+leftNodeCount .. ), tris [curTri+leftCount .. )
+			int rightNodeStart = curNode + leftNodeCount;
+			int rightTriStart = curTri + leftCount;
+
+			// Reserve space — advance counters past both subtrees.
+			curNode += leftNodeCount + rightNodeCount;
+			curTri += leftCount + rightCount;
+
+			int leftNode = leftNodeStart;
+			int leftTri = leftTriStart;
+			int rightNode = rightNodeStart;
+			int rightTri = rightTriStart;
+
+			std::thread leftThread([&, imin, isplit, leftNode, leftTri, depth]() mutable {
+				subdivide(items, nitems, imin, isplit, trisPerChunk,
+						  leftNode, nodes, maxNodes, leftTri, outTris, inTris, depth + 1);
+			});
+
+			subdivide(items, nitems, isplit, imax, trisPerChunk,
+					  rightNode, nodes, maxNodes, rightTri, outTris, inTris, depth + 1);
+
+			leftThread.join();
+		}
+		else
+		{
+			// Left
+			subdivide(items, nitems, imin, isplit, trisPerChunk, curNode, nodes, maxNodes, curTri, outTris, inTris, depth + 1);
+			// Right
+			subdivide(items, nitems, isplit, imax, trisPerChunk, curNode, nodes, maxNodes, curTri, outTris, inTris, depth + 1);
+		}
+
 		int iescape = curNode - icur;
 		// Negative index means escape.
 		node.i = -iescape;
@@ -189,26 +219,46 @@ bool rcCreateChunkyTriMesh(const rdVec3D* verts, const int* tris, int ntris,
 	if (!items)
 		return false;
 
-	for (int i = 0; i < ntris; i++)
 	{
-		const int* t = &tris[i*3];
-		BoundsItem& it = items[i];
-		it.i = i;
-		// Calc triangle XYZ bounds.
-		it.bmin.x = it.bmax.x = verts[t[0]].x;
-		it.bmin.y = it.bmax.y = verts[t[0]].y;
-		it.bmin.z = it.bmax.z = verts[t[0]].z;
-		for (int j = 1; j < 3; ++j)
-		{
-			const rdVec3D* v = &verts[t[j]];
-			if (v->x < it.bmin.x) it.bmin.x = v->x;
-			if (v->y < it.bmin.y) it.bmin.y = v->y;
-			if (v->z < it.bmin.z) it.bmin.z = v->z;
+		const int numWorkers = rdMax(1, (int)std::thread::hardware_concurrency() - 1);
+		std::atomic<int> nextChunk(0);
+		const int chunkSize = 4096;
 
-			if (v->x > it.bmax.x) it.bmax.x = v->x;
-			if (v->y > it.bmax.y) it.bmax.y = v->y;
-			if (v->z > it.bmax.z) it.bmax.z = v->z;
-		}
+		auto worker = [&]()
+		{
+			for (;;)
+			{
+				const int start = nextChunk.fetch_add(chunkSize);
+				if (start >= ntris)
+					break;
+				const int end = rdMin(start + chunkSize, ntris);
+				for (int i = start; i < end; i++)
+				{
+					const int* t = &tris[i*3];
+					BoundsItem& it = items[i];
+					it.i = i;
+					it.bmin.x = it.bmax.x = verts[t[0]].x;
+					it.bmin.y = it.bmax.y = verts[t[0]].y;
+					it.bmin.z = it.bmax.z = verts[t[0]].z;
+					for (int j = 1; j < 3; ++j)
+					{
+						const rdVec3D* v = &verts[t[j]];
+						if (v->x < it.bmin.x) it.bmin.x = v->x;
+						if (v->y < it.bmin.y) it.bmin.y = v->y;
+						if (v->z < it.bmin.z) it.bmin.z = v->z;
+						if (v->x > it.bmax.x) it.bmax.x = v->x;
+						if (v->y > it.bmax.y) it.bmax.y = v->y;
+						if (v->z > it.bmax.z) it.bmax.z = v->z;
+					}
+				}
+			}
+		};
+
+		std::vector<std::thread> workers;
+		for (int i = 0; i < numWorkers; i++)
+			workers.emplace_back(worker);
+		for (auto& w : workers)
+			w.join();
 	}
 
 	int curTri = 0;

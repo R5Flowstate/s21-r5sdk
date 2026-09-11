@@ -1,6 +1,6 @@
 //======== Copyright (c) Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose
 //
 //===========================================================================//
 #include "recipientfilter.h"

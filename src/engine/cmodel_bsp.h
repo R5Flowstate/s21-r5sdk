@@ -113,8 +113,6 @@ struct CustomPakData_s
 	bool UnloadAndRemoveNonPreloaded(const bool modsOnly);
 	bool UnloadAndRemovePreloaded();
 
-	PakHandle_t LoadBasePak(const char* const pakFile, const PakType_e type);
-	bool UnloadBasePak(const PakType_e type);
 
 private:
 	bool UnloadAndRemovePak(const int index);

@@ -21,6 +21,7 @@
 #include "Recast/Include/Recast.h"
 #include "Detour/Include/DetourNavMeshQuery.h"
 #include "NavEditor/Include/InputGeom.h"
+#include "NavEditor/Include/MeshLoaderBsp.h"
 #include "NavEditor/Include/TestCase.h"
 #include "NavEditor/Include/Filelist.h"
 #include "NavEditor/Include/Editor_SoloMesh.h"
@@ -135,7 +136,8 @@ void get_model_name(const std::string& nameIn, std::string& nameOut)
 void auto_load(const char* path, BuildContext& ctx, Editor*& editor,InputGeom*& geom, string& meshName)
 {
 	string geom_path = std::string(path);
-	meshName = geom_path.substr(geom_path.rfind("\\") + 1);
+	const size_t slashPos = geom_path.find_last_of("\\/");
+	meshName = (slashPos == string::npos) ? geom_path : geom_path.substr(slashPos + 1);
 	geom = new InputGeom;
 	if (!geom->load(&ctx, geom_path))
 	{
@@ -314,6 +316,13 @@ bool sdl_init(SDL_Window*& window, SDL_Renderer*& renderer, int &width, int &hei
 		return false;
 	}
 
+	if (!initGLExtensions())
+	{
+		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load required GL extensions (VBO support).\n");
+		SDL_Quit();
+		return false;
+	}
+
 	return true;
 }
 
@@ -350,6 +359,43 @@ void draw_background(const GLfloat width, const GLfloat height)
 
 	glEnd();
 	*/
+}
+
+static void printBakeUsage(void)
+{
+	printf(
+		"recast.exe [-console] <input-path> [options]\n"
+		"\n"
+		"options:\n"
+		"  --bounds <minX> <minY> <minZ> <maxX> <maxY> <maxZ>\n"
+		"        Bake volume in world units. Overrides the default (= full mesh extent).\n"
+		"  --hull <name>\n"
+		"        Bake one hull only. Valid names are exactly the g_navMeshNames entries:\n"
+		"        small, med_short, medium, large, extra_large.\n"
+		"  --cell-size <float>\n"
+		"        Override the per-hull cellSize for every hull baked.\n"
+		"  --clip-volumes <file.ent>\n"
+		"        Read out-of-bounds trigger brushes from an entity partition and keep\n"
+		"        navmesh out of them. A .bsp input finds its '_script.ent' by itself;\n"
+		"        pass this to give an .obj input the same clipping.\n"
+		"  --props <model-dir>\n"
+		"        Fold static prop collision into the soup. Point at an extracted\n"
+		"        .rmdl tree in RSX layout (<dir>/<name>/<name>.rmdl). Without it a\n"
+		"        .bsp's type-9 prop references are counted and skipped.\n"
+		"  --prop-detail\n"
+		"        Use a prop's full detail collision instead of the coarse hull that\n"
+		"        encases it. Far larger; the envelope is what obstructs an agent.\n"
+		"  --no-clip-volumes\n"
+		"        Bake the full mesh extent, ignoring any out-of-bounds brushes.\n"
+		"  --force\n"
+		"        Proceed even when the tile-count guard trips.\n");
+}
+
+static bool parseFloatToken(const char* token, float* out)
+{
+	char* end = nullptr;
+	*out = strtof(token, &end);
+	return end != token && end && *end == '\0';
 }
 
 #if 1
@@ -473,31 +519,179 @@ int not_main(int argc, char** argv)
 	const char* autoLoad = nullptr;
 	bool commandLine = false;
 	bool presentationMode = false;
+	bool hasBounds = false;
+	bool hasBakeOptions = false;
+	float boundsMinX = 0.0f, boundsMinY = 0.0f, boundsMinZ = 0.0f;
+	float boundsMaxX = 0.0f, boundsMaxY = 0.0f, boundsMaxZ = 0.0f;
+	const char* hullFilter = nullptr;
+	const char* clipVolumePath = nullptr;
+	bool noClipVolumes = false;
+	float cellSizeOverride = -1.0f;
+	bool forceBake = false;
 	int width = 0;
 	int height = 0;
 	SDL_Window* window = nullptr;
 	SDL_Renderer* renderer = nullptr;
 
-	if (argc > 1)
+	int argi = 1;
+	if (argc > 1 && strcmp(argv[1], "-console") == 0)
+		argi = 2;
+
+	while (argi < argc)
 	{
-		if (strcmp(argv[1], "-console") == 0)
+		const char* arg = argv[argi];
+		if (strcmp(arg, "--bounds") == 0)
 		{
-			if (argc > 2)
+			if (argi + 6 >= argc)
 			{
-				autoLoad = argv[2];
-				commandLine = true;
+				printf("Missing value(s) for --bounds (need 6 floats).\n");
+				printBakeUsage();
+				return EXIT_FAILURE;
 			}
+			const char* labels[6] = { "minX", "minY", "minZ", "maxX", "maxY", "maxZ" };
+			float vals[6];
+			for (int k = 0; k < 6; ++k)
+			{
+				if (!parseFloatToken(argv[argi + 1 + k], &vals[k]))
+				{
+					printf("Non-numeric value for --bounds %s: '%s'\n", labels[k], argv[argi + 1 + k]);
+					printBakeUsage();
+					return EXIT_FAILURE;
+				}
+			}
+			boundsMinX = vals[0]; boundsMinY = vals[1]; boundsMinZ = vals[2];
+			boundsMaxX = vals[3]; boundsMaxY = vals[4]; boundsMaxZ = vals[5];
+			hasBounds = true;
+			hasBakeOptions = true;
+			argi += 7;
+		}
+		else if (strcmp(arg, "--hull") == 0)
+		{
+			if (argi + 1 >= argc)
+			{
+				printf("Missing value for --hull.\n");
+				printBakeUsage();
+				return EXIT_FAILURE;
+			}
+			const char* name = argv[argi + 1];
+			bool valid = false;
+			for (int n = 0; n < NAVMESH_COUNT; ++n)
+			{
+				if (strcmp(name, g_navMeshNames[n]) == 0)
+				{
+					valid = true;
+					break;
+				}
+			}
+			if (!valid)
+			{
+				printf("Unknown hull name '%s'. Valid names:", name);
+				for (int n = 0; n < NAVMESH_COUNT; ++n)
+					printf(" %s", g_navMeshNames[n]);
+				printf("\n");
+				printBakeUsage();
+				return EXIT_FAILURE;
+			}
+			hullFilter = name;
+			hasBakeOptions = true;
+			argi += 2;
+		}
+		else if (strcmp(arg, "--cell-size") == 0)
+		{
+			if (argi + 1 >= argc)
+			{
+				printf("Missing value for --cell-size.\n");
+				printBakeUsage();
+				return EXIT_FAILURE;
+			}
+			if (!parseFloatToken(argv[argi + 1], &cellSizeOverride))
+			{
+				printf("Non-numeric value for --cell-size: '%s'\n", argv[argi + 1]);
+				printBakeUsage();
+				return EXIT_FAILURE;
+			}
+			hasBakeOptions = true;
+			argi += 2;
+		}
+		else if (strcmp(arg, "--clip-volumes") == 0)
+		{
+			if (argi + 1 >= argc)
+			{
+				printf("Missing value for --clip-volumes.\n");
+				printBakeUsage();
+				return EXIT_FAILURE;
+			}
+			clipVolumePath = argv[argi + 1];
+			InputGeom::setAutoClipVolumes(false);
+			hasBakeOptions = true;
+			argi += 2;
+		}
+		else if (strcmp(arg, "--props") == 0)
+		{
+			if (argi + 1 >= argc)
+			{
+				printf("Missing value for --props.\n");
+				printBakeUsage();
+				return EXIT_FAILURE;
+			}
+			rcMeshLoaderBsp::setPropModelDir(argv[argi + 1]);
+			hasBakeOptions = true;
+			argi += 2;
+		}
+		else if (strcmp(arg, "--prop-detail") == 0)
+		{
+			rcMeshLoaderBsp::setPropDetail(true);
+			hasBakeOptions = true;
+			argi += 1;
+		}
+		else if (strcmp(arg, "--no-clip-volumes") == 0)
+		{
+			InputGeom::setAutoClipVolumes(false);
+			noClipVolumes = true;
+			hasBakeOptions = true;
+			argi += 1;
+		}
+		else if (strcmp(arg, "--force") == 0)
+		{
+			forceBake = true;
+			hasBakeOptions = true;
+			argi += 1;
+		}
+		else if (arg[0] == '-')
+		{
+			printf("Unknown option: '%s'\n", arg);
+			printBakeUsage();
+			return EXIT_FAILURE;
 		}
 		else
 		{
-			FreeConsole();
-			autoLoad = argv[1];
+			if (autoLoad)
+			{
+				printf("Unexpected argument: '%s' (input path already set to '%s')\n", arg, autoLoad);
+				printBakeUsage();
+				return EXIT_FAILURE;
+			}
+			autoLoad = arg;
 			commandLine = true;
+			argi += 1;
 		}
 	}
-	else
+
+	if (hasBakeOptions && !autoLoad)
 	{
+		printf("Input path required when bake options are set.\n");
+		printBakeUsage();
+		return EXIT_FAILURE;
+	}
+
+	// Headless path keeps the console so bake banner / tile counts / errors stay visible.
+	if (!commandLine)
 		FreeConsole();
+
+	if (commandLine)
+	{
+		// Full buffering under redirect discards printf on segfault.
+		setvbuf(stdout, nullptr, _IONBF, 0);
 	}
 
 	if (!commandLine)
@@ -551,10 +745,93 @@ int not_main(int argc, char** argv)
 				update_camera(bmin, bmax, &cameraPos, &cameraEulers, camr);
 			}
 		}
-		if (argc > 2)
+		if (commandLine && autoLoad)
 		{
 			auto ts = dynamic_cast<Editor_TileMesh*>(editor);
-			ts->buildAllHulls();
+			if (!ts)
+			{
+				printf("Headless bake requires a tile-mesh editor.\n");
+				return EXIT_FAILURE;
+			}
+			if (!geom)
+			{
+				printf("Failed to load geometry: %s\n", autoLoad);
+				return EXIT_FAILURE;
+			}
+
+			if (clipVolumePath && geom->addClipVolumesFromEntityPartition(clipVolumePath) == 0)
+			{
+				printf("No clip volumes came out of '%s'.\n", clipVolumePath);
+				return EXIT_FAILURE;
+			}
+
+			// Bounds must be applied after auto_load so mesh AABB is known.
+			if (hasBounds)
+			{
+				if (!(boundsMinX < boundsMaxX))
+				{
+					printf("Invalid --bounds: minX (%.3f) >= maxX (%.3f)\n", boundsMinX, boundsMaxX);
+					return EXIT_FAILURE;
+				}
+				if (!(boundsMinY < boundsMaxY))
+				{
+					printf("Invalid --bounds: minY (%.3f) >= maxY (%.3f)\n", boundsMinY, boundsMaxY);
+					return EXIT_FAILURE;
+				}
+				if (!(boundsMinZ < boundsMaxZ))
+				{
+					printf("Invalid --bounds: minZ (%.3f) >= maxZ (%.3f)\n", boundsMinZ, boundsMaxZ);
+					return EXIT_FAILURE;
+				}
+
+				const rdVec3D* meshMin = geom->getMeshBoundsMin();
+				const rdVec3D* meshMax = geom->getMeshBoundsMax();
+				const bool intersects =
+					boundsMinX < meshMax->x && boundsMaxX > meshMin->x &&
+					boundsMinY < meshMax->y && boundsMaxY > meshMin->y &&
+					boundsMinZ < meshMax->z && boundsMaxZ > meshMin->z;
+				if (!intersects)
+				{
+					printf(
+						"Bake bounds do not intersect mesh AABB.\n"
+						"  requested: mins=(%.3f %.3f %.3f) maxs=(%.3f %.3f %.3f)\n"
+						"  mesh:      mins=(%.3f %.3f %.3f) maxs=(%.3f %.3f %.3f)\n",
+						boundsMinX, boundsMinY, boundsMinZ,
+						boundsMaxX, boundsMaxY, boundsMaxZ,
+						meshMin->x, meshMin->y, meshMin->z,
+						meshMax->x, meshMax->y, meshMax->z);
+					return EXIT_FAILURE;
+				}
+
+				rdVec3D* navMin = geom->getNavMeshBoundsMin();
+				rdVec3D* navMax = geom->getNavMeshBoundsMax();
+				navMin->init(boundsMinX, boundsMinY, boundsMinZ);
+				navMax->init(boundsMaxX, boundsMaxY, boundsMaxZ);
+			}
+
+			{
+				const rdVec3D* meshMin = geom->getMeshBoundsMin();
+				const rdVec3D* meshMax = geom->getMeshBoundsMax();
+				const rdVec3D* bakeMin = geom->getNavMeshBoundsMin();
+				const rdVec3D* bakeMax = geom->getNavMeshBoundsMax();
+				printf("[bake] input      : %s\n", autoLoad);
+				printf("[bake] mesh AABB  : mins=(%.3f %.3f %.3f) maxs=(%.3f %.3f %.3f)\n",
+					meshMin->x, meshMin->y, meshMin->z,
+					meshMax->x, meshMax->y, meshMax->z);
+				printf("[bake] bake AABB  : mins=(%.3f %.3f %.3f) maxs=(%.3f %.3f %.3f)  (%s)\n",
+					bakeMin->x, bakeMin->y, bakeMin->z,
+					bakeMax->x, bakeMax->y, bakeMax->z,
+					hasBounds ? "override" : "default");
+				printf("[bake] hull filter: %s\n", hullFilter ? hullFilter : "all");
+				printf("[bake] clip vols  : %s\n", noClipVolumes ? "disabled"
+					: (clipVolumePath ? clipVolumePath : "auto ('_script.ent' beside a .bsp)"));
+				if (cellSizeOverride > 0.0f)
+					printf("[bake] cell size  : %.3f override\n", cellSizeOverride);
+				else
+					printf("[bake] cell size  : default per hull\n");
+			}
+
+			ts->buildAllHulls(hullFilter, cellSizeOverride, forceBake);
 			return EXIT_SUCCESS;
 		}
 	}
@@ -1019,7 +1296,7 @@ int not_main(int argc, char** argv)
 					diag.lpstrFile = szFile;
 					diag.lpstrFile[0] = 0;
 					diag.nMaxFile = sizeof(szFile);
-					diag.lpstrFilter = "GSET\0*.gset\0OBJ\0*.obj\0Ply\0*.ply\0"; //TODO: BSP\0*.bsp\0
+					diag.lpstrFilter = "GSET\0*.gset\0OBJ\0*.obj\0Ply\0*.ply\0BSP\0*.bsp\0";
 					diag.nFilterIndex = 1;
 					diag.lpstrFileTitle = NULL;
 					diag.nMaxFileTitle = 0;
@@ -1075,6 +1352,7 @@ int not_main(int argc, char** argv)
 						scanDirectory(meshesFolder, ".gset", files);
 						scanDirectoryAppend(meshesFolder, ".obj", files);
 						scanDirectoryAppend(meshesFolder, ".ply", files);
+						scanDirectoryAppend(meshesFolder, ".bsp", files);
 					}
 				}
 				if (geom)

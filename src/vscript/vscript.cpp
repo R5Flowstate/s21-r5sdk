@@ -11,6 +11,10 @@
 #include "vscript/vscript.h"
 #include "game/shared/vscript_shared.h"
 #include "pluginsystem/modsystem.h"
+#if !defined(CLIENT_DLL)
+#include "game/server/vscript_server.h" // Script_RegisterTraceLineEntitiesOnlyArity
+#include "game/shared/scriptremotefunctions_server.h"
+#endif
 
 static const char* s_scriptContextNames[] = { "SERVER", "CLIENT", "UI" };
 
@@ -45,14 +49,20 @@ static bool s_scriptModListAppended[(int)SQCONTEXT::COUNT];
 
 //---------------------------------------------------------------------------------
 // Purpose: Returns the script VM pointer by context
-// Input  : context - 
+// Input: context - 
 //---------------------------------------------------------------------------------
 CSquirrelVM* Script_GetScriptHandle(const SQCONTEXT context)
 {
 	switch (context)
 	{
 	case SQCONTEXT::SERVER:
+#if defined(CLIENT_DLL)
+		// The client inject has no server VM, and g_pServerScript is not declared
+		// in this configuration.
+		return nullptr;
+#else
 		return g_pServerScript;
+#endif
 	case SQCONTEXT::CLIENT:
 		return g_pClientScript;
 	case SQCONTEXT::UI:
@@ -63,7 +73,7 @@ CSquirrelVM* Script_GetScriptHandle(const SQCONTEXT context)
 
 //---------------------------------------------------------------------------------
 // Purpose: loads the script list, listing scripts to be compiled.
-// Input  : *rsonfile - 
+// Input: *rsonfile - 
 //---------------------------------------------------------------------------------
 RSON::Node_t* Script_LoadScriptList(const SQChar* rsonfile)
 {
@@ -73,10 +83,10 @@ RSON::Node_t* Script_LoadScriptList(const SQChar* rsonfile)
 
 //---------------------------------------------------------------------------------
 // Purpose: loads script files listed in the script list, to be compiled.
-// Input  : *s - 
-//			*path - 
-//			*name - 
-//			flags - 
+// Input: *s - 
+// *path - 
+// *name - 
+// flags - 
 //---------------------------------------------------------------------------------
 SQBool Script_LoadScriptFile(CSquirrelVM* const s, const SQChar* path, const SQChar* name, SQInteger flags)
 {
@@ -86,9 +96,9 @@ SQBool Script_LoadScriptFile(CSquirrelVM* const s, const SQChar* path, const SQC
 
 //---------------------------------------------------------------------------------
 // Purpose: appends listed mod script into an already existing script array
-// Input  : context - 
-//			*scriptArray - 
-//			*pScriptCount - 
+// Input: context - 
+// *scriptArray - 
+// *pScriptCount - 
 //---------------------------------------------------------------------------------
 static void Script_AppendModScriptList(const SQCONTEXT context, char** const scriptArray, int* const pScriptCount)
 {
@@ -104,7 +114,7 @@ static void Script_AppendModScriptList(const SQCONTEXT context, char** const scr
 			continue;
 
 		// If its already loaded, use that one. This func can be called twice
-		// from CSquirrelVM::PrecompileServerScripts() and we don't want to
+		// from CSquirrelVM::PrecompileServerScripts and we don't want to
 		// load the rson again.
 		RSON::Node_t* modRson = s_scriptModPrecompileListDeferred[(int)context].rson[i];
 
@@ -141,6 +151,29 @@ static void Script_AppendModScriptList(const SQCONTEXT context, char** const scr
 
 		if (modScriptCount > 0)
 		{
+			// Compile-list entries are mod file content: drop anything that
+			// escapes the mod dir before the VM ever sees it. Rejected pointers
+			// are dropped, not freed -- allocation is native-owned and the drop
+			// is bounded by MAX_SCRIPT_FILES_TO_LOAD once per VM init.
+			int keptScriptCount = 0;
+			for (int si = 0; si < modScriptCount; ++si)
+			{
+				if (ModSystem_IsSafeRelativePath(modScriptPaths[si]))
+				{
+					modScriptPaths[keptScriptCount] = modScriptPaths[si];
+					keptScriptCount++;
+				}
+				else
+				{
+					Warning(eDLL_T::ENGINE, "Skipped script with unsafe path from mod '%s': '%s'\n",
+						mod->name.String(), modScriptPaths[si]);
+				}
+			}
+
+			if (keptScriptCount == 0)
+				continue; // Mod has no loadable scripts.
+
+			modScriptCount = keptScriptCount;
 			const int newScriptCount = *pScriptCount + modScriptCount;
 
 			// Make sure we didn't exceed it!
@@ -158,7 +191,7 @@ static void Script_AppendModScriptList(const SQCONTEXT context, char** const scr
 			*pScriptCount = newScriptCount;
 
 			// Only set this when everything was successful, this is so that
-			// SharedScript_ModSystem_RunCallbacks() doesn't do unnecessary
+			// SharedScript_ModSystem_RunCallbacks doesn't do unnecessary
 			// work for mods that don't have scripts at all.
 			mod->hasPrecompiledScripts = true;
 		}
@@ -169,13 +202,13 @@ static void Script_AppendModScriptList(const SQCONTEXT context, char** const scr
 
 //---------------------------------------------------------------------------------
 // Purpose: parses rson data to get an array of scripts to compile 
-// Input  : context - 
-//			*scriptListPath - 
-//			*rson - 
-//			*scriptArray - 
-//			*pScriptCount - 
-//			**precompiledScriptArray - 
-//			precompiledScriptCount - 
+// Input: context - 
+// *scriptListPath - 
+// *rson - 
+// *scriptArray - 
+// *pScriptCount - 
+// **precompiledScriptArray - 
+// precompiledScriptCount - 
 //---------------------------------------------------------------------------------
 bool Script_ParseScriptList(SQCONTEXT context, const char* scriptListPath,
 	RSON::Node_t* rson, char** scriptArray, int* pScriptCount,
@@ -197,7 +230,7 @@ bool Script_ParseScriptList(SQCONTEXT context, const char* scriptListPath,
 
 //---------------------------------------------------------------------------------
 // Purpose: precompiles scripts for the given VM
-// Input  : *vm
+// Input: *vm
 //---------------------------------------------------------------------------------
 SQBool Script_PrecompileScripts(CSquirrelVM* vm)
 {
@@ -214,7 +247,16 @@ SQBool Script_PrecompileScripts(CSquirrelVM* vm)
 	{
 	case SQCONTEXT::SERVER:
 	{
+#if !defined(CLIENT_DLL)
+		// Engine TraceLine is 6-arg; scripts pass entitiesOnly as 7th.
+		// Re-apply immediately before compile so nothing after VM Init can
+		// leave the S3 prototype in place (same class of trap as GRX_COUNT).
+		Script_RegisterTraceLineEntitiesOnlyArity(vm);
+#endif
 		result = v_Script_PrecompileServerScripts(vm);
+#if !defined(CLIENT_DLL)
+		ScriptRemoteC2S_DropFnCache();
+#endif
 		break;
 	}
 	case SQCONTEXT::CLIENT:
@@ -234,7 +276,13 @@ SQBool Script_PrecompileScripts(CSquirrelVM* vm)
 
 SQBool Script_PrecompileServerScripts(CSquirrelVM* vm)
 {
+#if defined(CLIENT_DLL)
+	// No server VM in the client inject; g_pServerScript does not exist here.
+	(void)vm;
+	return SQFalse;
+#else
 	return Script_PrecompileScripts(g_pServerScript);
+#endif
 }
 
 SQBool Script_PrecompileClientScripts(CSquirrelVM* vm)
@@ -244,8 +292,8 @@ SQBool Script_PrecompileClientScripts(CSquirrelVM* vm)
 
 //---------------------------------------------------------------------------------
 // Purpose: Compiles and executes input code on target VM by context
-// Input  : *code - 
-//			context - 
+// Input: *code - 
+// context - 
 //---------------------------------------------------------------------------------
 void Script_Execute(const SQChar* code, const SQCONTEXT context)
 {

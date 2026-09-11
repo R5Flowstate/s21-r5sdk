@@ -235,8 +235,8 @@ int LoadCustomActivityModifiersFromFile()
 			{
 				if (g_ActivityModifierNames[i] && strcmp(g_ActivityModifierNames[i], trimmed) == 0)
 				{
-					Warning(eDLL_T::ENGINE, "[ACTMOD] %s:%d: Modifier '%s' already predefined - skipping\n",
-						filePath, lineNum, trimmed);
+					// Already in the engine table — silent skip (file should
+					// only list S21-new names; leftover predefineds are noise).
 					duplicate = true;
 					break;
 				}
@@ -267,13 +267,13 @@ void VActivityModifiers::GetFun(void) const
 
 void VActivityModifiers::GetVar(void) const
 {
-	// Locate the modifier initialization loop by its distinctive preamble:
-	//   lea rsi, [ActivityModifierSymbols]   (at pattern - 7)
-	//   mov r15d, 10000h                     (pattern anchor)
-	//   lea rbx, [ActivityModifierNames]     (at pattern + 6)
-	//   lea r12, [ActivityModifierNames_end] (at pattern + 13)
-	//   lea rcx, [g_ActivityModifiersTable]  (at pattern + 0x5C)
-	//   NOTE: +0x52 points to the table lock, not the table itself
+	// Locate the modifier initialization loop by its distinctive preamble
+	// lea rsi, [ActivityModifierSymbols] (at pattern - 7)
+	// mov r15d, 10000h (pattern anchor)
+	// lea rbx, [ActivityModifierNames] (at pattern + 6)
+	// lea r12, [ActivityModifierNames_end] (at pattern + 13)
+	// lea rcx, [g_ActivityModifiersTable] (at pattern + 0x5C)
+	// NOTE: +0x52 points to the table lock, not the table itself
 	CMemory initPattern = Module_FindPattern(g_GameDll, "41 BF 00 00 01 00 48 8D 1D");
 	if (initPattern)
 	{

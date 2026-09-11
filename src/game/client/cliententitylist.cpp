@@ -20,7 +20,7 @@ static IClientNetworkable* ClientEntityList_GetClientNetworkable(IClientEntityLi
 // of CClientEntityList; sub classed data is truncated.
 static IClientEntity* ClientEntityList_GetClientEntity(IClientEntityList* const entList, const int entNum)
 {
-	// Numbers < -2 will be used to index into the array as follows:
+	// Numbers < -2 will be used to index into the array as follows
 	// m_EntPtrArray[ (MAX_EDICTS-2) - entNum ]. However, the code
 	// doesn't have a clamp for underflows; check it here. -1 cases
 	// are ignored here as they already are handled correctly.
@@ -41,14 +41,9 @@ static IClientEntity* ClientEntityList_GetClientEntity(IClientEntityList* const 
 	return v_ClientEntityList_GetClientEntity(entList, entNum);
 }
 
-void VClientEntityList::Detour(const bool bAttach) const
-{
-	DetourSetup(&v_ClientEntityList_GetClientNetworkable, &ClientEntityList_GetClientNetworkable, bAttach);
-	DetourSetup(&v_ClientEntityList_GetClientEntity, &ClientEntityList_GetClientEntity, bAttach);
-}
 
 //-----------------------------------------------------------------------------
 // Purpose: a global list of all the entities in the game. All iteration through
-//          entities is done through this object.
+// entities is done through this object.
 //-----------------------------------------------------------------------------
 CClientEntityList* g_clientEntityList = nullptr;

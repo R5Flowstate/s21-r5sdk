@@ -22,7 +22,7 @@ namespace XorCompileTime
 
     // 1988, Stephen Park and Keith Miller
     // "Random Number Generators: Good Ones Are Hard To Find", considered as "minimal standard"
-    // Park-Miller 31 bit pseudo-random number generator, implemented with G. Carta's optimisation:
+    // Park-Miller 31 bit pseudo-random number generator, implemented with G. Carta's optimisation
     // with 32-bit math and without division
 
     template < int N >
@@ -102,11 +102,11 @@ namespace XorCompileTime
 
 //--------------------------------------------------------------------------------
 //-- Note: XorStr will __NOT__ work directly with functions like printf.
-//         To work with them you need a wrapper function that takes a const char*
-//         as parameter and passes it to printf and alike.
+// To work with them you need a wrapper function that takes a const char*
+// as parameter and passes it to printf and alike.
 //
-//         The Microsoft Compiler/Linker is not working correctly with variadic 
-//         templates!
+// The Microsoft Compiler/Linker is not working correctly with variadic 
+// templates!
 //--------------------------------------------------------------------------------
 
 // Wrapper functions to work in all functions

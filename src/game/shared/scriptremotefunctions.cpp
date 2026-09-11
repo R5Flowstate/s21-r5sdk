@@ -21,7 +21,10 @@ constexpr int ORIG_USED_OFFSET = ORIG_COUNT_OFFSET + 4;
 char ScriptRemote_AddEntry(__int64 a1, __int64 a2, char a3, char a4, char a5, void* Src)
 {
 	if (!a1)
+	{
+		Warning(eDLL_T::ENGINE, "ScriptRemote_AddEntry: NULL base pointer\n");
 		return 0;
+	}
 
 	std::lock_guard<std::mutex> lock(s_Mutex);
 
@@ -35,13 +38,20 @@ char ScriptRemote_AddEntry(__int64 a1, __int64 a2, char a3, char a4, char a5, vo
 	const int bufferUsed = *pBufferUsed;
 
 	if (entryIndex < 0 || entryIndex >= ORIG_MAX_ENTRIES)
+	{
+		Warning(eDLL_T::ENGINE, "ScriptRemote_AddEntry: entry index %d out of range [0, %d)\n", entryIndex, ORIG_MAX_ENTRIES);
 		return 0;
+	}
 
 	if (bufferUsed < 0 || bufferUsed > ORIG_ARG_BUFFER_SIZE)
+	{
+		Warning(eDLL_T::ENGINE, "ScriptRemote_AddEntry: bufferUsed %d out of range [0, %d]\n", bufferUsed, ORIG_ARG_BUFFER_SIZE);
 		return 0;
+	}
 
 	if (s_nExtendedArgBufferUsed < 0 || s_nExtendedArgBufferUsed > SCRIPT_REMOTE_ARG_BUFFER_SIZE)
 	{
+		Warning(eDLL_T::ENGINE, "ScriptRemote_AddEntry: extended buffer corrupted (%d), resetting\n", s_nExtendedArgBufferUsed);
 		s_nExtendedArgBufferUsed = 0;
 		return 0;
 	}
@@ -58,8 +68,14 @@ char ScriptRemote_AddEntry(__int64 a1, __int64 a2, char a3, char a4, char a5, vo
 	{
 		const int extRemaining = SCRIPT_REMOTE_ARG_BUFFER_SIZE - s_nExtendedArgBufferUsed;
 		if (argDataSize > extRemaining)
+		{
+			Warning(eDLL_T::ENGINE, "ScriptRemote_AddEntry: BOTH buffers full! orig=%d/%d, ext=%d/%d, need=%d\n",
+				bufferUsed, ORIG_ARG_BUFFER_SIZE, s_nExtendedArgBufferUsed, SCRIPT_REMOTE_ARG_BUFFER_SIZE, argDataSize);
 			return 0;
+		}
 
+		DevMsg(eDLL_T::ENGINE, "ScriptRemote_AddEntry: using extended buffer (orig full: %d/%d, ext: %d/%d, need: %d)\n",
+			bufferUsed, ORIG_ARG_BUFFER_SIZE, s_nExtendedArgBufferUsed, SCRIPT_REMOTE_ARG_BUFFER_SIZE, argDataSize);
 		argDestPtr = s_ExtendedArgBuffer + s_nExtendedArgBufferUsed;
 		s_nExtendedArgBufferUsed += argDataSize;
 	}
@@ -87,20 +103,10 @@ __int64 ScriptRemote_RegisterName(__int64 a1, unsigned char* a2)
 	return v_ScriptRemote_RegisterName(a1, a2);
 }
 
-void VScriptRemoteFunctions::Detour(const bool bAttach) const
+void ScriptRemote_ResetExtendedArgBuffer(void)
 {
-	if (!v_ScriptRemote_AddEntry)
-		return;
-
-	DetourSetup(&v_ScriptRemote_AddEntry, &ScriptRemote_AddEntry, bAttach);
-
-	if (v_ScriptRemote_RegisterName)
-		DetourSetup(&v_ScriptRemote_RegisterName, &ScriptRemote_RegisterName, bAttach);
-
-	if (bAttach)
-	{
-		std::lock_guard<std::mutex> lock(s_Mutex);
-		memset(s_ExtendedArgBuffer, 0, SCRIPT_REMOTE_ARG_BUFFER_SIZE);
-		s_nExtendedArgBufferUsed = 0;
-	}
+	std::lock_guard<std::mutex> lock(s_Mutex);
+	memset(s_ExtendedArgBuffer, 0, SCRIPT_REMOTE_ARG_BUFFER_SIZE);
+	s_nExtendedArgBufferUsed = 0;
 }
+

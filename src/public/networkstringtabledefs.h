@@ -1,6 +1,6 @@
-﻿//===== Copyright � 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright � 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //===========================================================================//
@@ -24,7 +24,7 @@ class INetworkStringTable;
 typedef void ( *pfnStringChanged )( void* object, INetworkStringTable* stringTable, int stringNumber, char const* newString, void const* newData );
 
 //-----------------------------------------------------------------------------
-// Purpose: Game .dll shared string table interfaces
+// Purpose: Game.dll shared string table interfaces
 //-----------------------------------------------------------------------------
 class INetworkStringTable
 {

@@ -1,6 +1,6 @@
-﻿//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose
 //
 // $NoKeywords: $
 //=============================================================================//
@@ -28,7 +28,7 @@ class IHandleEntity;
 // Game-code CBaseHandle implementation.
 // -------------------------------------------------------------------------------------------------- //
 /*
-inline IHandleEntity* CBaseHandle::Get() const
+inline IHandleEntity* CBaseHandle::Get const
 {
 	extern CBaseEntityList *g_pEntityList;
 	return g_pEntityList->LookupEntity( *this );
@@ -63,7 +63,7 @@ public:
 
 	static CHandle<T> UnsafeFromBaseHandle( const CBaseHandle& handle );
 
-	// The index should have come from a call to CBaseHandle::ToInt(). If it hasn't, you're in trouble.
+	// The index should have come from a call to CBaseHandle::ToInt. If it hasn't, you're in trouble.
 	static CHandle<T> UnsafeFromIndex( int index );
 
 	T*		Get() const;

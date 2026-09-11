@@ -1,7 +1,7 @@
 #pragma once
 #include "tier0/icommandline.h"
 
-class CCommandLine : public ICommandLine // VTABLE @0x141369C78 in R5pc_r5launch_N1094_CL456479_2019_10_30_05_20_PM
+class CCommandLine : public ICommandLine // VTABLE @ in R5pc_r5launch_N1094_CL456479_2019_10_30_05_20_PM
 {
 public:
 	static void StaticCreateCmdLine(CCommandLine* thisptr, const char* pszCommandLine);
@@ -32,6 +32,7 @@ inline CCommandLine* CommandLine(void)
 
 inline void(*CCommandLine__CreateCmdLine)(CCommandLine* thisptr, const char* pszCommandLine);
 
+#ifndef CLIENT_DLL
 ///////////////////////////////////////////////////////////////////////////////
 class VCommandLine : public IDetour
 {
@@ -48,3 +49,4 @@ class VCommandLine : public IDetour
 	virtual void Detour(const bool bAttach) const;
 };
 ///////////////////////////////////////////////////////////////////////////////
+#endif // !CLIENT_DLL
