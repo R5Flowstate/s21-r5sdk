@@ -21,6 +21,7 @@
 #include "game/shared/edict_dirty.h"
 #include "game/shared/weapon_enforce.h"
 #include "game/server/akimbo.h"
+#include "weapon_realm_follow.h"
 
 #include <cstring>
 
@@ -295,6 +296,9 @@ static __int64 __fastcall Hook_SetActiveWeapon(void* player, unsigned int slot, 
 		return 0;
 
 	const __int64 result = v_SetActiveWeapon(player, slot, weaponEnt);
+
+	if (player && weaponEnt)
+		WeaponRealmFollow_StampActiveWeapon(player, weaponEnt);
 
 	if (player)
 		WeapSelMirror_OnSetActiveWeapon(player, slot, weaponEnt, oldActiveEH);

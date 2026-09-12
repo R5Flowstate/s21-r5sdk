@@ -278,32 +278,73 @@ void RuntimePtc_Init()
 	// gDefault (1280x720 on 16:9). 4:3 is never in that list. Keep the
 	// requested size and set windowed+noborder (bit0|bit1 at config+0x34).
 	// DX11 only: DX12 keeps separate windowed/fullscreen sizes and a different
-	// flag layout, and the launcher already remaps 4:3 fullscreen to a listed mode.
+	// flag layout, so it is handled by the block below; the launcher already
+	// remaps unlisted fullscreen to borderless at the requested size.
+	CMemory miss = Module_FindPattern(g_GameDll,
+		"FF C7 3B FE 7C ?? 8B 05 ?? ?? ?? ?? 8B 0D ?? ?? ?? ??");
+	if (!miss.GetPtr())
 	{
-		CMemory miss = Module_FindPattern(g_GameDll,
-			"FF C7 3B FE 7C ?? 8B 05 ?? ?? ?? ?? 8B 0D ?? ?? ?? ??");
-		if (!miss.GetPtr())
-			SDK_LogDevFile("[VIDMODE] exclusive-miss store NOT FOUND -- 4:3 -fullscreen stays 720p\n");
+		// DX12 exclusive-miss: load/load/store/store with the sizes at the
+		// same +0x1C/+0x20 slots, but the flag byte lives at +0x3C: bit0
+		// exclusive, bit1 (0x02) windowed, bit2 (0x04) noborder. The mode
+		// selector consumes bit0/bit2 the same way DX11 consumes its +0x34
+		// bits, and entry routes on 0x02 to the windowed path. Keep the
+		// requested WxH, force windowed|noborder, and rejoin the windowed
+		// floor check so the desktop clamp still runs: that clamp is what
+		// saves a 1920x1200 request on a 1920x1080 desktop. Only attempted
+		// when the DX11 shape missed, so each exe patches exactly one site.
+		CMemory miss12 = Module_FindPattern(g_GameDll,
+			"8B 0D ?? ?? ?? ?? 8B C1 8B 15 ?? ?? ?? ?? 89 53 1C 89 4B 20 E9 ?? ?? ?? ??");
+		CMemory floor12 = Module_FindPattern(g_GameDll,
+			"8B 43 20 3D ?? ?? 00 00 73 ?? 8B 0D ?? ?? ?? ?? 8B 05 ?? ?? ?? ?? 89 4B 1C 89 43 20 89 4B 34 89 43 38");
+		if (!miss12.GetPtr() || !floor12.GetPtr())
+			SDK_LogDevFile("[VIDMODE] dx12 exclusive-miss store NOT FOUND -- unlisted -fullscreen stays 720p\n");
 		else
 		{
-			CMemory store = miss.Offset(18);
-			const uint8_t op = store.GetValue<uint8_t>();
-			if (op == 0x80)
-				SDK_LogDevFile("[VIDMODE] exclusive-miss already patched at %p\n", (void*)store.GetPtr());
-			else if (op == 0x89
-				&& store.Offset(8).GetValue<uint8_t>() == 0xE9
-				&& store.Offset(9).GetValue<uint32_t>() == 0x97)
-			{
-				// jmp moves 1 byte earlier, rel32 0x97 -> 0x98; same target.
-				store.Patch({ 0x80, 0x4B, 0x34, 0x03, 0x8B, 0x43, 0x20,
-					0xE9, 0x98, 0x00, 0x00, 0x00, 0x90 });
-				SDK_LogDevFile("[VIDMODE] exclusive-miss keeps requested size at %p\n",
-					(void*)store.GetPtr());
-			}
+			CMemory store12 = miss12.Offset(14);
+			const int64_t nRel = (int64_t)floor12.GetPtr() - ((int64_t)store12.GetPtr() + 9);
+			if (store12.GetValue<uint8_t>() != 0x89
+				|| store12.Offset(3).GetValue<uint8_t>() != 0x89
+				|| store12.Offset(6).GetValue<uint8_t>() != 0xE9
+				|| nRel < INT32_MIN || nRel > INT32_MAX)
+				SDK_LogDevFile("[VIDMODE] dx12 exclusive-miss bytes unexpected at %p\n", (void*)store12.GetPtr());
 			else
-				SDK_LogDevFile("[VIDMODE] exclusive-miss bytes unexpected at %p (op=%02X)\n",
-					(void*)store.GetPtr(), op);
+			{
+				// or [rbx+3Ch],6 (4B) + jmp rel32 to the floor check (5B) + nop nop (2B).
+				const int32_t nJmp = (int32_t)nRel;
+				const std::vector<uint8_t> vPatch =
+				{
+					0x80, 0x4B, 0x3C, 0x06,
+					0xE9,
+					(uint8_t)(nJmp & 0xFF), (uint8_t)((nJmp >> 8) & 0xFF),
+					(uint8_t)((nJmp >> 16) & 0xFF), (uint8_t)((nJmp >> 24) & 0xFF),
+					0x66, 0x90
+				};
+				store12.Patch(vPatch);
+				SDK_LogDevFile("[VIDMODE] dx12 exclusive-miss keeps requested size at %p (rejoins floor)\n",
+					(void*)store12.GetPtr());
+			}
 		}
+	}
+	else
+	{
+		CMemory store = miss.Offset(18);
+		const uint8_t op = store.GetValue<uint8_t>();
+		if (op == 0x80)
+			SDK_LogDevFile("[VIDMODE] exclusive-miss already patched at %p\n", (void*)store.GetPtr());
+		else if (op == 0x89
+			&& store.Offset(8).GetValue<uint8_t>() == 0xE9
+			&& store.Offset(9).GetValue<uint32_t>() == 0x97)
+		{
+			// jmp moves 1 byte earlier, rel32 0x97 -> 0x98; same target.
+			store.Patch({ 0x80, 0x4B, 0x34, 0x03, 0x8B, 0x43, 0x20,
+				0xE9, 0x98, 0x00, 0x00, 0x00, 0x90 });
+			SDK_LogDevFile("[VIDMODE] exclusive-miss keeps requested size at %p\n",
+				(void*)store.GetPtr());
+		}
+		else
+			SDK_LogDevFile("[VIDMODE] exclusive-miss bytes unexpected at %p (op=%02X)\n",
+				(void*)store.GetPtr(), op);
 	}
 
 	// Windowed path rejects height < 720. 800x600 is a 4:3 preset; 320 is

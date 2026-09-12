@@ -133,6 +133,7 @@
 #include "game/server/halfduck_zip_parity.h"
 #include "game/server/move_sim_trace.h"
 #include "game/server/repel_realm_gate.h"
+#include "game/server/weapon_realm_follow.h"
 #include "game/server/zipline_cooldown.h"
 #include "game/server/zipline_exit_parity.h"
 #include "game/server/poseparam_ext.h"
@@ -575,6 +576,7 @@ REGISTER(VConnectPasswordGate);   // REGISTER SERVER ONLY! challenge-bind the co
 	REGISTER(VHalfDuckZipParity);       // REGISTER SERVER ONLY! [HALFDUCK] m_doingHalfDuck is latched once at duck-start and is not networked; duck is suppressed while ziplining, so the two engines sample it one command apart and only one applies the (standHull-duckHull)*0.5 origin step. Forces the latch on a duck that begins just after a zipline release. Twin: VHalfDuckZipParityClient.
 	REGISTER(VMoveSimTrace);            // REGISTER SERVER ONLY! [MOVE-TRACE] per-command FullWalkMove state dump; twin: VMoveSimTraceClient (attaches nothing; sampled from VJetDrive's hook)
 	REGISTER(VRepelRealmGate);          // REGISTER SERVER ONLY! [REPEL-REALM] player-vs-player repel pass gated on shared m_realmsBitMask; disjoint-realm players no longer push each other
+	REGISTER(VWeaponRealmFollow);       // REGISTER SERVER ONLY! [REALM-FOLLOW] carried weapons adopt owner realms at activation + on every SetRealmsBitMask (opponent tracers)
 	REGISTER(VZiplineExitParity);       // REGISTER SERVER ONLY! [ZIP-EXIT] auto-detach exit-velocity rewrite (client rope clamp + vertical magnitude) so both engines leave the rope with the same velocity
 	REGISTER(VMeleeActivityTraceServer);   // REGISTER SERVER ONLY! [MELEE-ACT] bridge_melee_trace: melee custom-activity lifetime, diffed against the client twin
 	REGISTER(VMeleeLungeProbeServer);   // REGISTER SERVER ONLY! [LUNGE-PROBE] bridge_melee_lunge_probe: melee-lunge overspeed-clamp cap value, diffed against the client twin

@@ -207,9 +207,49 @@ bool Cmd_ExecuteUnrestricted(const char* const pCommandString, const char* const
 	return true;
 }
 
+static bool s_bRedirectFallbackLogged = false;
+
+//-----------------------------------------------------------------------------
+// Purpose: redirect printf used by status/ping/RCON output. The redirect
+// object is the invoking session; stdin console invocation has none (null),
+// which the engine dereferences unconditionally (AV at +0x48748).
+//-----------------------------------------------------------------------------
+static void Hook_CmdRedirectPrintf(__int64 a1, int a2, const char* pFormat, ...)
+{
+	char szBuf[4096];
+
+	if (pFormat)
+	{
+		va_list va;
+		va_start(va, pFormat);
+		vsnprintf(szBuf, sizeof(szBuf), pFormat, va);
+		va_end(va);
+	}
+	else
+		szBuf[0] = '\0';
+
+	if (!a1)
+	{
+		if (!s_bRedirectFallbackLogged)
+		{
+			s_bRedirectFallbackLogged = true;
+			Warning(eDLL_T::SERVER, "[CMD] command output has no redirect; printing to console\n");
+		}
+		Msg(eDLL_T::SERVER, "%s", szBuf);
+		return;
+	}
+
+	v_CmdRedirectPrintf(a1, a2, "%s", szBuf);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 void VCmd::Detour(const bool bAttach) const
 {
 	DetourSetup(&v_Cmd_ForwardToServer, &Cmd_ForwardToServer, bAttach);
+
+	if (v_CmdRedirectPrintf)
+		DetourSetup(&v_CmdRedirectPrintf, &Hook_CmdRedirectPrintf, bAttach);
+	else
+		Warning(eDLL_T::SERVER, "[CMD] CmdRedirectPrintf unresolved; stdin status/ping guard off\n");
 }
 #endif // !CLIENT_DLL

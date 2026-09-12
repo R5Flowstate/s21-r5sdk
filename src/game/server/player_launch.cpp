@@ -60,6 +60,20 @@ static ConVar sdk_player_launch_diag("sdk_player_launch_diag", "0",
 	FCVAR_DEVELOPMENTONLY,
 	"Log PlayerLaunch latch/apply/land. 0=off.");
 
+static ConVar bridge_stand_on_obb("bridge_stand_on_obb", "1",
+	FCVAR_RELEASE,
+	"Treat SOLID_OBB as standable ground, matching the client. 0 = types 1/2/6/11 only.");
+
+static constexpr ptrdiff_t ENT_OFF_SOLIDFLAGS = 848; // FSOLID_NOT_STANDABLE
+static constexpr ptrdiff_t ENT_OFF_SOLIDTYPE  = 852;
+static constexpr unsigned char kFlNotStandable = 0x10;
+static constexpr unsigned char kSolidObb = 3;
+static constexpr ptrdiff_t ENT_VT_IS_TITAN = 752;
+static constexpr ptrdiff_t ENT_VT_IS_TITAN_ENT = 768;
+
+static bool (__fastcall *v_CGameMovement_CanStandOn)(void* pPlayer, void* pEnt) = nullptr;
+static unsigned char (__fastcall *v_EntityIsNpcGround)(void* pEnt) = nullptr;
+
 static thread_local void* s_fullWalkCtx = nullptr;
 
 static int  s_offDuckToggleOn = -1;
@@ -438,10 +452,54 @@ static __int64 __fastcall Hook_CGameMovement_CheckJumpButton(void* ctx)
 	return ret;
 }
 
+static bool __fastcall Hook_CGameMovement_CanStandOn(void* pPlayer, void* pEnt)
+{
+	if (!pEnt)
+		return false;
+
+	const unsigned char* const pBytes = reinterpret_cast<const unsigned char*>(pEnt);
+	if ((pBytes[ENT_OFF_SOLIDFLAGS] & kFlNotStandable) != 0)
+		return false;
+
+	if (pPlayer)
+	{
+		using FnIsTitan = unsigned char(__fastcall*)(void*);
+		const uintptr_t playerVt = *reinterpret_cast<const uintptr_t*>(pPlayer);
+		const uintptr_t entVt = *reinterpret_cast<const uintptr_t*>(pEnt);
+		const FnIsTitan fnPlayerTitan = *reinterpret_cast<const FnIsTitan*>(playerVt + ENT_VT_IS_TITAN);
+		const FnIsTitan fnEntTitan = *reinterpret_cast<const FnIsTitan*>(entVt + ENT_VT_IS_TITAN_ENT);
+		if (fnPlayerTitan(pPlayer) && fnEntTitan(pEnt))
+			return false;
+	}
+
+	if (v_EntityIsNpcGround && v_EntityIsNpcGround(pEnt))
+		return false;
+
+	const unsigned char nSolid = pBytes[ENT_OFF_SOLIDTYPE];
+	if (((nSolid - 1) & 0xFA) == 0 && nSolid != 5)
+		return true;
+	if (nSolid == 11)
+		return true;
+	if (bridge_stand_on_obb.GetBool() && nSolid == kSolidObb)
+	{
+		static bool s_bLoggedOnce = false;
+		if (!s_bLoggedOnce)
+		{
+			s_bLoggedOnce = true;
+			Msg(eDLL_T::SERVER, "[STAND-OBB] accepted SOLID_OBB ent=%p\n", pEnt);
+		}
+		return true;
+	}
+
+	return false;
+}
+
 void VPlayerLaunch::GetAdr(void) const
 {
 	LogFunAdr("CGameMovement::CheckJumpButton", v_CGameMovement__CheckJumpButton);
 	LogFunAdr("CGameMovement::SetGroundEntity", v_CGameMovement__SetGroundEntity);
+	LogFunAdr("CGameMovement::CanStandOn", v_CGameMovement_CanStandOn);
+	LogFunAdr("EntityIsNpcGround", v_EntityIsNpcGround);
 	LogFunAdr("CPlayer::ClearWallRun", v_CPlayer__ClearWallRun);
 	LogFunAdr("CBaseEntity::SetAbsAngles", v_CBaseEntity__SetAbsAngles);
 }
@@ -465,6 +523,27 @@ void VPlayerLaunch::GetFun(void) const
 	if (!v_CGameMovement__SetGroundEntity)
 		Warning(eDLL_T::SERVER,
 			"[PLAYER-LAUNCH] CGameMovement::SetGroundEntity pattern unresolved\n");
+
+	// CGameMovement::CanStandOn(player, ent). FSOLID_NOT_STANDABLE at ent+0x350
+	// and IsTitan vtable +0x2F0 separate the server half. Unique (1 hit).
+	Module_FindPattern(g_GameDll,
+		"40 53 48 83 EC 20 48 8B DA 48 85 D2 74 ?? "
+		"F6 82 50 03 00 00 10 75 ?? 48 8B 01 FF 90 F0 02 00 00")
+		.GetPtr(v_CGameMovement_CanStandOn);
+
+	if (!v_CGameMovement_CanStandOn)
+	{
+		Warning(eDLL_T::SERVER,
+			"[STAND-OBB] CanStandOn pattern unresolved -- SOLID_OBB floors stay refused\n");
+	}
+	else
+	{
+		CMemory(v_CGameMovement_CanStandOn).Offset(0x37).FollowNearCallSelf()
+			.GetPtr(v_EntityIsNpcGround);
+		if (!v_EntityIsNpcGround)
+			Warning(eDLL_T::SERVER,
+				"[STAND-OBB] NPC ground gate unresolved -- SOLID_OBB hook not attached\n");
+	}
 
 	// CPlayer::ClearWallRun(player). Unique on this dedi (1 hit).
 	Module_FindPattern(g_GameDll,
@@ -494,5 +573,8 @@ void VPlayerLaunch::Detour(const bool bAttach) const
 {
 	if (v_CGameMovement__CheckJumpButton)
 		DetourSetup(&v_CGameMovement__CheckJumpButton, &Hook_CGameMovement_CheckJumpButton, bAttach);
+
+	if (v_CGameMovement_CanStandOn && v_EntityIsNpcGround)
+		DetourSetup(&v_CGameMovement_CanStandOn, &Hook_CGameMovement_CanStandOn, bAttach);
 }
 

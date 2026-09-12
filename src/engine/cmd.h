@@ -93,6 +93,7 @@ inline void(*Cbuf_AddExecutionMarker)(ECommandTarget_t target, ECmdExecutionMark
 inline void(*Cbuf_Execute)(void);
 inline void(*v_Cmd_Dispatch)(ECommandTarget_t eTarget, const ConCommandBase* pCmdBase, const CCommand* pCommand, bool bCallBackupCallback);
 inline bool(*v_Cmd_ForwardToServer)(const CCommand* pCommand);
+inline void(*v_CmdRedirectPrintf)(__int64 a1, int a2, const char* pFormat, ...);
 
 extern CCommandBuffer** s_pCommandBuffer;
 extern LPCRITICAL_SECTION s_pCommandBufferMutex;
@@ -110,6 +111,7 @@ class VCmd : public IDetour
 		LogFunAdr("Cbuf_Execute", Cbuf_Execute);
 		LogFunAdr("Cmd_Dispatch", v_Cmd_Dispatch);
 		LogFunAdr("Cmd_ForwardToServer", v_Cmd_ForwardToServer);
+		LogFunAdr("CmdRedirectPrintf", v_CmdRedirectPrintf);
 		LogVarAdr("s_CommandBuffer", s_pCommandBuffer);
 		LogVarAdr("s_CommandBufferMutex", s_pCommandBufferMutex);
 		LogVarAdr("g_ExecutionMarkers", g_pExecutionMarkers);
@@ -122,6 +124,10 @@ class VCmd : public IDetour
 
 		Module_FindPattern(g_GameDll, "E8 ?? ?? ?? ?? 8B ?? 0C 49 FF C7").FollowNearCallSelf().GetPtr(v_Cmd_Dispatch);
 		Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 81 EC ?? ?? ?? ?? 44 8B 59 04").GetPtr(v_Cmd_ForwardToServer);
+
+		// Redirect printf for status/ping/RCON output. Disp8/disp32
+		// wildcards: large-frame variadic prologue + reentrancy-guard load at +0x48748.
+		Module_FindPattern(g_GameDll, "4C 8B DC 4D 89 43 ?? 4D 89 4B ?? 55 56 57 48 81 EC ?? ?? ?? ?? 80 B9 ?? ?? ?? ?? ?? 49 8B F8 8B EA 48 8B F1 0F 85 ?? ?? ?? ?? 48 8B 81").GetPtr(v_CmdRedirectPrintf);
 	}
 	virtual void GetVar(void) const
 	{

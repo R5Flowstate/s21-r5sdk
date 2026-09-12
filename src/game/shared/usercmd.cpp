@@ -52,7 +52,9 @@ void ClampUserCmd(CUserCmd* ucmd)
 			usercmd_frametime_max.GetFloat());
 
 	// Checks are only required if cycleslot is valid; see 'CPlayer::UpdateWeaponSlots'.
-	if (ucmd->cycleslot != WEAPON_INVENTORY_SLOT_INVALID)
+	if (ucmd->cycleslot != WEAPON_INVENTORY_SLOT_INVALID
+		&& ucmd->cycleslot != WEAPON_INVENTORY_SLOT_HOLSTERED
+		&& ucmd->cycleslot != WEAPON_INVENTORY_SLOT_ANY)
 	{
 		const bool dualWieldEnabled = usercmd_dualwield_enable.GetBool();
 
@@ -72,7 +74,7 @@ void ClampUserCmd(CUserCmd* ucmd)
 	}
 }
 
-//-----------------------------------------------------------------------------
+ //-----------------------------------------------------------------------------
 // Purpose: Read in a delta compressed usercommand.
 // Input: *buf -
 // *move -
@@ -126,6 +128,15 @@ static ConVar usercmd_clamp_diag("usercmd_clamp_diag", "0",
 
 static long s_nClampDiagLines = 0;
 static constexpr long kClampDiagCap = 64;
+
+static ConVar usercmd_select_diag("usercmd_select_diag", "0",
+	FCVAR_DEVELOPMENTONLY,
+	"Emit a capped [USERCMD-SEL] line for every accepted command carrying a "
+	"weapon-select edge: final cycleslot, weaponindex, weaponselect word and "
+	"setlastcycleslot.");
+
+static long s_nSelectDiagLines = 0;
+static constexpr long kSelectDiagCap = 160;
 
 //-----------------------------------------------------------------------------
 // Purpose: Clamp untrusted usercommand.
@@ -186,7 +197,9 @@ void ClampUserCmd(CUserCmd* ucmd)
 	const byte nIndexBefore = ucmd->weaponindex;
 
 	// Checks are only required if cycleslot is valid; see 'CPlayer::UpdateWeaponSlots'.
-	if (ucmd->cycleslot != WEAPON_INVENTORY_SLOT_INVALID)
+	if (ucmd->cycleslot != WEAPON_INVENTORY_SLOT_INVALID
+		&& ucmd->cycleslot != WEAPON_INVENTORY_SLOT_HOLSTERED
+		&& ucmd->cycleslot != WEAPON_INVENTORY_SLOT_ANY)
 	{
 		const bool dualWieldEnabled = usercmd_dualwield_enable.GetBool();
 
@@ -214,6 +227,21 @@ void ClampUserCmd(CUserCmd* ucmd)
 			"[USERCMD-CLAMP] cmd=%d cycleslot %u->%u weaponindex %u->%u\n",
 			ucmd->command_number, nCycleBefore, ucmd->cycleslot,
 			nIndexBefore, ucmd->weaponindex);
+	}
+
+	if (usercmd_select_diag.GetBool() && s_nSelectDiagLines < kSelectDiagCap)
+	{
+		const int16_t nSelWord = ucmd->weaponselect;
+		if (ucmd->cycleslot != WEAPON_INVENTORY_SLOT_INVALID
+			|| (nSelWord & (int16_t)0x8000) == 0
+			|| ucmd->setlastcycleslot)
+		{
+			++s_nSelectDiagLines;
+			Warning(eDLL_T::SERVER,
+				"[USERCMD-SEL] cmd=%d cycleslot=%u weaponindex=%u selword=0x%04X setlast=%d\n",
+				ucmd->command_number, ucmd->cycleslot, ucmd->weaponindex,
+				(unsigned)nSelWord & 0xFFFFu, ucmd->setlastcycleslot ? 1 : 0);
+		}
 	}
 }
 

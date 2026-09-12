@@ -88,6 +88,7 @@ static constexpr int kDuckStateStanding = 0; // DS_STANDING
 // CPlayerLocalData: duckToggle 0x5AA8 = localdata+0x18, fallVel is localdata+0x48.
 static constexpr ptrdiff_t PLAYER_OFF_FALLVEL = 0x5AD8;
 static constexpr ptrdiff_t PLAYER_OFF_HAS_JUMPED = 0x6230; // m_bHasJumpedSinceTouchedGround
+static constexpr ptrdiff_t PLAYER_OFF_PUSHAWAY = 30700; // m_pushAwayFromTopAcceleration
 
 // TeleportPlayerNoInterp step selector, so the placement path can be bisected
 // against a plain SetOrigin without a rebuild.
@@ -699,6 +700,8 @@ static void* Translocation_ThisEntity(HSQUIRRELVM v)
 
 static void (*v_CBaseEntity_SetAbsOrigin)(CBaseEntity* pEntity, const float* pAbsOrigin) = nullptr;
 static bool s_bSetAbsOriginResolved = false;
+static void (*v_CBaseEntity_SetAbsVelocity)(void* pEntity, const Vector3D* pVelocity) = nullptr;
+static bool s_bSetAbsVelocityResolved = false;
 
 static void Translocation_ResolveSetAbsOrigin(void)
 {
@@ -721,6 +724,31 @@ static void Translocation_ResolveSetAbsOrigin(void)
 		Msg(eDLL_T::SERVER,
 			"[TRANSLOC] SetAbsOrigin resolved at %p\n",
 			reinterpret_cast<void*>(v_CBaseEntity_SetAbsOrigin));
+	}
+}
+
+static void Translocation_ResolveSetAbsVelocity(void)
+{
+	if (s_bSetAbsVelocityResolved)
+		return;
+	s_bSetAbsVelocityResolved = true;
+
+	Module_FindPattern(g_GameDll,
+		"48 8B C4 48 89 58 10 48 89 68 18 48 89 70 20 57 48 81 EC B0 00 00 00 "
+		"48 8B 1D ?? ?? ?? ?? 48 8B E9 44 0F 29 40 C8 48 8B F2 0F BF 41 58")
+		.GetPtr(v_CBaseEntity_SetAbsVelocity);
+
+	if (!v_CBaseEntity_SetAbsVelocity)
+	{
+		Warning(eDLL_T::SERVER,
+			"[TRANSLOC] SetAbsVelocity pattern unresolved -- "
+			"PlantOnGround cannot zero velocity\n");
+	}
+	else
+	{
+		Msg(eDLL_T::SERVER,
+			"[TRANSLOC] SetAbsVelocity resolved at %p\n",
+			reinterpret_cast<void*>(v_CBaseEntity_SetAbsVelocity));
 	}
 }
 
@@ -831,6 +859,18 @@ static void Translocation_PlantOnGround(void* pEnt)
 
 	*reinterpret_cast<float*>(base + PLAYER_OFF_FALLVEL) = 0.0f;
 	*reinterpret_cast<unsigned char*>(base + PLAYER_OFF_HAS_JUMPED) = 0;
+
+	float* const pPush = reinterpret_cast<float*>(base + PLAYER_OFF_PUSHAWAY);
+	pPush[0] = 0.0f;
+	pPush[1] = 0.0f;
+	pPush[2] = 0.0f;
+
+	Translocation_ResolveSetAbsVelocity();
+	if (v_CBaseEntity_SetAbsVelocity)
+	{
+		const Vector3D vel(0.0f, 0.0f, 0.0f);
+		v_CBaseEntity_SetAbsVelocity(pEnt, &vel);
+	}
 
 	int* const pFlags = reinterpret_cast<int*>(base + PLAYER_OFF_FLAGS);
 	if (pWorld)
