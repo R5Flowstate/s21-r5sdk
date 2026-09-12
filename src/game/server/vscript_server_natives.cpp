@@ -161,6 +161,10 @@ static constexpr int BENF_ALLOW_OBJECT_PLACEMENT = 0x10000000;
 // CBaseEntity networked-flag bit 30; replicated through DT_BaseEntity m_networkedFlags.
 static constexpr int BENF_CAN_BE_MELEED_BY_OWNER = 0x40000000;
 
+// CBaseEntity networked-flag bit 10; replicated through DT_BaseEntity m_networkedFlags.
+// Set while the client must skip this entity in aim assist target search.
+static constexpr int BENF_AIM_ASSIST_IGNORED = 0x00000400;
+
 static void (*v_CBaseEntity_SetNetworkedFlag)(void* pEntity, bool bSet, int nMask) = nullptr;
 static bool s_bSetNetworkedFlagResolved = false;
 
@@ -271,6 +275,50 @@ static SQRESULT Script_SetCanBeMeleedByOwner(HSQUIRRELVM v)
 		return SQ_ERROR;
 
 	v_CBaseEntity_SetNetworkedFlag(pEnt, bCanMelee != SQFalse, BENF_CAN_BE_MELEED_BY_OWNER);
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static ConVar bridge_aimassist_log("bridge_aimassist_log", "0", FCVAR_DEVELOPMENTONLY,
+	"Log SetAimAssistAllowed invocations (0=first call only, 1=every call).");
+
+//-----------------------------------------------------------------------------
+// entity.SetAimAssistAllowed(bool) -- clears the client-tested ignore bit when
+// allowed, sets it when disallowed. The engine helper dirty-marks the edict.
+//-----------------------------------------------------------------------------
+static SQRESULT Script_SetAimAssistAllowed(HSQUIRRELVM v)
+{
+	ServerScript_ResolveSetNetworkedFlag();
+
+	if (!v_CBaseEntity_SetNetworkedFlag)
+	{
+		static bool s_bStubWarned = false;
+		if (!s_bStubWarned)
+		{
+			s_bStubWarned = true;
+			Warning(eDLL_T::SERVER,
+				"[AIM-ASSIST] SetAimAssistAllowed -- SetNetworkedFlag native unresolved, no-op\n");
+		}
+		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+	}
+
+	void* pEnt = nullptr;
+	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pEnt)) || !pEnt)
+		return SQ_ERROR;
+
+	SQBool bAllowed = SQFalse;
+	if (SQ_FAILED(sq_getbool(v, 2, &bAllowed)))
+		return SQ_ERROR;
+
+	v_CBaseEntity_SetNetworkedFlag(pEnt, bAllowed == SQFalse, BENF_AIM_ASSIST_IGNORED);
+
+	static bool s_bLoggedOnce = false;
+	if (!s_bLoggedOnce || bridge_aimassist_log.GetBool())
+	{
+		s_bLoggedOnce = true;
+		Msg(eDLL_T::SERVER, "[AIM-ASSIST] entity=%p allowed=%d\n",
+			pEnt, bAllowed ? 1 : 0);
+	}
+
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
@@ -2796,6 +2844,14 @@ void Script_RegisterDedicatedEntityNatives(ScriptClassDescriptor_t* entityStruct
         "",
         false,
         Script_Anim_EnableRelativeToGround);
+    entityStruct->AddFunction(
+        "SetAimAssistAllowed",
+        "Script_SetAimAssistAllowed",
+        "Allows or excludes this entity from controller aim assist (networked).",
+        "void",
+        "bool allowed",
+        false,
+        Script_SetAimAssistAllowed);
 }
 
 void Script_RegisterDedicatedPlayerNatives(ScriptClassDescriptor_t* playerStruct)
