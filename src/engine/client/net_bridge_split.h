@@ -274,6 +274,21 @@ struct State {
 	bool     bulletTracePresent;
 	float    frametime;
 };
+
+// Both engines delta-encode the first cmd of a clc_Move batch against a
+// CUserCmd::Reset() null cmd, not a zeroed one. A zero baseline decodes an
+// inherited weaponSelect as slot 0, so a later explicit slot-0 select reads
+// as no-change and is never emitted.
+inline void ResetToNullCmd(State& s)
+{
+	memset(&s, 0, sizeof(s));
+	s.commandNumber        = 0xFFFFFFFFu;
+	s.weaponSelect         = -1;
+	s.weaponSelectType     = -1;
+	s.realtimeWeaponMod    = 0xFF00u;
+	s.weaponCustomActivity = -1;
+	s.meleetarget          = 0xFFFFFFFFu;
+}
 }
 
 

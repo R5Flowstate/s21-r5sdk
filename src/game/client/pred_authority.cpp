@@ -522,6 +522,22 @@ float PredNative_LatestPredictedTime(void)
 	return *reinterpret_cast<const float*>(globals + 0x28);   // the clock weapon timers compare against
 }
 
+bool PredNative_SnapTimes(float* pLast, float* pCurrent, float* pFuture,
+	float* pLerp)
+{
+	const uintptr_t globals = PredNative_Globals();
+	if (!globals)
+		return false;
+
+	// CGlobalVarsBase: lastSnapTime +0x14, currentSnapTime +0x18,
+	// futureSnapTime +0x1C, snapLerp +0x20.
+	if (pLast)    *pLast    = *reinterpret_cast<const float*>(globals + 0x14);
+	if (pCurrent) *pCurrent = *reinterpret_cast<const float*>(globals + 0x18);
+	if (pFuture)  *pFuture  = *reinterpret_cast<const float*>(globals + 0x1C);
+	if (pLerp)    *pLerp    = *reinterpret_cast<const float*>(globals + 0x20);
+	return true;
+}
+
 float PredNative_Tolerance(int nType, float flFieldTol)
 {
 	if (nType != FIELD_TIME)

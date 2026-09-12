@@ -278,47 +278,76 @@ static SQRESULT Script_SetCanBeMeleedByOwner(HSQUIRRELVM v)
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
-static ConVar bridge_aimassist_log("bridge_aimassist_log", "0", FCVAR_DEVELOPMENTONLY,
-	"Log SetAimAssistAllowed invocations (0=first call only, 1=every call).");
+static constexpr int kNetworkedFlagsSendOff = 0xD8; // DT_BaseEntity::m_networkedFlags
 
-//-----------------------------------------------------------------------------
-// entity.SetAimAssistAllowed(bool) -- clears the client-tested ignore bit when
-// allowed, sets it when disallowed. The engine helper dirty-marks the edict.
-//-----------------------------------------------------------------------------
-static SQRESULT Script_SetAimAssistAllowed(HSQUIRRELVM v)
+static void ServerScript_SetAimAssistAllowedBit(void* pEnt, bool bAllowed)
 {
-	ServerScript_ResolveSetNetworkedFlag();
+	if (!pEnt)
+		return;
 
-	if (!v_CBaseEntity_SetNetworkedFlag)
+	int nOff = DTExtend_FindNativePropOffset(pEnt, "m_networkedFlags");
+	if (nOff > 0)
+		nOff &= 0xFFFFF;
+	// SendProp sits in the early CBaseEntity dword. Recv twins store the same
+	// name much later -- refuse those so a wrong table walk cannot stomp.
+	if (nOff < 4 || nOff > 0x200 || (nOff & 3))
 	{
-		static bool s_bStubWarned = false;
-		if (!s_bStubWarned)
+		static bool s_bOffWarned = false;
+		if (!s_bOffWarned)
 		{
-			s_bStubWarned = true;
+			s_bOffWarned = true;
 			Warning(eDLL_T::SERVER,
-				"[AIM-ASSIST] SetAimAssistAllowed -- SetNetworkedFlag native unresolved, no-op\n");
+				"[AIM-ASSIST] m_networkedFlags SendProp unresolved (got %d) -- using 0xD8\n",
+				nOff);
+		}
+		nOff = kNetworkedFlagsSendOff;
+	}
+
+	int* const pFlags = reinterpret_cast<int*>(
+		reinterpret_cast<uintptr_t>(pEnt) + static_cast<unsigned>(nOff));
+	const int nOld = *pFlags;
+	const int nNew = bAllowed ? (nOld & ~BENF_AIM_ASSIST_IGNORED)
+	                          : (nOld | BENF_AIM_ASSIST_IGNORED);
+
+	static bool s_bLoggedOnce = false;
+	if (!s_bLoggedOnce)
+	{
+		s_bLoggedOnce = true;
+		Msg(eDLL_T::SERVER,
+			"[AIM-ASSIST] entity=%p allowed=%d off=0x%X old=0x%X new=0x%X\n",
+			pEnt, bAllowed ? 1 : 0, nOff, nOld, nNew);
+	}
+
+	if (nOld == nNew)
+		return;
+
+	*pFlags = nNew;
+	MarkEntityEdictDirty(pEnt);
+}
+
+//-----------------------------------------------------------------------------
+// entity.SetAimAssistAllowed(bool) -- bit 10 of m_networkedFlags. Allowed
+// clears it; disallowed sets it. The S21 client skips entities with the bit.
+//-----------------------------------------------------------------------------
+SQRESULT Script_SetAimAssistAllowed(HSQUIRRELVM v)
+{
+	void* pEnt = nullptr;
+	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pEnt)) || !pEnt)
+	{
+		static bool s_bNullWarned = false;
+		if (!s_bNullWarned)
+		{
+			s_bNullWarned = true;
+			Warning(eDLL_T::SERVER, "[AIM-ASSIST] null entity -- SetAimAssistAllowed skipped\n");
 		}
 		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 	}
 
-	void* pEnt = nullptr;
-	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pEnt)) || !pEnt)
-		return SQ_ERROR;
-
 	SQBool bAllowed = SQFalse;
 	if (SQ_FAILED(sq_getbool(v, 2, &bAllowed)))
-		return SQ_ERROR;
+		bAllowed = SQFalse;
 
-	v_CBaseEntity_SetNetworkedFlag(pEnt, bAllowed == SQFalse, BENF_AIM_ASSIST_IGNORED);
-
-	static bool s_bLoggedOnce = false;
-	if (!s_bLoggedOnce || bridge_aimassist_log.GetBool())
-	{
-		s_bLoggedOnce = true;
-		Msg(eDLL_T::SERVER, "[AIM-ASSIST] entity=%p allowed=%d\n",
-			pEnt, bAllowed ? 1 : 0);
-	}
-
+	ServerScript_SetAimAssistAllowedBit(pEnt, bAllowed != SQFalse);
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
@@ -2844,14 +2873,19 @@ void Script_RegisterDedicatedEntityNatives(ScriptClassDescriptor_t* entityStruct
         "",
         false,
         Script_Anim_EnableRelativeToGround);
-    entityStruct->AddFunction(
-        "SetAimAssistAllowed",
-        "Script_SetAimAssistAllowed",
-        "Allows or excludes this entity from controller aim assist (networked).",
-        "void",
-        "bool allowed",
-        false,
-        Script_SetAimAssistAllowed);
+	// Engine already registers this method. The detour is the one body.
+	// If the pattern missed, last-wins AddFunction still installs ours.
+	if (!v_ScriptSetAimAssistAllowed)
+	{
+		entityStruct->AddFunction(
+			"SetAimAssistAllowed",
+			"Script_SetAimAssistAllowed",
+			"Allows or excludes this entity from controller aim assist (networked).",
+			"void",
+			"bool allowed",
+			false,
+			Script_SetAimAssistAllowed);
+	}
 }
 
 void Script_RegisterDedicatedPlayerNatives(ScriptClassDescriptor_t* playerStruct)

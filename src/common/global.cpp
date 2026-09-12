@@ -10,7 +10,7 @@
 #include "completion.h"
 #include "callback.h"
 #include "global.h"
-
+#include "game/client/visual_clutter.h"
 
 ConVar curl_debug("curl_debug", "0", FCVAR_DEVELOPMENTONLY, "Determines whether or not to enable curl debug logging.", "1 = curl logs; 0 (zero) = no logs");
 ConVar curl_timeout("curl_timeout", "15", FCVAR_DEVELOPMENTONLY, "Maximum time in seconds a curl transfer operation could take.");
@@ -291,6 +291,7 @@ void Bridge_ApplyLaunchConVarTokens(void)
 void Bridge_ApplyLaunchConVarOverrides(void)
 {
 	SoftenedLocale_DefaultOn();
+	VisualClutter_ApplyPin();
 
 	Bridge_ApplyLaunchConVarTokens();
 

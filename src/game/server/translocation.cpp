@@ -66,6 +66,9 @@ static constexpr ptrdiff_t PLAYER_OFF_DOINGHALFDUCK = 0x65F8;
 static constexpr ptrdiff_t PLAYER_OFF_DUCKTOGGLE = 0x5AA8;
 static constexpr ptrdiff_t PLAYER_OFF_FORCESTANCE = 0x5AAC; // 0 none, 1 stand, 2 crouch
 static constexpr ptrdiff_t PLAYER_OFF_DUCK_REMAINDER = 0x5AB0;
+static constexpr ptrdiff_t PLAYER_OFF_VIEWOFFSET = 0x56C; // m_vecViewOffset, DT_BaseCombatCharacter
+static constexpr ptrdiff_t PLAYER_OFF_CLASSSETTINGS = 0x5F08;
+static constexpr size_t kVtableNetworkStateChanged = 0x868; // DuckImmediate per-float notify
 static constexpr ptrdiff_t PLAYER_OFF_DUCK_HULL_MIN = 0x6614;
 static constexpr ptrdiff_t PLAYER_OFF_DUCK_HULL_MAX = 0x6620;
 static constexpr ptrdiff_t PLAYER_OFF_STAND_HULL_MIN = 0x65FC;
@@ -118,14 +121,13 @@ static __int64 (*v_WeaponX_SetWeaponState)(void* pWeapon, unsigned int state) = 
 static char (*v_SetIdealWeaponActivity)(void* pWeapon, unsigned int activity) = nullptr;
 static char (*v_WeaponX_StartCustomActivity)(void* pWeapon, unsigned int activity, unsigned char flags) = nullptr;
 static void (*v_CPlayer_DuckImmediate)(void* pPlayer) = nullptr;
+static uint32_t* s_pPoseViewHeightOff = nullptr;
+static uint32_t* s_pPoseStandOff = nullptr;
 static char (*v_CBaseEntity_SetMoveType)(void* pEnt, int moveType, char moveCollide) = nullptr;
 static void (*v_CPlayer_SetOneHandedOn)(void* pPlayer) = nullptr;
 static void (*v_CPlayer_SetOneHandedOff)(void* pPlayer) = nullptr;
 
 static SQRESULT (*v_IsInputCommandPressed)(HSQUIRRELVM v) = nullptr;
-static ConVar bridge_translocation_diag("bridge_translocation_diag", "0",
-	FCVAR_DEVELOPMENTONLY,
-	"Log translocation native first-calls and TeleportPlayerNoInterp results.");
 static ConVar bridge_teleport_steps("bridge_teleport_steps", "31",
 	FCVAR_RELEASE,
 	"TeleportPlayerNoInterp steps to run, as a bitmask. 1 = EF_NOINTERP, "
@@ -150,7 +152,7 @@ static void Translocation_SetFlightHold(void* pWeapon, bool bHold)
 		s_flightHoldWeapons.Erase(pWeapon);
 
 	static bool s_bLoggedOnce = false;
-	if (!s_bLoggedOnce || bridge_translocation_diag.GetBool())
+	if (!s_bLoggedOnce)
 	{
 		s_bLoggedOnce = true;
 		Msg(eDLL_T::SERVER, "[TRANSLOC] flight hold weapon=%p hold=%d\n",
@@ -252,7 +254,7 @@ static void Translocation_LogTossLoop(const char* pszEdge, void* pWeapon,
 	unsigned int stateIn, unsigned int stateOut, float held, int holstered)
 {
 	static int s_nLog = 24;
-	if (s_nLog <= 0 && !bridge_translocation_diag.GetBool())
+	if (s_nLog <= 0)
 		return;
 	if (s_nLog > 0)
 		--s_nLog;
@@ -565,13 +567,6 @@ static void Translocation_ArmTossLoopClocks(void* pWeapon)
 	*reinterpret_cast<float*>(
 		reinterpret_cast<uintptr_t>(pWeapon) + WEAPON_OFF_TIMEWEAPONIDLE) = stamp;
 	MarkEntityEdictDirty(pWeapon);
-
-	if (bridge_translocation_diag.GetBool())
-	{
-		Msg(eDLL_T::SERVER,
-			"[TRANSLOC] tossloop clocks weapon=%p ready=%.3f idle=%.3f now=%.3f\n",
-			pWeapon, stamp, stamp, now);
-	}
 }
 
 static void Translocation_ReleaseTossLoopClocks(void* pWeapon)
@@ -806,13 +801,46 @@ static bool Translocation_IsLivePlayer(void* pEnt)
 	return UTIL_PlayerByIndex(edictIdx) == reinterpret_cast<CPlayer*>(pEnt);
 }
 
-// A teleport leaves the player with no ground entity for a tick. A duck that
-// STARTS on such a tick latches m_doingHalfDuck, and when that transition
-// completes the movement FSM adds (standHeight - duckHeight) * 0.5 = 16.5 to
-// origin.z -- the player ends up a half hull above an exactly authored spawn.
-// Settling the state machine before placement leaves nothing in flight to
-// complete. duckState is edict-dirtied by the engine, so the client replays
-// from the same standing state.
+static void Translocation_NotifyField(void* pEnt, void* pField)
+{
+	void** const pVtbl = *reinterpret_cast<void***>(pEnt);
+	if (!pVtbl)
+		return;
+	using NotifyFn = void(__fastcall*)(void*, void*);
+	const NotifyFn fn = reinterpret_cast<NotifyFn>(pVtbl[kVtableNetworkStateChanged / sizeof(void*)]);
+	if (fn)
+		fn(pEnt, pField);
+}
+
+// DuckImmediate writes crouched poseSettings.viewheight into m_vecViewOffset.
+// Duck() only calls SetDuckedEyeOffset during a transition; DS_STANDING
+// early-outs and leaves a leftover duck-height vector on the wire forever.
+static void Translocation_ApplyStandingViewOffset(void* pEnt)
+{
+	if (!s_pPoseViewHeightOff || !s_pPoseStandOff)
+		return;
+
+	const uintptr_t base = reinterpret_cast<uintptr_t>(pEnt);
+	const uintptr_t settings = *reinterpret_cast<uintptr_t*>(base + PLAYER_OFF_CLASSSETTINGS);
+	if (!settings)
+		return;
+
+	const uint32_t viewHOff = *s_pPoseViewHeightOff;
+	const uint32_t standOff = *s_pPoseStandOff;
+	const float* const pSrc = reinterpret_cast<const float*>(settings + standOff + viewHOff);
+	float* const pDst = reinterpret_cast<float*>(base + PLAYER_OFF_VIEWOFFSET);
+	for (int i = 0; i < 3; ++i)
+	{
+		if (pDst[i] == pSrc[i])
+			continue;
+		Translocation_NotifyField(pEnt, &pDst[i]);
+		pDst[i] = pSrc[i];
+	}
+}
+
+// A teleport leaves the player with no ground entity for a tick. Settling
+// the FSM leaves nothing in flight. viewOffset is a separate networked
+// field DuckImmediate writes; Duck() will not fix it from DS_STANDING.
 static void Translocation_SettleStance(void* pEnt)
 {
 	if (!Translocation_IsLivePlayer(pEnt))
@@ -838,6 +866,7 @@ static void Translocation_SettleStance(void* pEnt)
 	int* const pFlags = reinterpret_cast<int*>(base + PLAYER_OFF_FLAGS);
 	*pFlags &= ~kFlDucking;
 
+	Translocation_ApplyStandingViewOffset(pEnt);
 	MarkEntityEdictDirty(pEnt);
 }
 
@@ -874,7 +903,7 @@ static SQRESULT Script_SettleStance(HSQUIRRELVM v)
 	TriggerPass_SetGroundEntityNull(pEnt);
 
 	static bool s_bLoggedOnce = false;
-	if (!s_bLoggedOnce || bridge_translocation_diag.GetBool())
+	if (!s_bLoggedOnce)
 	{
 		s_bLoggedOnce = true;
 		Msg(eDLL_T::SERVER, "[TRANSLOC] SettleStance ent=%p\n", pEnt);
@@ -938,12 +967,6 @@ static void Translocation_PlantOnGround(void* pEnt)
 	}
 
 	MarkEntityEdictDirty(pEnt);
-
-	if (bridge_translocation_diag.GetBool())
-	{
-		Msg(eDLL_T::SERVER, "[TRANSLOC] PlantOnGround ent=%p world=%p flags=0x%x\n",
-			pEnt, pWorld, *pFlags);
-	}
 }
 
 static SQRESULT Script_PlantOnGround(HSQUIRRELVM v)
@@ -955,7 +978,7 @@ static SQRESULT Script_PlantOnGround(HSQUIRRELVM v)
 	Translocation_PlantOnGround(pEnt);
 
 	static bool s_bLoggedOnce = false;
-	if (!s_bLoggedOnce || bridge_translocation_diag.GetBool())
+	if (!s_bLoggedOnce)
 	{
 		s_bLoggedOnce = true;
 		Msg(eDLL_T::SERVER, "[TRANSLOC] PlantOnGround ent=%p\n", pEnt);
@@ -988,7 +1011,7 @@ static SQRESULT Script_AddGrenadeStatusFlag(HSQUIRRELVM v)
 		pEnt, GrenadeStatusFlags_Read(pEnt) | static_cast<int>(flag));
 
 	static bool s_bLoggedOnce = false;
-	if (!s_bLoggedOnce || bridge_translocation_diag.GetBool())
+	if (!s_bLoggedOnce)
 	{
 		s_bLoggedOnce = true;
 		Msg(eDLL_T::SERVER, "[TRANSLOC] AddGrenadeStatusFlag ent=%p flag=%d -> 0x%X\n",
@@ -1055,7 +1078,7 @@ static SQRESULT Script_SetProjectileTouchesOwnerTriggers(HSQUIRRELVM v)
 		Translocation_OnProjectileSpawned(pEnt);
 
 	static bool s_bLoggedOnce = false;
-	if (!s_bLoggedOnce || bridge_translocation_diag.GetBool())
+	if (!s_bLoggedOnce)
 	{
 		s_bLoggedOnce = true;
 		Msg(eDLL_T::SERVER,
@@ -1078,7 +1101,7 @@ static SQRESULT Script_TriggerAndTouchOwnerTouchedTriggers(HSQUIRRELVM v)
 		return SQ_ERROR;
 
 	static bool s_bLoggedOnce = false;
-	if (!s_bLoggedOnce || bridge_translocation_diag.GetBool())
+	if (!s_bLoggedOnce)
 	{
 		s_bLoggedOnce = true;
 		Msg(eDLL_T::SERVER,
@@ -1110,11 +1133,6 @@ static SQRESULT Script_IsInputCommandPressed(HSQUIRRELVM v)
 	const bool hit = ((held & static_cast<int>(cmd)) != 0)
 		|| ((pressed & static_cast<int>(cmd)) != 0)
 		|| sticky;
-	if (sticky && bridge_translocation_diag.GetBool())
-	{
-		Msg(eDLL_T::SERVER, "[TRANSLOC] drop-click sticky cmd=0x%X\n",
-			static_cast<int>(cmd));
-	}
 	sq_pushbool(v, hit ? SQTrue : SQFalse);
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
@@ -1217,13 +1235,6 @@ static SQRESULT ServerScript_TeleportPlayerNoInterp(HSQUIRRELVM v)
 	const float dest[3] = { pPos->x, pPos->y, pPos->z };
 	v_CBaseEntity_SetAbsOrigin(reinterpret_cast<CBaseEntity*>(pEnt), dest);
 	MarkEntityEdictDirty(pEnt);
-
-	if (bridge_translocation_diag.GetBool())
-	{
-		Msg(eDLL_T::SERVER,
-			"[TRANSLOC] TeleportPlayerNoInterp ent=%p -> %.1f %.1f %.1f\n",
-			pEnt, dest[0], dest[1], dest[2]);
-	}
 
 	sq_pushbool(v, SQTrue);
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
@@ -1629,6 +1640,8 @@ void VTranslocation::GetAdr(void) const
 	LogFunAdr("CWeaponX::SetIdealWeaponActivity", v_SetIdealWeaponActivity);
 	LogFunAdr("CWeaponX::StartCustomActivity", v_WeaponX_StartCustomActivity);
 	LogFunAdr("CPlayer::DuckImmediate", v_CPlayer_DuckImmediate);
+	LogVarAdr("poseSettings.viewheight", s_pPoseViewHeightOff);
+	LogVarAdr("poseSettings.standing", s_pPoseStandOff);
 	LogFunAdr("CBaseEntity::SetMoveType", v_CBaseEntity_SetMoveType);
 	LogFunAdr("CPlayer::SetOneHandedWeaponUsageOn", v_CPlayer_SetOneHandedOn);
 	LogVarAdr("TossCompleteHolsterRet", s_pTossCompleteHolsterRet);
@@ -1691,6 +1704,21 @@ void VTranslocation::GetFun(void) const
 	if (!v_CPlayer_DuckImmediate)
 		Warning(eDLL_T::SERVER,
 			"[TRANSLOC] DuckImmediate unresolved -- TeleportPlayerNoInterp skips duck\n");
+	else
+	{
+		// +0x75 / +0x8C: mov eax, [rip] viewheight field and crouch pose finders.
+		s_pPoseViewHeightOff = CMemory(v_CPlayer_DuckImmediate)
+			.Offset(0x75).ResolveRelativeAddress(2, 6).RCast<uint32_t*>();
+		uint32_t* const pCrouch = CMemory(v_CPlayer_DuckImmediate)
+			.Offset(0x8C).ResolveRelativeAddress(2, 6).RCast<uint32_t*>();
+		// standing finder is the previous poseSettings slot (idx0 vs idx1).
+		if (pCrouch)
+			s_pPoseStandOff = reinterpret_cast<uint32_t*>(
+				reinterpret_cast<uintptr_t>(pCrouch) - 0x220);
+		if (!s_pPoseViewHeightOff || !s_pPoseStandOff)
+			Warning(eDLL_T::SERVER,
+				"[TRANSLOC] poseSettings finders unresolved -- SettleStance skips viewOffset\n");
+	}
 
 	// SERVER SetMoveType. Unique (1 hit). WALK=2, collide=0 is ClearTraverse.
 	Module_FindPattern(g_GameDll,

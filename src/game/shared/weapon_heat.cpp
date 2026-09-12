@@ -50,6 +50,11 @@ static ConVar bridge_charge_hold_when_full("bridge_charge_hold_when_full", "1",
 	"Honour charge_allow_hold_when_full from the weapon KV, which this engine "
 	"has no setting for (0=off, 1=on).");
 
+static ConVar bridge_charge_min_required("bridge_charge_min_required", "1",
+	FCVAR_RELEASE,
+	"Honour charge_attack_min_charge_required from the weapon KV, which this "
+	"engine has no setting for (0=off, 1=on).");
+
 static ConVar bridge_charge_overheat_cooldown("bridge_charge_overheat_cooldown", "1",
 	FCVAR_RELEASE,
 	"Use charge_overheat_cooldown_time/delay when a charge weapon overheats "
@@ -94,6 +99,8 @@ static constexpr int WEAPON_CHARGE_LEVEL_BASE_OFFSET     = WEAPON_MODVARS_OFFSET
 static constexpr int WEAPON_CHARGE_OVERHEATS_WHEN_FULL_OFFSET = WEAPON_MODVARS_OFFSET + 0x4EE;
 // charge_remain_full_when_fired -- GetChargeFraction's no-decay early-out.
 static constexpr int WEAPON_CHARGE_REMAIN_FULL_OFFSET    = WEAPON_MODVARS_OFFSET + 0x4EC;
+// charge_require_input -- KV bool at modvars+0x4E8 (entity +0x1CC8).
+static constexpr int WEAPON_CHARGE_REQUIRE_INPUT_OFFSET  = WEAPON_MODVARS_OFFSET + 0x4E8;
 // S3 charge_cooldown_time_late1/2/3. S21 renamed these to charge_overheat_*.
 static constexpr int MODVAR_CHARGE_COOLDOWN_TIME_LATE1   = 0x4CC;
 static constexpr int MODVAR_CHARGE_COOLDOWN_TIME_LATE2   = 0x4D0;
@@ -133,6 +140,10 @@ struct WeaponHeatConfig
 	// curve is: this engine's weapon-KV table has no entry for the key, so the
 	// value never reaches m_modVars and the charge FSM cannot see it.
 	bool chargeAllowHoldWhenFull = false;
+
+	// charge_attack_min_charge_required. Same missing-key case; this engine
+	// only has charge_attack_requires_full_charge (bool, default 0).
+	float chargeAttackMinChargeRequired = 0.0f;
 
 	// charge_overheat_cooldown_time / _delay. S3 has the overheat predicate
 	// and the late-ramp slots; it has no schema entries for these two.
@@ -360,6 +371,8 @@ static WeaponHeatConfig LoadHeatConfigFromFile(const std::string& weaponClassNam
 			config.burstFireCount = Sdk_ParseInt(value);
 		else if (key == "charge_allow_hold_when_full")
 			config.chargeAllowHoldWhenFull = (Sdk_ParseInt(value) != 0);
+		else if (key == "charge_attack_min_charge_required")
+			config.chargeAttackMinChargeRequired = Sdk_ParseFloat(value);
 		else if (key == "charge_overheat_cooldown_time")
 			config.overheatCooldownTime = Sdk_ParseFloat(value);
 		else if (key == "charge_overheat_cooldown_delay")
@@ -406,6 +419,13 @@ static WeaponHeatConfig LoadHeatConfigFromFile(const std::string& weaponClassNam
 			weaponClassName.c_str(), config.hasChargeCurve ? 1 : 0,
 			config.chargeCurveA, config.chargeCurveB, config.chargeCurveC,
 			config.chargeAllowHoldWhenFull ? 1 : 0);
+	}
+
+	if (config.chargeAttackMinChargeRequired > 0.0f)
+	{
+		Msg(eDLL_T::SERVER,
+			"[ChargeMin] Loaded '%s': min=%.3f\n",
+			weaponClassName.c_str(), config.chargeAttackMinChargeRequired);
 	}
 
 	if (config.overheatCooldownTime > 0.0f)
@@ -963,6 +983,7 @@ static void(__fastcall* v_CWeaponX_PlayerWeapon_BusyFrame)(__int64 weapon) = nul
 static char(__fastcall* v_CWeaponX_PrimaryAttack)(__int64 weapon) = nullptr;
 static char(__fastcall* v_CWeaponX_HandleChargeAttack)(__int64 weapon, char isHoldingAttack,
 	char isPrimaryAttack) = nullptr;
+static char(__fastcall* v_CWeaponX_ChargeEndNoAttack)(__int64 weapon) = nullptr;
 
 // Unconditional first-call announce so a silent stub cannot hide.
 static void WeaponHeat_AnnounceHookOnce(bool& flag, const char* name)
@@ -1060,6 +1081,49 @@ static bool WeaponHeat_ShouldHoldFullCharge(void* pWeapon, char isHoldingAttack)
 	return ComputeWeaponLinearChargeFraction(pWeapon) >= 1.0f;
 }
 
+// True when the stock FSM is about to ChargeEnd (release, or elapsed >= charge_time).
+static bool WeaponHeat_ChargeFsmWouldComplete(void* pWeapon, char isHoldingAttack, char isPrimaryAttack)
+{
+	const int state = GetWeaponStateDword(pWeapon);
+	if ((unsigned int)(state - WEAP_STATE_CHARGE) > 1u && !GetWeaponIsChargingFlag(pWeapon))
+		return false;
+
+	const uintptr_t base = reinterpret_cast<uintptr_t>(pWeapon);
+	const bool requireInput = *reinterpret_cast<const unsigned char*>(
+		base + WEAPON_CHARGE_REQUIRE_INPUT_OFFSET) != 0;
+	if (!isHoldingAttack && requireInput)
+		return true;
+
+	const float chargeTime = GetWeaponChargeTime(pWeapon);
+	if (chargeTime <= 0.0f)
+	{
+		const bool remainFull = *reinterpret_cast<const unsigned char*>(
+			base + WEAPON_CHARGE_REMAIN_FULL_OFFSET) != 0;
+		return remainFull && isPrimaryAttack;
+	}
+
+	return (GetChargeClockTime() - GetWeaponChargeStartTime(pWeapon)) >= chargeTime;
+}
+
+static bool WeaponHeat_ShouldChargeEndNoAttack(void* pWeapon, char isHoldingAttack, char isPrimaryAttack)
+{
+	if (!bridge_charge_min_required.GetBool() || !pWeapon || !v_CWeaponX_ChargeEndNoAttack)
+		return false;
+
+	const WeaponHeatConfig& config = GetHeatConfig(GetWeaponClassName(pWeapon));
+	if (config.chargeAttackMinChargeRequired <= 0.0f)
+		return false;
+
+	if (*reinterpret_cast<const unsigned char*>(
+		reinterpret_cast<uintptr_t>(pWeapon) + WEAPON_FIRES_WHILE_CHARGING_OFFSET))
+		return false;
+
+	if (!WeaponHeat_ChargeFsmWouldComplete(pWeapon, isHoldingAttack, isPrimaryAttack))
+		return false;
+
+	return Clamp01(ComputeWeaponLinearChargeFraction(pWeapon)) < config.chargeAttackMinChargeRequired;
+}
+
 static char __fastcall Hook_CWeaponX_HandleChargeAttack(__int64 weapon, char isHoldingAttack,
 	char isPrimaryAttack)
 {
@@ -1099,6 +1163,24 @@ static char __fastcall Hook_CWeaponX_HandleChargeAttack(__int64 weapon, char isH
 		}
 	}
 
+	if (WeaponHeat_ShouldChargeEndNoAttack(reinterpret_cast<void*>(weapon), isHoldingAttack,
+		isPrimaryAttack))
+	{
+		static bool s_seenMin = false;
+		if (!s_seenMin)
+		{
+			s_seenMin = true;
+			Msg(eDLL_T::SERVER,
+				"[ChargeMin] '%s' ChargeEndNoAttack frac=%.3f min=%.3f hold=%d\n",
+				GetWeaponClassName(reinterpret_cast<void*>(weapon)),
+				Clamp01(ComputeWeaponLinearChargeFraction(reinterpret_cast<void*>(weapon))),
+				GetHeatConfig(GetWeaponClassName(reinterpret_cast<void*>(weapon))).chargeAttackMinChargeRequired,
+				isHoldingAttack ? 1 : 0);
+		}
+
+		return v_CWeaponX_ChargeEndNoAttack(weapon);
+	}
+
 	return v_CWeaponX_HandleChargeAttack(weapon, isHoldingAttack, isPrimaryAttack);
 }
 
@@ -1126,6 +1208,7 @@ void VWeaponHeat::GetAdr(void) const
 	LogFunAdr("CWeaponX::PlayerWeapon_BusyFrame", v_CWeaponX_PlayerWeapon_BusyFrame);
 	LogFunAdr("CWeaponX::PrimaryAttack", v_CWeaponX_PrimaryAttack);
 	LogFunAdr("CWeaponX::HandleChargeAttack_Internal", v_CWeaponX_HandleChargeAttack);
+	LogFunAdr("CWeaponX::ChargeEndNoAttack", v_CWeaponX_ChargeEndNoAttack);
 }
 
 void VWeaponHeat::GetFun(void) const
@@ -1148,6 +1231,13 @@ void VWeaponHeat::GetFun(void) const
 		"48 89 5C 24 08 48 89 6C 24 10 48 89 7C 24 18 41 56 48 83 EC 30 48 8B D9 "
 		"0F 29 74 24 20 8B 89 F0 11 00 00 41 0F B6 E8 44 0F B6 F2")
 		.GetPtr(v_CWeaponX_HandleChargeAttack);
+
+	// CWeaponX::ChargeEndNoAttack. Live half: weapState +0x1234, isCharging +0x1551,
+	// then ChargeEnd_Internal(0, 0).
+	Module_FindPattern(g_GameDll,
+		"48 83 EC 28 8B 81 34 12 00 00 83 E8 05 83 F8 01 76 16 E8 ?? ?? ?? ?? "
+		"84 C0 75 0D 38 81 51 15 00 00 75 05 48 83 C4 28 C3 45 33 C0 33 D2")
+		.GetPtr(v_CWeaponX_ChargeEndNoAttack);
 
 	// CWeaponX::PlayerWeapon_PostFrame (engine helper). Prologue through the
 	// m_weaponOwner load at weapon+0x11F0 and its -1 test; the wildcard is the
@@ -1189,6 +1279,10 @@ void VWeaponHeat::GetFun(void) const
 	if (!v_CWeaponX_GetChargeFraction)
 		Warning(eDLL_T::SERVER,
 			"[BowCharge] CWeaponX::GetChargeFraction pattern unresolved\n");
+	if (!v_CWeaponX_ChargeEndNoAttack)
+		Warning(eDLL_T::SERVER,
+			"[ChargeMin] CWeaponX::ChargeEndNoAttack pattern unresolved -- "
+			"charge_attack_min_charge_required stays dead\n");
 }
 
 void VWeaponHeat::Detour(const bool bAttach) const

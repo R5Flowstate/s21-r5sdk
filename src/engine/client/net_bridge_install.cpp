@@ -3853,9 +3853,9 @@ static ConVar bridge_anim_wire_skip("bridge_anim_wire_skip", "1", FCVAR_RELEASE,
 	"stomp the client author; null animstate = native wire apply (S21 SkipsAnimationData). 1=on (ship).");
 
 // Clamp moveDirection 4 (RIGHT, unbound) -> 3 (LEFT, mirrored) before activity resolve.
-static ConVar bridge_anim_dir_clamp("bridge_anim_dir_clamp", "1", FCVAR_RELEASE,
-	"[ANIM-DIR-CLAMP] clamp animstate moveDirection RIGHT->LEFT before activity resolve (fixes the "
-	"unbound-693 strafe-right T-pose; engine mirroring handles the visual flip). Bridge local player only. 1=on (ship).");
+static ConVar bridge_anim_dir_clamp("bridge_anim_dir_clamp", "0", FCVAR_RELEASE,
+	"[ANIM-DIR-CLAMP] clamp animstate moveDirection RIGHT->LEFT before activity resolve. "
+	"Leftover for an unbound-693 T-pose that was never RUN_RIGHT; leave off. Bridge local player only.");
 
 // S21 C_Player::m_animActive @ +0x99E. SkipsAnimationData yields wire while set.
 // Used by wire_skip (AnimWireSkip_IsClientAuthored) -- the authorship yield gate.
@@ -4831,6 +4831,12 @@ static ConVar bridge_clk_probe("bridge_clk_probe", "0", FCVAR_DEVELOPMENTONLY,
 	"Dump CClockDriftMgr once per second: the scale ring, its average, the "
 	"ahead-drain pair and the server/client tick pair.");
 
+static ConVar bridge_snap_pair_diag("bridge_snap_pair_diag", "0",
+	FCVAR_DEVELOPMENTONLY,
+	"[SNAP-PAIR] Once-per-second spacing of the snapshot pair the world lerps "
+	"between: how many frames had no future snapshot, how many extrapolated past "
+	"it, and the dt every per-snapshot derivative divides by. 0 = off.");
+
 static void ClSendTick_DumpClockDrift(void)
 {
 	ClockDriftView_t drift;
@@ -5053,6 +5059,63 @@ static void __fastcall Hook_ClSendTick()
 				Warning(eDLL_T::CLIENT,
 					"[CLKDRIFT] carried %.3fs discarded usercmd dt (true=%.3f max=%.3f) #%ld\n",
 					flCarry, trueDt, flMax, c);
+		}
+	}
+
+	// [SNAP-PAIR] the two snapshots the world is interpolated between. Every
+	// per-snapshot derivative the client takes -- remote-player velocity, and so
+	// the aim-assist magnet and dampen release -- divides by fut-cur, so a
+	// collapsed pair zeroes all of them at once. lerp > 1 means the client is
+	// extrapolating past the future snapshot.
+	if (bridge_snap_pair_diag.GetBool())
+	{
+		static double s_dPairWinStart = 0.0;
+		static int    s_nPairFrames = 0;
+		static int    s_nPairZero = 0;
+		static int    s_nPairOver = 0;
+		static float  s_flPairDtMin = 0.0f;
+		static float  s_flPairDtMax = 0.0f;
+		static float  s_flPairLerpMax = 0.0f;
+
+		float flLast = 0.0f, flCur = 0.0f, flFut = 0.0f, flLerp = 0.0f;
+		if (PredNative_SnapTimes(&flLast, &flCur, &flFut, &flLerp))
+		{
+			const float flDt = flFut - flCur;
+			const double dNow = Plat_FloatTime();
+			if (s_dPairWinStart == 0.0)
+			{
+				s_dPairWinStart = dNow;
+				s_flPairDtMin = flDt;
+				s_flPairDtMax = flDt;
+			}
+			++s_nPairFrames;
+			if (flDt <= 0.0f)
+				++s_nPairZero;
+			if (flLerp > 1.0f)
+				++s_nPairOver;
+			if (flDt < s_flPairDtMin) s_flPairDtMin = flDt;
+			if (flDt > s_flPairDtMax) s_flPairDtMax = flDt;
+			if (flLerp > s_flPairLerpMax) s_flPairLerpMax = flLerp;
+
+			if (dNow - s_dPairWinStart >= 1.0)
+			{
+				Warning(eDLL_T::CLIENT,
+					"[SNAP-PAIR] frames=%d collapsed=%d extrapolating=%d "
+					"dt{min=%.4f max=%.4f} lerpMax=%.2f last=%.3f cur=%.3f fut=%.3f\n",
+					s_nPairFrames, s_nPairZero, s_nPairOver,
+					static_cast<double>(s_flPairDtMin),
+					static_cast<double>(s_flPairDtMax),
+					static_cast<double>(s_flPairLerpMax),
+					static_cast<double>(flLast), static_cast<double>(flCur),
+					static_cast<double>(flFut));
+				s_dPairWinStart = dNow;
+				s_nPairFrames = 0;
+				s_nPairZero = 0;
+				s_nPairOver = 0;
+				s_flPairDtMin = flDt;
+				s_flPairDtMax = flDt;
+				s_flPairLerpMax = flLerp;
+			}
 		}
 	}
 
@@ -8176,7 +8239,7 @@ static void S21Bridge_ResetAllState()
     memset(s_relaySendTime, 0, sizeof(s_relaySendTime));
     s_outBytesAcc = 0;
     S21Bridge_FlowStatsReset();
-    memset(&s_bridgeC2sPrevCmd, 0, sizeof(s_bridgeC2sPrevCmd));
+    S21BridgeCmd::ResetToNullCmd(s_bridgeC2sPrevCmd);
     s_bridgeC2sPrevS3ImpulseWire = 0; // [S21-EXTRA-FLAGS] same reset lifecycle as s_bridgeC2sPrevCmd
     s_ftEstLastCmdNr = 0;             // [C2S-FT-RESTAMP] estimator reset (cmd numbers restart per connection)
     s_ftEstLastWall  = 0.0;

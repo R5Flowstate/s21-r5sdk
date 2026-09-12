@@ -6,16 +6,19 @@
 #ifndef TIER1_SDK_PARSE_H
 #define TIER1_SDK_PARSE_H
 
+#include <cmath>
 #include <cstdlib>
 #include <string>
 
 // strtof / strtol do not throw; reject when no conversion digits were consumed.
+// NaN / Inf are not a number the caller asked for -- a weapon KV of "nan"
+// would otherwise disable every finite compare that consumes the value.
 inline float Sdk_ParseFloat(const std::string& s, const float fallback = 0.0f)
 {
 	char* end = nullptr;
 	const char* const begin = s.c_str();
 	const float v = strtof(begin, &end);
-	if (end == begin)
+	if (end == begin || !std::isfinite(v))
 		return fallback;
 	return v;
 }

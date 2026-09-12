@@ -232,21 +232,13 @@ static ConVar bridge_c2s_scriptremote("bridge_c2s_scriptremote", "1", FCVAR_RELE
 	"Relay S21 ScriptRemote C2S (Remote_ServerCallFunction: loot + ServerCallFunction RPCs) "
 	"S21 t=4 -> S3 net_ScriptMessage(68). 1 = ON (DEFAULT). Requires dedi net_ScriptMessage "
 	"to decode the S21 frame (deploy server.dll first).");
-// weaponSelect=0 is the resting value, so emit-on-change drops slot-0 selects.
-// Emit an explicit cycleslot when weaponSelect changed or updateCycleWeapon is set.
+// Redundant explicit cycleslot on an updateCycleWeapon edge. The select edge
+// itself is carried by emit-on-change against the null-cmd baseline.
 static ConVar bridge_weap_cycle_fix("bridge_weap_cycle_fix", "1", FCVAR_RELEASE,
 	"Deliver the S21 weaponSelect=0+updateCycleWeapon=1 first-weapon (slot 0) select to "
 	"the dedi by force-emitting an explicit cycleslot on the updateCycleWeapon edge. "
 	"1 = ON (DEFAULT, fix for unreachable rspn). 0 = stock emit-on-change.");
 
-static ConVar bridge_weapsel_diag("bridge_weapsel_diag", "0",
-	FCVAR_DEVELOPMENTONLY,
-	"Emit a rate-limited [WEAPSEL] line for every command carrying a weapon "
-	"select or an updateCycleWeapon edge, with the parsed slot and hand and "
-	"whether the select edge was synthesised.");
-
-static long s_nWeapSelDiagLines = 0;
-static constexpr long kWeapSelDiagCap = 128;
 // Helpers: a single 'any C2S relay active' check the drain + slice paths share,
 // and per-message gates for the per-type convars.
 static inline bool S21Bridge_C2S_ClcMoveOn() {
@@ -802,16 +794,6 @@ static bool S21Bridge_EmitS3Cmd(bf_write& w, const S21BridgeCmd::State& cur,
 		EmitDeltaS(w, cur.weaponSelectType, 3, prev.weaponSelectType);
 	}
 
-	if (bridge_weapsel_diag.GetBool() && s_nWeapSelDiagLines < kWeapSelDiagCap
-		&& (emitSelect || cur.updateCycleWeapon != 0))
-	{
-		++s_nWeapSelDiagLines;
-		Warning(eDLL_T::CLIENT,
-			"[WEAPSEL] cmd=%u sel=%d/%d hand=%d/%d upd=%u forced=%d emit=%d\n",
-			cur.commandNumber, cur.weaponSelect, prev.weaponSelect,
-			cur.weaponSelectType, prev.weaponSelectType,
-			(unsigned)cur.updateCycleWeapon, selectEvent ? 1 : 0, emitSelect ? 1 : 0);
-	}
 	// 17. weaponselect (+0x37) -- 1+0/16
 	EmitDeltaU(w, cur.realtimeWeaponMod, 16, prev.realtimeWeaponMod);
 	// S21 emits weaponToggleAkimbo (1-bit always) between realtimeWeaponMod and weaponCustomActivity;
@@ -1235,10 +1217,10 @@ static void S21Bridge_RelayUnrelMsg(const uint8_t* uData, int uBytes,
 			alignas(4) uint8_t scratch[2048] = {0};
 			bf_write w("clc_Move_xform", scratch, sizeof(scratch));
 
-			// Reset prev-cmd state at the start of each clc_Move batch. The engine's
-			// ReadUserCmd loop passes from=null_cmd for the first cmd (backup or new),
-			// so our delta baseline must also be zeroed per batch.
-			memset(&s_bridgeC2sPrevCmd, 0, sizeof(s_bridgeC2sPrevCmd));
+			// Reset prev-cmd state at the start of each clc_Move batch. Both the S21
+			// writer and the S3 ReadUserCmd loop use a CUserCmd::Reset() null cmd
+			// as the baseline for the first cmd (backup or new).
+			S21BridgeCmd::ResetToNullCmd(s_bridgeC2sPrevCmd);
 			s_bridgeC2sPrevS3ImpulseWire = 0; // [S21-EXTRA-FLAGS] same per-batch null baseline
 
 			// Mid-batch parse/emit failure: keep already-transcoded cmds; do not return the whole batch.

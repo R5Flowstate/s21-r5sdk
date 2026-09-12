@@ -19,6 +19,7 @@ bool ServerScript_IsDedicatedRuntime(void);
 void* ServerScript_EntityPtrFromStackIdx(HSQUIRRELVM v, SQInteger sqIdx);
 SQRESULT ServerScript_FS_StatsIngest(HSQUIRRELVM v);
 void Script_DedicatedTraceDetour(const bool bAttach);
+SQRESULT Script_SetAimAssistAllowed(HSQUIRRELVM v);
 bool BreachTrace_CallBoolCallback(const HSCRIPT hFunc, const ScriptVariant_t& arg);
 void BreachTrace_LevelShutdown(void);
 

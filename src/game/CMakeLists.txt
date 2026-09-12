@@ -442,6 +442,10 @@ add_sources( SOURCE_GROUP "Rendering"
     "client/viewrender.cpp"
     "client/viewrender.h"
     "client/iviewrender.h"
+    "client/fov_limit.cpp"
+    "client/fov_limit.h"
+    "client/visual_clutter.cpp"
+    "client/visual_clutter.h"
 )
 
 add_sources( SOURCE_GROUP "Animation"

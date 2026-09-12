@@ -193,6 +193,9 @@ class CBaseEntity;
 struct matrix3x4_t;
 inline matrix3x4_t* (*v_CBaseEntity_EntityToWorldTransform)(CBaseEntity* pEnt);
 
+// ScriptSetAimAssistAllowed. Unique via btr-bit-10 after the +0xD8 load.
+inline SQRESULT (*v_ScriptSetAimAssistAllowed)(HSQUIRRELVM v);
+
 inline void (*v_Script_RegisterServerEntityClassFuncs)();
 inline void (*v_Script_RegisterServerPlayerClassFuncs)();
 inline void (*v_Script_RegisterServerCombatCharacterClassFuncs)();
@@ -234,6 +237,7 @@ class VScriptServer : public IDetour
 		LogFunAdr("sq_newstruct", v_sq_newstruct);
 		LogFunAdr("sq_setstructfield", v_sq_setstructfield);
 		LogFunAdr("CBaseEntity::EntityToWorldTransform", v_CBaseEntity_EntityToWorldTransform);
+		LogFunAdr("ScriptSetAimAssistAllowed", v_ScriptSetAimAssistAllowed);
 
 		LogFunAdr("Script_RegisterServerEntityClassFuncs", v_Script_RegisterServerEntityClassFuncs);
 		LogFunAdr("Script_RegisterServerPlayerClassFuncs", v_Script_RegisterServerPlayerClassFuncs);
@@ -352,6 +356,16 @@ class VScriptServer : public IDetour
 			"E8 ?? ?? ?? ?? 48 8D 83 50 04 00 00 48 83 C4 20 5B C3 "
 			"48 8D 81 50 04 00 00")
 			.GetPtr(v_CBaseEntity_EntityToWorldTransform);
+
+		Module_FindPattern(g_GameDll,
+			"40 53 48 83 EC 20 48 8D 54 24 38 48 8B D9 E8 ?? ?? ?? ?? 84 C0 74 ?? "
+			"48 8B 43 58 4C 8B 44 24 38 83 78 18 00 41 8B 80 D8 00 00 00 44 8B C8 74 ?? "
+			"41 0F BA F1 0A")
+			.GetPtr(v_ScriptSetAimAssistAllowed);
+
+		if (!v_ScriptSetAimAssistAllowed)
+			Warning(eDLL_T::SERVER, "[AIM-ASSIST] ScriptSetAimAssistAllowed pattern "
+				"unresolved -- entity.SetAimAssistAllowed stays the engine body\n");
 
 		Module_FindPattern(g_GameDll, "48 83 EC ?? 80 3D ?? ?? ?? ?? ?? 0F 85 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 48 89 5C 24 ?? 48 89 05 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? C6 05 ?? ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? 33 D2 48 8D 05 ?? ?? ?? ?? 48 C7 05")
 			.GetPtr(v_Script_RegisterServerEntityClassFuncs);

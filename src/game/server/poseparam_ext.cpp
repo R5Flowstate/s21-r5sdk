@@ -11,9 +11,10 @@
 #include "poseparam_ext.h"
 #include "game/shared/edict_dirty.h"
 #include "game/shared/sdk_entity_state.h"
+#include "mathlib/mathlib.h"
 
 //-----------------------------------------------------------------------------
-// Raw layout -- CBaseAnimating on the dedicated server (r5apex_ds).
+// Raw layout -- CBaseAnimating on the dedicated server.
 //-----------------------------------------------------------------------------
 // int16_t edict index; -1 = not networked.
 static constexpr ptrdiff_t ENT_OFF_EDICTIDX   = 0x58;
@@ -24,6 +25,13 @@ static constexpr ptrdiff_t ENT_OFF_MODELWRAP  = 0xFD8;
 // native m_flPoseParameter[12]. Element SendProps carry offsets relative to
 // THIS base, so the encoder hands the wire proxy entity+0xD08, not the entity.
 static constexpr ptrdiff_t ENT_OFF_POSEPARAM  = 0xD08;
+// CPlayer::m_vecAbsVelocity (server half).
+static constexpr ptrdiff_t ENT_OFF_ABSVELOCITY = 0x3DC;
+// CMultiPlayerAnimState::m_player (server half).
+static constexpr ptrdiff_t ANIMSTATE_OFF_PLAYER = 0x1C0;
+// Class-core rrig slots -- identical on S21 and converted S3 light/medium/heavy.
+static constexpr int kPoseIdxMoveYaw         = 2;
+static constexpr int kPoseIdxMoveYawBackward = 3;
 
 // Model wrapper: studioHdr at +0x08, virtualModel at +0x10.
 static constexpr ptrdiff_t WRAP_OFF_STUDIOHDR    = 0x08;
@@ -51,15 +59,13 @@ void PoseParamExt_LevelShutdown(void)
 
 //-----------------------------------------------------------------------------
 // Engine function pointers -- script Set/GetPoseParameter and OverTime.
-// (r5apex_ds RVA 0xCC87A0 / 0xCC88F0 / 0xCC8B50)
 //-----------------------------------------------------------------------------
 static void(*v_ScriptSetPoseParameter)(void* self, int idx, float value) = nullptr;
 static void(*v_ScriptSetPoseParameterOverTime)(void* self, int idx, float value, float time) = nullptr;
 static float(*v_ScriptGetPoseParameter)(void* self, int idx) = nullptr;
 
-// Script LookupPoseParameterIndex (r5apex_ds RVA 0xCC86C0). Stock raises
-// "Parameter name %s not found" on a miss; the silent walk at 0xCC6DD0 returns
-// -1 without touching the VM error flag.
+// Script LookupPoseParameterIndex. Stock raises "Parameter name %s not found"
+// on a miss; the silent name walk returns -1 without touching the VM error flag.
 static int(*v_ScriptLookupPoseParameterIndex)(void* self, const char* name) = nullptr;
 static int(*v_StudioHdr_FindPoseParameter)(void* self, void* wrapper, const char* name) = nullptr;
 
@@ -68,6 +74,9 @@ static int(*v_StudioHdr_FindPoseParameter)(void* self, void* wrapper, const char
 //-----------------------------------------------------------------------------
 static float(*v_Studio_SetPoseParameter)(void* wrapper, int idx, float value, float* pCtlOut) = nullptr;
 static float(*v_Studio_GetPoseParameter)(void* wrapper, int idx, float ctl) = nullptr;
+static float(__fastcall* v_NativeSetPoseParameter)(void* self, void* studio, int idx, float value) = nullptr;
+static __int64(__fastcall* v_ServerAnimStateUpdate)(void* animstate, float flDt, float a3, float a4) = nullptr;
+static QAngle*(__fastcall* v_CPlayer_EyeAngles)(void* player, QAngle* out) = nullptr;
 
 //-----------------------------------------------------------------------------
 // ConVars.
@@ -84,6 +93,11 @@ static ConVar bridge_pose_param_ext_diag(
 	"[POSE-EXT] extended pose-param store diagnostics. 1 = periodic tally, "
 	"2 = also one line per store (hard-capped). Default 0.");
 
+static ConVar bridge_pose_moveyaw(
+	"bridge_pose_moveyaw", "1", FCVAR_RELEASE | FCVAR_GAMEDLL,
+	"After server animstate Update, write move_yaw / move_yaw_backward from "
+	"abs-velocity vs EyeAngles so remotes receive the strafe lean. 0 = stock.");
+
 static constexpr LONG kTallyInterval = 64;
 static constexpr LONG kVerboseMax    = 64;
 
@@ -97,6 +111,9 @@ static volatile LONG s_nWireNonZero = 0;
 static volatile LONG s_nWireCalls    = 0;
 static volatile LONG s_bWireHitLogged = 0;
 static volatile LONG s_bLookupMissLogged = 0;
+static volatile LONG s_bMoveYawAnnounced = 0;
+static volatile LONG s_bMoveYawEyeWarned = 0;
+static volatile LONG s_bNativeSetPoseAnnounced = 0;
 
 // SP_OFFSET on grown elements 12..23: stashed element index, not a struct offset.
 static constexpr ptrdiff_t kWirePropOffsetSlot = 0x78;
@@ -482,6 +499,142 @@ static int Hook_ScriptLookupPoseParameterIndex(void* self, const char* name)
 	return idx;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: write a normalized 0..1 control into native [0..11] or the sidecar.
+//-----------------------------------------------------------------------------
+static void PoseExt_WriteControl(void* self, const int idx, const float ctl)
+{
+	if (!self || idx < 0 || idx >= kWirePoseSlots)
+		return;
+
+	float clamped = ctl;
+	if (clamped < 0.0f)
+		clamped = 0.0f;
+	else if (clamped > 1.0f)
+		clamped = 1.0f;
+
+	if (idx < kNativePoseSlots)
+	{
+		float* const slot = reinterpret_cast<float*>(
+			reinterpret_cast<uint8_t*>(self) + ENT_OFF_POSEPARAM + idx * 4);
+		if (fabsf(*slot - clamped) <= 0.001f)
+			return;
+		*slot = clamped;
+		MarkEntityEdictDirty(self);
+		return;
+	}
+
+	const int edictIdx = PoseExt_ReadEdictIdx(self);
+	if (edictIdx < 0)
+		return;
+	float* const ext = PoseExt_Slot(self, edictIdx, idx);
+	if (fabsf(*ext - clamped) <= 0.001f)
+		return;
+	*ext = clamped;
+	MarkEntityEdictDirty(self);
+}
+
+static float PoseExt_PlusMinus90ToControl(const float degrees)
+{
+	return (degrees + 90.0f) / 180.0f;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: native CBaseAnimating::SetPoseParameter -- sidecar for idx 12..23
+// so animstate writes past the 12-wide array do not land in overtime state.
+//-----------------------------------------------------------------------------
+static float __fastcall Hook_NativeSetPoseParameter(void* self, void* studio, int idx, float value)
+{
+	if (!self || idx < kNativePoseSlots || idx >= kWirePoseSlots || !studio)
+	{
+		if (v_NativeSetPoseParameter)
+			return v_NativeSetPoseParameter(self, studio, idx, value);
+		return value;
+	}
+
+	float ctl = 0.0f;
+	if (v_Studio_SetPoseParameter && studio)
+		v_Studio_SetPoseParameter(studio, idx, value, &ctl);
+	else
+		ctl = value;
+
+	PoseExt_WriteControl(self, idx, ctl);
+	if (InterlockedCompareExchange(&s_bNativeSetPoseAnnounced, 1, 0) == 0)
+		DevMsg(eDLL_T::SERVER,
+			"[POSE-EXT] native SetPoseParameter idx=%d value=%.4f ctl=%.4f -- sidecar\n",
+			idx, value, ctl);
+	return value;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: eye-relative move_yaw onto class-core slots 2/3 after Update.
+// Indices, not names -- Update's name walk bails the whole pose block when
+// aim_pitch misses.
+//-----------------------------------------------------------------------------
+static void PoseExt_AuthorMoveYaw(void* animstate)
+{
+	if (!bridge_pose_moveyaw.GetBool() || !animstate || !v_CPlayer_EyeAngles)
+		return;
+
+	void* const player = *reinterpret_cast<void* const*>(
+		reinterpret_cast<const uint8_t*>(animstate) + ANIMSTATE_OFF_PLAYER);
+	if (!player)
+		return;
+	if (PoseExt_ReadEdictIdx(player) < 0)
+		return;
+
+	QAngle eye;
+	eye.Init();
+	if (!v_CPlayer_EyeAngles(player, &eye))
+	{
+		if (InterlockedCompareExchange(&s_bMoveYawEyeWarned, 1, 0) == 0)
+			Warning(eDLL_T::SERVER,
+				"[POSE-MOVEYAW] EyeAngles returned null -- locomotion pose not authored\n");
+		return;
+	}
+
+	const float* const vel = reinterpret_cast<const float*>(
+		reinterpret_cast<const uint8_t*>(player) + ENT_OFF_ABSVELOCITY);
+	const float speed2d = sqrtf((vel[0] * vel[0]) + (vel[1] * vel[1]));
+
+	float moveYaw = 0.0f;
+	float moveYawBack = 0.0f;
+	if (speed2d > 0.5f)
+	{
+		const float velYaw = RAD2DEG(atan2f(vel[1], vel[0]));
+		float delta = AngleNormalize(velYaw - eye.y);
+		if (delta < -90.0f || delta > 90.0f)
+		{
+			moveYawBack = AngleNormalize(delta + 180.0f);
+			moveYaw = -moveYawBack;
+		}
+		else
+		{
+			moveYaw = delta;
+			moveYawBack = -delta;
+		}
+	}
+
+	const float ctlYaw = PoseExt_PlusMinus90ToControl(moveYaw);
+	const float ctlBack = PoseExt_PlusMinus90ToControl(moveYawBack);
+	PoseExt_WriteControl(player, kPoseIdxMoveYaw, ctlYaw);
+	PoseExt_WriteControl(player, kPoseIdxMoveYawBackward, ctlBack);
+
+	if (InterlockedCompareExchange(&s_bMoveYawAnnounced, 1, 0) == 0)
+		Msg(eDLL_T::SERVER,
+			"[POSE-MOVEYAW] first author deg=%.1f ctl=%.4f speed=%.1f eye=%.1f edict=%d\n",
+			moveYaw, ctlYaw, speed2d, eye.y, PoseExt_ReadEdictIdx(player));
+}
+
+static __int64 __fastcall Hook_ServerAnimStateUpdate(void* animstate, float flDt, float a3, float a4)
+{
+	const __int64 result = v_ServerAnimStateUpdate
+		? v_ServerAnimStateUpdate(animstate, flDt, a3, a4)
+		: 0;
+	PoseExt_AuthorMoveYaw(animstate);
+	return result;
+}
+
 void VPoseParamExt::GetAdr(void) const
 {
 	LogFunAdr("ScriptLookupPoseParameterIndex", v_ScriptLookupPoseParameterIndex);
@@ -491,13 +644,16 @@ void VPoseParamExt::GetAdr(void) const
 	LogFunAdr("ScriptGetPoseParameter", v_ScriptGetPoseParameter);
 	LogFunAdr("Studio_SetPoseParameter", v_Studio_SetPoseParameter);
 	LogFunAdr("Studio_GetPoseParameter", v_Studio_GetPoseParameter);
+	LogFunAdr("NativeSetPoseParameter", v_NativeSetPoseParameter);
+	LogFunAdr("ServerAnimStateUpdate", v_ServerAnimStateUpdate);
+	LogFunAdr("CPlayer_EyeAngles", v_CPlayer_EyeAngles);
 }
 
 void VPoseParamExt::GetFun(void) const
 {
-	// Script LookupPoseParameterIndex (r5apex_ds RVA 0xCC86C0). The 0xFD8
-	// displacement is the server CBaseAnimating model-wrapper offset -- keeps
-	// the client twin (LookupSequence shares the prologue) out.
+	// Script LookupPoseParameterIndex. The 0xFD8 displacement is the server
+	// CBaseAnimating model-wrapper offset -- keeps the client twin
+	// (LookupSequence shares the prologue) out.
 	Module_FindPattern(g_GameDll,
 		"48 89 5C 24 ?? 57 48 83 EC ?? 48 83 B9 D8 0F 00 00 00 48 8B FA 48 8B D9 75 ?? "
 		"0F BF 91 DE 00 00 00 48 8B 0D ?? ?? ?? ?? 48 8B 01 FF 50 ?? 48 85 C0 74 ?? "
@@ -510,8 +666,7 @@ void VPoseParamExt::GetFun(void) const
 			"[POSE-EXT] ScriptLookupPoseParameterIndex pattern unresolved -- "
 			"missing pose-param names still raise and unwind the script thread\n");
 
-	// Silent name walk (r5apex_ds RVA 0xCC6DD0). Returns -1 on miss, 0 when the
-	// studiohdr is unusable.
+	// Silent name walk. Returns -1 on miss, 0 when the studiohdr is unusable.
 	Module_FindPattern(g_GameDll,
 		"48 89 74 24 ?? 57 48 83 EC ?? 49 8B F0 48 8B FA 48 85 D2")
 		.GetPtr(v_StudioHdr_FindPoseParameter);
@@ -521,7 +676,7 @@ void VPoseParamExt::GetFun(void) const
 			"[POSE-EXT] StudioHdr_FindPoseParameter pattern unresolved -- "
 			"LookupPoseParameterIndex cannot swallow a miss\n");
 
-	// Script SetPoseParameter (r5apex_ds RVA 0xCC87A0).
+	// Script SetPoseParameter.
 	Module_FindPattern(g_GameDll,
 		"48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC ?? 48 83 B9 ?? ?? ?? ?? ?? 8B F2")
 		.GetPtr(v_ScriptSetPoseParameter);
@@ -531,7 +686,7 @@ void VPoseParamExt::GetFun(void) const
 			"[POSE-EXT] ScriptSetPoseParameter pattern unresolved -- Ballistic "
 			"ultimate stays broken (Parameter index invalid on idx>=12)\n");
 
-	// Script SetPoseParameterOverTime (r5apex_ds RVA 0xCC88F0).
+	// Script SetPoseParameterOverTime.
 	Module_FindPattern(g_GameDll,
 		"48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC ?? 48 83 B9 ?? ?? ?? ?? ?? 48 8B D9")
 		.GetPtr(v_ScriptSetPoseParameterOverTime);
@@ -541,7 +696,7 @@ void VPoseParamExt::GetFun(void) const
 			"[POSE-EXT] ScriptSetPoseParameterOverTime pattern unresolved -- "
 			"extended OverTime sets still raise Parameter index invalid\n");
 
-	// Script GetPoseParameter (r5apex_ds RVA 0xCC8B50).
+	// Script GetPoseParameter.
 	Module_FindPattern(g_GameDll,
 		"48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC ?? 48 83 B9 ?? ?? ?? ?? ?? 8B EA")
 		.GetPtr(v_ScriptGetPoseParameter);
@@ -551,12 +706,12 @@ void VPoseParamExt::GetFun(void) const
 			"[POSE-EXT] ScriptGetPoseParameter pattern unresolved -- extended "
 			"reads still over-read m_poseParameterOverTimeActive as float\n");
 
-	// Studio_SetPoseParameter (r5apex_ds RVA 0x1D4800).
+	// Studio_SetPoseParameter.
 	Module_FindPattern(g_GameDll,
 		"40 57 48 83 EC ?? 48 8B 41 ?? 49 8B F9")
 		.GetPtr(v_Studio_SetPoseParameter);
 
-	// Studio_GetPoseParameter (r5apex_ds RVA 0x1D4920).
+	// Studio_GetPoseParameter.
 	Module_FindPattern(g_GameDll,
 		"48 83 EC ?? 0F 29 74 24 ?? 0F 28 F2 85 D2")
 		.GetPtr(v_Studio_GetPoseParameter);
@@ -566,6 +721,34 @@ void VPoseParamExt::GetFun(void) const
 			"[POSE-EXT] pose-param space converters unresolved -- extended slots "
 			"fall back to RAW script space and the client will misread any "
 			"parameter not authored start=0 end=1\n");
+
+	// Native CBaseAnimating::SetPoseParameter. No 12-cap; idx 12+ lands in overtime.
+	Module_FindPattern(g_GameDll,
+		"48 89 5C 24 ?? 57 48 83 EC ?? 0F 29 74 24 ?? 0F 28 F3 49 63 F8 48 8B C2 48 8B D9 48 85 D2 0F 84")
+		.GetPtr(v_NativeSetPoseParameter);
+
+	if (!v_NativeSetPoseParameter)
+		Warning(eDLL_T::SERVER,
+			"[POSE-EXT] native SetPoseParameter pattern unresolved -- "
+			"idx 12..23 still write through the 12-wide array into overtime\n");
+
+	// Server CMultiPlayerAnimState::Update. [rcx+1C0]=player keeps the client twin out.
+	Module_FindPattern(g_GameDll,
+		"48 8B C4 55 53 57 41 55 48 8D 68 ?? 48 81 EC ?? ?? ?? ?? 48 8B 99 C0 01 00 00 48 8B F9")
+		.GetPtr(v_ServerAnimStateUpdate);
+
+	if (!v_ServerAnimStateUpdate)
+		Warning(eDLL_T::SERVER,
+			"[POSE-MOVEYAW] server animstate Update pattern unresolved -- "
+			"move_yaw stays whatever the name walk wrote\n");
+
+	Module_FindPattern(g_GameDll, "40 53 48 83 EC 30 F2 0F 10 05 ?? ?? ?? ??")
+		.GetPtr(v_CPlayer_EyeAngles);
+
+	if (!v_CPlayer_EyeAngles)
+		Warning(eDLL_T::SERVER,
+			"[POSE-MOVEYAW] CPlayer::EyeAngles pattern unresolved -- "
+			"locomotion pose author disabled\n");
 }
 
 void VPoseParamExt::Detour(const bool bAttach) const
@@ -578,5 +761,9 @@ void VPoseParamExt::Detour(const bool bAttach) const
 		DetourSetup(&v_ScriptSetPoseParameterOverTime, &Hook_ScriptSetPoseParameterOverTime, bAttach);
 	if (v_ScriptGetPoseParameter)
 		DetourSetup(&v_ScriptGetPoseParameter, &Hook_ScriptGetPoseParameter, bAttach);
+	if (v_NativeSetPoseParameter)
+		DetourSetup(&v_NativeSetPoseParameter, &Hook_NativeSetPoseParameter, bAttach);
+	if (v_ServerAnimStateUpdate)
+		DetourSetup(&v_ServerAnimStateUpdate, &Hook_ServerAnimStateUpdate, bAttach);
 }
 

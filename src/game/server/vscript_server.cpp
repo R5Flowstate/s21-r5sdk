@@ -2219,6 +2219,9 @@ void VScriptServer::Detour(const bool bAttach) const
 
 	Script_DedicatedTraceDetour(bAttach);
 
+	if (v_ScriptSetAimAssistAllowed)
+		DetourSetup(&v_ScriptSetAimAssistAllowed, &Script_SetAimAssistAllowed, bAttach);
+
     DetourSetup(&v_Script_RegisterServerEntityClassFuncs, &Script_RegisterServerEntityClassFuncs, bAttach);
     DetourSetup(&v_Script_RegisterServerPlayerClassFuncs, &Script_RegisterServerPlayerClassFuncs, bAttach);
     DetourSetup(&v_Script_RegisterServerCombatCharacterClassFuncs, &Script_RegisterServerCombatCharacterClassFuncs, bAttach);

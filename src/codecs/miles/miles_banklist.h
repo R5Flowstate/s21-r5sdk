@@ -9,6 +9,8 @@
 #include "thirdparty/detours/include/idetour.h"
 
 inline __int64(__fastcall* v_MilesShared_LoadBanksListFromFile)(char*, __int64, __int64, __int64) = nullptr;
+inline char(__fastcall* v_ClientSoundMiles_Initialize)(void) = nullptr;
+inline const char** s_ppszMilesLanguageLatch = nullptr;
 
 ///////////////////////////////////////////////////////////////////////////////
 class VMilesBankListS21 : public IDetour
@@ -16,9 +18,11 @@ class VMilesBankListS21 : public IDetour
 	virtual void GetAdr(void) const
 	{
 		LogFunAdr("MilesShared_LoadBanksListFromFile", v_MilesShared_LoadBanksListFromFile);
+		LogFunAdr("ClientSoundMiles_Initialize", v_ClientSoundMiles_Initialize);
+		LogVarAdr("miles_language_latch", s_ppszMilesLanguageLatch);
 	}
 	virtual void GetFun(void) const;
-	virtual void GetVar(void) const { }
+	virtual void GetVar(void) const;
 	virtual void GetCon(void) const { }
 	virtual void Detour(const bool bAttach) const;
 };

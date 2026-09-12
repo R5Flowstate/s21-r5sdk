@@ -62,6 +62,13 @@ float PredNative_TickInterval(void);
 float PredNative_CurTime(void);
 float PredNative_LatestPredictedTime(void);
 
+// The snapshot pair the engine is lerping between, as the engine publishes it.
+// futureSnapTime == currentSnapTime means there is no future snapshot, so every
+// per-snapshot derivative the client takes off that pair comes out zero.
+// False when the globals are unresolved.
+bool PredNative_SnapTimes(float* pLast, float* pCurrent, float* pFuture,
+	float* pLerp);
+
 // [TIME-DOMAIN] clientTb-serverTb used for the current command's convert.
 float TimeDomain_LastDelta(void);
 

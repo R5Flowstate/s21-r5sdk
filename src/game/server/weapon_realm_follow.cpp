@@ -51,36 +51,20 @@ static ConVar bridge_weapon_realm_follow("bridge_weapon_realm_follow", "1", FCVA
 	"Adopt owner realms onto carried weapons: at activation (SetActiveWeapon) "
 	"and by pushing the full inventory on every SetRealmsBitMask. Keeps "
 	"opponent bullet tracers visible across 1v1 realm moves");
-static ConVar bridge_weapon_realm_follow_diag("bridge_weapon_realm_follow_diag", "0",
-	FCVAR_DEVELOPMENTONLY,
-	"Log weapons re-stamped by the realm follow (rate limited)");
 
 static __int64 (*v_SetRealmsBitMask)(__int64 ent, uint64_t mask) = nullptr;
-
-static int s_diagCount = 0;
 
 //-----------------------------------------------------------------------------
 // Purpose: stamp one weapon when its mask is stale. The engine setter
 // clears the transmit cache, dirties the edict and recurses move children.
 //-----------------------------------------------------------------------------
-static void WeaponRealmFollow_StampWeapon(const __int64 weaponEnt, const uint64_t ownerMask,
-	const char* const why)
+static void WeaponRealmFollow_StampWeapon(const __int64 weaponEnt, const uint64_t ownerMask)
 {
 	const uint64_t weaponMask = *reinterpret_cast<const uint64_t*>(weaponEnt + WRF_ENT_OFF_REALMSBITMASK);
 	if (weaponMask == ownerMask)
 		return;
 
 	v_SetRealmsBitMask(weaponEnt, ownerMask);
-
-	if (bridge_weapon_realm_follow_diag.GetBool() &&
-		(s_diagCount++ < 32 || (s_diagCount % 512) == 0))
-	{
-		const int16_t weaponIndex = *reinterpret_cast<const int16_t*>(weaponEnt + WRF_ENT_OFF_EDICTINDEX);
-		DevMsg(eDLL_T::SERVER, "[REALM-FOLLOW] %s weapon=%d mask 0x%llX -> 0x%llX (n=%d)\n",
-			why, static_cast<int>(weaponIndex),
-			static_cast<unsigned long long>(weaponMask),
-			static_cast<unsigned long long>(ownerMask), s_diagCount);
-	}
 }
 
 //-----------------------------------------------------------------------------
@@ -133,7 +117,7 @@ static void WeaponRealmFollow_PushInventory(const __int64 ent)
 			if (ownerEH != entEH)
 				continue;
 
-			WeaponRealmFollow_StampWeapon(reinterpret_cast<__int64>(weapon), entMask, "push");
+			WeaponRealmFollow_StampWeapon(reinterpret_cast<__int64>(weapon), entMask);
 		}
 	}
 }
@@ -172,16 +156,11 @@ void WeaponRealmFollow_StampActiveWeapon(void* const player, const __int64 weapo
 	const SDKEntityHandle weaponEH = SDKEntityState_GetHandle(reinterpret_cast<const void*>(weaponEnt));
 	if (!weaponEH.IsValid()
 		|| SDKEntityState_Resolve(weaponEH, ESide::Server) != reinterpret_cast<void*>(weaponEnt))
-	{
-		if (bridge_weapon_realm_follow_diag.GetBool())
-			DevMsg(eDLL_T::SERVER, "[REALM-FOLLOW] activate skip, stale weapon=%p\n",
-				reinterpret_cast<void*>(weaponEnt));
 		return;
-	}
 
 	const uint64_t playerMask = *reinterpret_cast<const uint64_t*>(
 		reinterpret_cast<uintptr_t>(player) + WRF_ENT_OFF_REALMSBITMASK);
-	WeaponRealmFollow_StampWeapon(weaponEnt, playerMask, "activate");
+	WeaponRealmFollow_StampWeapon(weaponEnt, playerMask);
 }
 
 //-----------------------------------------------------------------------------

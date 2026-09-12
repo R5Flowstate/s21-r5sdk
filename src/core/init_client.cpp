@@ -56,6 +56,8 @@
 #include "game/client/weapon_mod_visual.h"
 #include "game/client/classvar_natives.h"
 #include "game/client/fs_1v1_convars.h"
+#include "game/client/fov_limit.h"
+#include "game/client/visual_clutter.h"
 #include "game/client/mantle_boost_rui.h"
 #include "game/shared/pose_param.h"
 #include "datacache/anim_desc.h"
@@ -539,6 +541,8 @@ void DetourRegister()
 	REGISTER(VEffectChildLinkGuardS21);
 	REGISTER(VStudioSeqdescGuardS21);
 	REGISTER(VClassVarNativesCl);
+	REGISTER(VFOVLimit);
+	REGISTER(VVisualClutter);
 
 	//-------------------------------------------------------------------------
 	// FileSystem
