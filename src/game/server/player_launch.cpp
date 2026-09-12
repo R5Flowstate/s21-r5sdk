@@ -538,7 +538,11 @@ void VPlayerLaunch::GetFun(void) const
 	}
 	else
 	{
-		CMemory(v_CGameMovement_CanStandOn).Offset(0x37).FollowNearCallSelf()
+		// The NPC-ground gate is the only direct call in CanStandOn (the two
+		// titan checks are indirect). Anchor on its mov/call pair so a frame
+		// shift cannot slide the resolve onto the wrong call.
+		CMemory(v_CGameMovement_CanStandOn).FindPatternSelf("48 8B CB E8", CMemory::Direction::DOWN, 0x80)
+			.Offset(3).FollowNearCallSelf()
 			.GetPtr(v_EntityIsNpcGround);
 		if (!v_EntityIsNpcGround)
 			Warning(eDLL_T::SERVER,

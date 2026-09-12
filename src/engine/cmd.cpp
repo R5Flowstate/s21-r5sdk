@@ -211,8 +211,10 @@ static bool s_bRedirectFallbackLogged = false;
 
 //-----------------------------------------------------------------------------
 // Purpose: redirect printf used by status/ping/RCON output. The redirect
-// object is the invoking session; stdin console invocation has none (null),
-// which the engine dereferences unconditionally (AV at +0x48748).
+// object is the invoking session's own context, alive for the call by
+// construction; stdin console invocation has none (null), which the engine
+// dereferences unconditionally (AV at +0x48748). Only the null case is
+// guardable here -- a non-null session is engine-owned lifetime.
 //-----------------------------------------------------------------------------
 static void Hook_CmdRedirectPrintf(__int64 a1, int a2, const char* pFormat, ...)
 {

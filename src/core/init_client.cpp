@@ -112,7 +112,6 @@
 #include "game/client/melee_activity_trace.h"
 #include "game/client/bridge_cmd_seed.h"
 #include "game/client/bridge_fire_tap.h"
-#include "game/client/ground_standable_probe.h"
 #include "game/client/jumppad_viewpunch_diag.h"
 #include "game/client/ruitracks.h"
 #include "game/client/hud_basechat.h"
@@ -605,7 +604,6 @@ void DetourRegister()
 	REGISTER(VMoveSimTraceClient);
 	REGISTER(VBridgeCmdSeedClient);
 	REGISTER(VBridgeFireTapClient);
-	REGISTER(VGroundStandableProbe);
 	// VRuiTracks: S21 already owns ids through that range.
 	// VClockMonotonicFix: Hook_ClockDrift already strips non-monotonic feeds.
 	// V_ViewRender: GetVar pattern is S3-only (0 hits on S21).

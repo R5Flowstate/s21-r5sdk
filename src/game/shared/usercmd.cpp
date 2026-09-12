@@ -52,26 +52,31 @@ void ClampUserCmd(CUserCmd* ucmd)
 			usercmd_frametime_max.GetFloat());
 
 	// Checks are only required if cycleslot is valid; see 'CPlayer::UpdateWeaponSlots'.
+	// weaponindex folds below regardless: a HOLSTERED/ANY marker must never
+	// smuggle a raw wire hand past this gate into UpdateWeaponSlots.
+	const bool dualWieldEnabled = usercmd_dualwield_enable.GetBool();
+
 	if (ucmd->cycleslot != WEAPON_INVENTORY_SLOT_INVALID
 		&& ucmd->cycleslot != WEAPON_INVENTORY_SLOT_HOLSTERED
 		&& ucmd->cycleslot != WEAPON_INVENTORY_SLOT_ANY)
 	{
-		const bool dualWieldEnabled = usercmd_dualwield_enable.GetBool();
-
 		// Dual-wield cycle slots stay blocked unless explicitly enabled.
 		// Bound is the S21 gadget slot (5=ordnance, 6=survival), not S3 anti-titan. Dual wield starts at 7.
 		if (!dualWieldEnabled && ucmd->cycleslot > WEAPON_INVENTORY_SLOT_S21_GADGET)
 			ucmd->cycleslot = WEAPON_INVENTORY_SLOT_S21_GADGET;
 
 		// m_selectedWeapons is size 2; clamp so it never reads OOB.
-		// weaponindex INVALID is 0xFF -- do not fold it to a hand. Weapon_UpdateSelection indexes unchecked.
+		// weaponindex INVALID is 0xFF -- invalidate the slot, do not fold it to a hand.
 		if (ucmd->weaponindex == WEAPON_INVENTORY_SLOT_INVALID)
 			ucmd->cycleslot = WEAPON_INVENTORY_SLOT_INVALID;
-		else if (ucmd->weaponindex >= WEAPON_INVENTORY_SLOT_PRIMARY_1)
-			dualWieldEnabled
-			? ucmd->weaponindex = WEAPON_INVENTORY_SLOT_PRIMARY_1
-			: ucmd->weaponindex = WEAPON_INVENTORY_SLOT_PRIMARY_0;
 	}
+
+	// Fold the hand unconditionally. Weapon_UpdateSelection indexes unchecked.
+	if (ucmd->weaponindex != WEAPON_INVENTORY_SLOT_INVALID
+		&& ucmd->weaponindex >= WEAPON_INVENTORY_SLOT_PRIMARY_1)
+		dualWieldEnabled
+		? ucmd->weaponindex = WEAPON_INVENTORY_SLOT_PRIMARY_1
+		: ucmd->weaponindex = WEAPON_INVENTORY_SLOT_PRIMARY_0;
 }
 
  //-----------------------------------------------------------------------------
@@ -197,26 +202,31 @@ void ClampUserCmd(CUserCmd* ucmd)
 	const byte nIndexBefore = ucmd->weaponindex;
 
 	// Checks are only required if cycleslot is valid; see 'CPlayer::UpdateWeaponSlots'.
+	// weaponindex folds below regardless: a HOLSTERED/ANY marker must never
+	// smuggle a raw wire hand past this gate into UpdateWeaponSlots.
+	const bool dualWieldEnabled = usercmd_dualwield_enable.GetBool();
+
 	if (ucmd->cycleslot != WEAPON_INVENTORY_SLOT_INVALID
 		&& ucmd->cycleslot != WEAPON_INVENTORY_SLOT_HOLSTERED
 		&& ucmd->cycleslot != WEAPON_INVENTORY_SLOT_ANY)
 	{
-		const bool dualWieldEnabled = usercmd_dualwield_enable.GetBool();
-
 		// Dual-wield cycle slots stay blocked unless explicitly enabled.
 		// Bound is the S21 gadget slot (5=ordnance, 6=survival), not S3 anti-titan. Dual wield starts at 7.
 		if (!dualWieldEnabled && ucmd->cycleslot > WEAPON_INVENTORY_SLOT_S21_GADGET)
 			ucmd->cycleslot = WEAPON_INVENTORY_SLOT_S21_GADGET;
 
 		// m_selectedWeapons is size 2; clamp so it never reads OOB.
-		// weaponindex INVALID is 0xFF -- do not fold it to a hand. Weapon_UpdateSelection indexes unchecked.
+		// weaponindex INVALID is 0xFF -- invalidate the slot, do not fold it to a hand.
 		if (ucmd->weaponindex == WEAPON_INVENTORY_SLOT_INVALID)
 			ucmd->cycleslot = WEAPON_INVENTORY_SLOT_INVALID;
-		else if (ucmd->weaponindex >= WEAPON_INVENTORY_SLOT_PRIMARY_1)
-			dualWieldEnabled
-			? ucmd->weaponindex = WEAPON_INVENTORY_SLOT_PRIMARY_1
-			: ucmd->weaponindex = WEAPON_INVENTORY_SLOT_PRIMARY_0;
 	}
+
+	// Fold the hand unconditionally. Weapon_UpdateSelection indexes unchecked.
+	if (ucmd->weaponindex != WEAPON_INVENTORY_SLOT_INVALID
+		&& ucmd->weaponindex >= WEAPON_INVENTORY_SLOT_PRIMARY_1)
+		dualWieldEnabled
+		? ucmd->weaponindex = WEAPON_INVENTORY_SLOT_PRIMARY_1
+		: ucmd->weaponindex = WEAPON_INVENTORY_SLOT_PRIMARY_0;
 
 	if (usercmd_clamp_diag.GetBool()
 		&& (ucmd->cycleslot != nCycleBefore || ucmd->weaponindex != nIndexBefore)

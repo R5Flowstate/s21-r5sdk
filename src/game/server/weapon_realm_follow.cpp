@@ -138,12 +138,20 @@ static void WeaponRealmFollow_PushInventory(const __int64 ent)
 	}
 }
 
+static thread_local bool s_bInPushInventory = false;
+
 static __int64 __fastcall Hook_SetRealmsBitMask(const __int64 ent, const uint64_t mask)
 {
 	const __int64 result = v_SetRealmsBitMask(ent, mask);
 
-	if (bridge_weapon_realm_follow.GetBool() && ent)
+	// The stamp path below re-enters this setter on each weapon (orig only,
+	// never this hook), but a nested push would redo the same walk; skip it.
+	if (bridge_weapon_realm_follow.GetBool() && ent && !s_bInPushInventory)
+	{
+		s_bInPushInventory = true;
 		WeaponRealmFollow_PushInventory(ent);
+		s_bInPushInventory = false;
+	}
 
 	return result;
 }
@@ -157,6 +165,19 @@ void WeaponRealmFollow_StampActiveWeapon(void* const player, const __int64 weapo
 {
 	if (!bridge_weapon_realm_follow.GetBool() || !player || !weaponEnt || !v_SetRealmsBitMask)
 		return;
+
+	// weaponEnt arrives after orig ran; the engine may have rejected or
+	// freed it. Resolve through the handle map and prove this pointer is
+	// the live occupant before writing its mask.
+	const SDKEntityHandle weaponEH = SDKEntityState_GetHandle(reinterpret_cast<const void*>(weaponEnt));
+	if (!weaponEH.IsValid()
+		|| SDKEntityState_Resolve(weaponEH, ESide::Server) != reinterpret_cast<void*>(weaponEnt))
+	{
+		if (bridge_weapon_realm_follow_diag.GetBool())
+			DevMsg(eDLL_T::SERVER, "[REALM-FOLLOW] activate skip, stale weapon=%p\n",
+				reinterpret_cast<void*>(weaponEnt));
+		return;
+	}
 
 	const uint64_t playerMask = *reinterpret_cast<const uint64_t*>(
 		reinterpret_cast<uintptr_t>(player) + WRF_ENT_OFF_REALMSBITMASK);
@@ -174,18 +195,19 @@ void VWeaponRealmFollow::GetAdr(void) const
 //-----------------------------------------------------------------------------
 void VWeaponRealmFollow::GetFun(void) const
 {
-	// Server-half CBaseEntity::SetRealmsBitMask. Interior
-	// landmarks: twin vtbl+0x2E8 probes bracketing the transmit-serial bump,
-	// then the move-child handle resolve at +0x6340. The 0xAE8/0xB00/0x314
-	// immediates below the hook point are the server-half offsets; the
-	// client twin stores realms at +0x938, so it cannot match (unique).
+	// Server-half CBaseEntity::SetRealmsBitMask. The tail carries the
+	// server-half mask compare (cmp [rbx+0AE8h]); the client twin keeps
+	// its mask at +0x938, so it cannot match these bytes. Single hit on
+	// the dedi; transmit-serial bump and move-child resolve up front.
 	Module_FindPattern(g_GameDll,
 		"48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 "
 		"48 8B 01 48 8B FA 48 8B D9 FF 90 E8 02 00 00 "
 		"48 8D 35 ?? ?? ?? ?? 84 C0 74 ?? F0 FF 05 ?? ?? ?? ?? "
 		"48 8B 03 48 8B CB FF 90 E8 02 00 00 33 C9 84 C0 "
 		"48 0F 45 CB 8B 91 40 63 00 00 8B C2 83 FA FF 74 ?? "
-		"0F B7 C2 C1 EA 10 48 8D 0C 40 48 03 C9 39 54 CE 08")
+		"0F B7 C2 C1 EA 10 48 8D 0C 40 48 03 C9 39 54 CE 08 "
+		"75 ?? 48 8B 0C CE EB ?? 33 C9 48 8B D7 E8 ?? ?? ?? ?? "
+		"C7 83 00 0B 00 00 00 00 00 00 48 39 BB E8 0A 00 00")
 		.GetPtr(v_SetRealmsBitMask);
 
 	if (!v_SetRealmsBitMask)

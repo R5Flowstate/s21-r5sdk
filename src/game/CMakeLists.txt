@@ -512,8 +512,6 @@ add_sources( SOURCE_GROUP "Prediction"
     "client/bridge_cmd_seed.h"
     "client/bridge_fire_tap.cpp"
     "client/bridge_fire_tap.h"
-    "client/ground_standable_probe.cpp"
-    "client/ground_standable_probe.h"
 )
 
 add_sources( SOURCE_GROUP "Grapple Rope"

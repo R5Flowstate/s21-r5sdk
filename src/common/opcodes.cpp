@@ -321,8 +321,13 @@ void RuntimePtc_Init()
 					0x66, 0x90
 				};
 				store12.Patch(vPatch);
-				SDK_LogDevFile("[VIDMODE] dx12 exclusive-miss keeps requested size at %p (rejoins floor)\n",
-					(void*)store12.GetPtr());
+				if (store12.GetValue<uint8_t>() != 0x80
+					|| store12.Offset(4).GetValue<uint8_t>() != 0xE9)
+					SDK_LogDevFile("[VIDMODE] dx12 exclusive-miss patch FAILED to stick at %p\n",
+						(void*)store12.GetPtr());
+				else
+					SDK_LogDevFile("[VIDMODE] dx12 exclusive-miss keeps requested size at %p (rejoins floor)\n",
+						(void*)store12.GetPtr());
 			}
 		}
 	}

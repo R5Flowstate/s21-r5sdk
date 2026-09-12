@@ -2199,6 +2199,10 @@ static void Hook_Script_RegisterServerWeaponSlotConstants(CSquirrelVM* s)
     s->RegisterConstant("WEAPON_INVENTORY_SLOT_DUALPRIMARY_2",  9);
     s->RegisterConstant("WEAPON_INVENTORY_SLOT_DUALPRIMARY_3", 10);
 
+    // Engine stow marker (0xFD); the engine schema predates it, so name it
+    // here for scripts testing the stow edge. INVALID/ANY stay engine-owned.
+    s->RegisterConstant("WEAPON_INVENTORY_SLOT_HOLSTERED", 0xFD);
+
     Msg(eDLL_T::SERVER, "[WEAP-SLOT] S21 inventory slot schema applied "
         "(sling=4, anti_titan=5, gadget=6)\n");
 }

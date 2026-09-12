@@ -8,6 +8,7 @@
 #include "translocation.h"
 #include "baseentity.h"
 #include "player.h"
+#include "game/server/util_server.h"
 #include "game/shared/edict_dirty.h"
 #include "game/shared/vscript_gamedll_defs.h"
 #include "game/shared/weapon_script_vars.h"
@@ -88,7 +89,7 @@ static constexpr int kDuckStateStanding = 0; // DS_STANDING
 // CPlayerLocalData: duckToggle 0x5AA8 = localdata+0x18, fallVel is localdata+0x48.
 static constexpr ptrdiff_t PLAYER_OFF_FALLVEL = 0x5AD8;
 static constexpr ptrdiff_t PLAYER_OFF_HAS_JUMPED = 0x6230; // m_bHasJumpedSinceTouchedGround
-static constexpr ptrdiff_t PLAYER_OFF_PUSHAWAY = 30700; // m_pushAwayFromTopAcceleration
+static constexpr ptrdiff_t PLAYER_OFF_PUSHAWAY = 0x77EC; // m_pushAwayFromTopAcceleration
 
 // TeleportPlayerNoInterp step selector, so the placement path can be bisected
 // against a plain SetOrigin without a rebuild.
@@ -733,10 +734,28 @@ static void Translocation_ResolveSetAbsVelocity(void)
 		return;
 	s_bSetAbsVelocityResolved = true;
 
+	// Server-half CBaseEntity::SetAbsVelocity. The rip-relative critsec load
+	// plus the abs-origin/abs-velocity compares below it separate it from the
+	// client twin in this same binary. Single hit on the dedi.
 	Module_FindPattern(g_GameDll,
 		"48 8B C4 48 89 58 10 48 89 68 18 48 89 70 20 57 48 81 EC B0 00 00 00 "
 		"48 8B 1D ?? ?? ?? ?? 48 8B E9 44 0F 29 40 C8 48 8B F2 0F BF 41 58")
 		.GetPtr(v_CBaseEntity_SetAbsVelocity);
+
+	// Twin guard: a future build that shifts codegen must fail closed here,
+	// not call into the wrong half. Prologue plus the abs-origin movaps in
+	// the compare block below it.
+	CMemory setAbsVel(v_CBaseEntity_SetAbsVelocity);
+	if (v_CBaseEntity_SetAbsVelocity
+		&& (!setAbsVel.CheckOpCodes(
+				{ 0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x10 })
+			|| !setAbsVel.FindPatternSelf("44 0F 29 40 C8",
+				CMemory::Direction::DOWN, 0x120).IsValid()))
+	{
+		Warning(eDLL_T::SERVER,
+			"[TRANSLOC] SetAbsVelocity prologue mismatch -- twin guard tripped, velocity zeroing off\n");
+		v_CBaseEntity_SetAbsVelocity = nullptr;
+	}
 
 	if (!v_CBaseEntity_SetAbsVelocity)
 	{
@@ -773,6 +792,20 @@ static void Translocation_AddNoInterp(void* pEnt)
 	MarkEntityEdictDirty(pEnt);
 }
 
+// Player-only offsets below (duck state, fall velocity, push-away) over-read
+// smaller entities. These natives arrive as script `this`; prove the pointer
+// is the live player occupant before touching them.
+static bool Translocation_IsLivePlayer(void* pEnt)
+{
+	if (!pEnt || !gpGlobals)
+		return false;
+	const int16_t edictIdx = *reinterpret_cast<const int16_t*>(
+		reinterpret_cast<uintptr_t>(pEnt) + 88);
+	if (edictIdx < 1)
+		return false;
+	return UTIL_PlayerByIndex(edictIdx) == reinterpret_cast<CPlayer*>(pEnt);
+}
+
 // A teleport leaves the player with no ground entity for a tick. A duck that
 // STARTS on such a tick latches m_doingHalfDuck, and when that transition
 // completes the movement FSM adds (standHeight - duckHeight) * 0.5 = 16.5 to
@@ -782,8 +815,17 @@ static void Translocation_AddNoInterp(void* pEnt)
 // from the same standing state.
 static void Translocation_SettleStance(void* pEnt)
 {
-	if (!pEnt)
+	if (!Translocation_IsLivePlayer(pEnt))
+	{
+		static bool s_bWarned = false;
+		if (!s_bWarned)
+		{
+			s_bWarned = true;
+			Warning(eDLL_T::SERVER,
+				"[TRANSLOC] SettleStance on non-player ent=%p -- skipped\n", pEnt);
+		}
 		return;
+	}
 
 	const uintptr_t base = reinterpret_cast<uintptr_t>(pEnt);
 
@@ -801,7 +843,7 @@ static void Translocation_SettleStance(void* pEnt)
 
 static void Translocation_UpdateCollisionBounds(void* pEnt)
 {
-	if (!pEnt)
+	if (!Translocation_IsLivePlayer(pEnt))
 		return;
 	auto* const pBase = reinterpret_cast<CBaseEntity*>(pEnt);
 	CCollisionProperty* const pColl = pBase->CollisionProp();
@@ -845,8 +887,17 @@ static SQRESULT Script_SettleStance(HSQUIRRELVM v)
 // Call this AFTER SetOrigin on a floor dest so the same-frame snapshot is standing.
 static void Translocation_PlantOnGround(void* pEnt)
 {
-	if (!pEnt)
+	if (!Translocation_IsLivePlayer(pEnt))
+	{
+		static bool s_bWarned = false;
+		if (!s_bWarned)
+		{
+			s_bWarned = true;
+			Warning(eDLL_T::SERVER,
+				"[TRANSLOC] PlantOnGround on non-player ent=%p -- skipped\n", pEnt);
+		}
 		return;
+	}
 	if (!bridge_plant_on_ground.GetBool())
 		return;
 
@@ -1094,7 +1145,7 @@ static SQRESULT ServerScript_TeleportPlayerNoInterp(HSQUIRRELVM v)
 	Translocation_ResolveSetAbsOrigin();
 
 	void* const pEnt = Translocation_EntityFromStack(v, 2);
-	if (!pEnt)
+	if (!Translocation_IsLivePlayer(pEnt))
 	{
 		static bool s_bNullWarned = false;
 		if (!s_bNullWarned)
