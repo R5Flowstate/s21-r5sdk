@@ -1131,6 +1131,7 @@ static bool S21_StringCmdNameDenied(const char* pszName)
 		"sdk_splitpacket_recv_clamp",
 		"language", "bridge_ui_language", "localize_ui_reset",
 		"localize_disk", "localize_disk_strict", "localize_retire_poison",
+		"bridge_pose_param_ext", "bridge_pose_moveyaw",
 	};
 
 	if (!pszName || !pszName[0])

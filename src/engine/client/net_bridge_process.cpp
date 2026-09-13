@@ -2587,14 +2587,21 @@ static void S21Bridge_InjectScriptRemote(const char* name, uint32_t nameLen, uin
 
 	if (!hFunc)
 	{
+		// FindFunction Allocs a 24-byte engine object we do not Free on the
+		// client (no engine IMemAlloc singleton). A full cache + miss would
+		// leak 24 B per remote; refuse the lookup instead of evicting.
+		if (s_srFnCacheCount >= 32)
+		{
+			static int s_srCacheFull = 0;
+			if (++s_srCacheFull <= 8)
+				Warning(eDLL_T::ENGINE,
+					"[BRIDGE-S2C-SR] function cache full -- drop '%.*s' (no FindFunction)\n",
+					(int)nameLen, name);
+			return;
+		}
 		hFunc = vm->FindFunction(name, nullptr, nullptr);
 		if (hFunc)
 		{
-			if (s_srFnCacheCount >= 32)
-			{
-				memmove(&s_srFnCache[0], &s_srFnCache[1], sizeof(s_srFnCache[0]) * 31);
-				s_srFnCacheCount = 31;
-			}
 			S21Bridge_SRFuncCacheEntry& e = s_srFnCache[s_srFnCacheCount++];
 			V_strncpy(e.szName, name, sizeof(e.szName));
 			e.hFunc = hFunc;
@@ -4391,6 +4398,21 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 					}
 					else
 					{
+					const uint64_t nItems = pGlobals
+						? *reinterpret_cast<const uint64_t*>(
+							reinterpret_cast<uintptr_t>(pGlobals) + 0x30000)
+						: 0x1001ull;
+					if (nItems > 0x1000)
+					{
+						Warning(eDLL_T::ENGINE,
+							"[BRIDGE-PM] pdef item count %llu exceeds 4096 -- leaving unloaded\n",
+							(unsigned long long)nItems);
+						if (pLoaded)
+							*pLoaded = 0;
+						s_bridgePdefReady = false;
+					}
+					else
+					{
 					if (pLoaded)
 					{
 						*pLoaded = 1;
@@ -4408,6 +4430,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 						(unsigned long long)*reinterpret_cast<uint64_t*>((uintptr_t)netMsg + 32));
 
 					pdefOk = true;
+					}
 					}
 					SDK_Log("[BRIDGE-PM] PersistenceDefFile: BZ2 ok, decompressed %u -> %u, parse=%d\n",
 						pdefDataLen, decompLen, (int)parseOk);
@@ -5416,6 +5439,39 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 				continue;
 			}
 
+			// Compressed non-LZSS keeps attacker size DWORDs; native Process
+			// new[]s then Oodle from those. Only our capped LZSS->Oodle rewrite
+			// (or an already-capped 0xFFFFFFFD blob) may stay compressed.
+			{
+				const uint32_t cstCompBytes = (cstFinalDataBits + 7) / 8;
+				if (cstFinalComp)
+				{
+					bool cstOodleOk = false;
+					if (cstFinalData && cstCompBytes >= 16)
+					{
+						const uint32_t uncomp = *reinterpret_cast<const uint32_t*>(cstFinalData);
+						const uint32_t blob = *reinterpret_cast<const uint32_t*>(cstFinalData + 4);
+						const uint32_t mag = *reinterpret_cast<const uint32_t*>(cstFinalData + 8);
+						if (uncomp > 0 && uncomp <= kS21CstUncompMax
+							&& mag == 0xFFFFFFFD
+							&& blob >= 8 && 8u + blob == cstCompBytes)
+							cstOodleOk = true;
+					}
+					if (!cstOodleOk)
+					{
+						static int s_cstCompDrop = 0;
+						if (++s_cstCompDrop <= 8)
+							Warning(eDLL_T::ENGINE,
+								"[SEC] CreateStringTable '%s' compressed blob not a capped Oodle rewrite -- drop\n",
+								cstName);
+						if (cstFinalData != cstRawData)
+							free(cstFinalData);
+						free(cstRawData);
+						continue;
+					}
+				}
+			}
+
 			// -- Build S21 format: dataLen 22->24 bits, decompress LZSS->raw --
 			// [SEC C10] Capacity-bound rewrite into s21CstBuf; fail closed on oversize.
 			uint32_t cstFinalDataBytes = (cstFinalDataBits + 7) / 8;
@@ -6310,6 +6366,18 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 				Warning(eDLL_T::ENGINE,
 					"[BRIDGE-PM] Persistence %s dropped -- pdef not parsed\n",
 					s3cmd == 25 ? "Baseline" : "UpdateVar");
+				continue;
+			}
+
+			if (s3cmd == 20)
+			{
+				static int s_grantPickupSkip = 0;
+				if (s_grantPickupSkip < 4)
+				{
+					++s_grantPickupSkip;
+					Warning(eDLL_T::ENGINE,
+						"[BRIDGE-PM] GrantClientSidePickup dropped after RFB\n");
+				}
 				continue;
 			}
 

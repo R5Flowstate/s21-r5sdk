@@ -52,6 +52,8 @@ static constexpr int kZiprailVtbl_IsZiprail = 0x7B0;
 static constexpr ptrdiff_t kClEntOffCollisionProp = 0x3B8;
 static constexpr ptrdiff_t kClPropOffSolidFlags = 0x28;
 static constexpr unsigned int kSolidFlagNotInSpatial = 0x4000;
+static constexpr ptrdiff_t kClZiprailOffNodeCount = 0x0FA0;
+static constexpr unsigned kZiprailPathNodeMax = 32;
 
 // Base zipline virtual: false for plain C_Zipline, true only for C_Ziprail.
 // Safe to call on any zipline entity (slot exists on the base class).
@@ -70,6 +72,32 @@ static void __fastcall Hook_ZiprailPostDataUpdate(void* self, int updateType, fl
 {
 	// self = IClientNetworkable subobject; C_Ziprail base is self-24.
 	const uintptr_t ent = reinterpret_cast<uintptr_t>(self) - 24;
+
+	// RecvPropArray3 is 32. Native create loops nodeCount with no min;
+	// clamp before that walk so positions[i] stay inside the 0x12F0 object.
+	if (ClZiprail_IsZiprailEntity(reinterpret_cast<void*>(ent)))
+	{
+		__try
+		{
+			unsigned char* const pCount = reinterpret_cast<unsigned char*>(ent + kClZiprailOffNodeCount);
+			if (*pCount > kZiprailPathNodeMax)
+			{
+				static volatile LONG s_nodeClamp = 0;
+				if (InterlockedIncrement(&s_nodeClamp) <= 8)
+					Warning(eDLL_T::ENGINE,
+						"[CL-ZIPRAIL] nodeCount=%u over %u -- clamp ent=0x%p\n",
+						static_cast<unsigned>(*pCount), kZiprailPathNodeMax,
+						reinterpret_cast<void*>(ent));
+				*pCount = static_cast<unsigned char>(kZiprailPathNodeMax);
+			}
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			Warning(eDLL_T::ENGINE,
+				"[CL-ZIPRAIL] nodeCount clamp raised ent=0x%p\n",
+				reinterpret_cast<void*>(ent));
+		}
+	}
 
 	if (s_origZiprailPostDataUpdate)
 		s_origZiprailPostDataUpdate(self, updateType, oldTime, newTime);
@@ -112,7 +140,7 @@ static void __fastcall Hook_ZiprailPostDataUpdate(void* self, int updateType, fl
 	// whose wire carried no path at that moment stays empty for the map.
 	if (updateType == 1 /* DATA_UPDATE_CREATED */)
 	{
-		const unsigned int nodeCount = *reinterpret_cast<unsigned __int8*>(ent + 0x0FA0);
+		const unsigned int nodeCount = *reinterpret_cast<unsigned __int8*>(ent + kClZiprailOffNodeCount);
 		if (nodeCount < 2)
 		{
 			static volatile LONG s_emptyPathWarns = 0;

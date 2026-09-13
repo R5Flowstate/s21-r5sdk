@@ -64,6 +64,39 @@ static const void* GetDictStorage(const void* dict)
 	}
 }
 
+static int ResolveStringNumber(const void* tbl, int stringNumber)
+{
+	const uint8_t* base = static_cast<const uint8_t*>(tbl);
+	const void* clientSide = *reinterpret_cast<void* const*>(
+		base + STBL_PITEMS_CS_OFF);
+	if (clientSide && stringNumber < -1)
+		return -stringNumber;
+	return stringNumber;
+}
+
+// Dict vtable slot 4 is IsValidIndex (unsigned short).
+static bool DictIndexValid(const void* dict, int idx)
+{
+	if (!dict || idx < 0
+		|| static_cast<unsigned>(idx) == 0xFFFFu
+		|| static_cast<unsigned>(idx) > 0x3FFFu)
+		return false;
+	__try
+	{
+		void** const vt = *reinterpret_cast<void** const*>(dict);
+		if (!vt)
+			return false;
+		const auto isValid = reinterpret_cast<bool(__fastcall*)(void*, unsigned short)>(vt[4]);
+		if (!isValid)
+			return false;
+		return isValid(const_cast<void*>(dict), static_cast<unsigned short>(idx));
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return false;
+	}
+}
+
 // One-shot warning suppression by table-name pointer + storage-NULL state.
 // Hash collisions are fine; we just want to avoid log spam when a worker
 // thread polls the same empty modelprecache hundreds of times per second.
@@ -102,11 +135,23 @@ static const void* __fastcall Hook_CNetworkStringTable_GetEntryUserData_S21(
 	const bool  storageBad  = (storage == reinterpret_cast<void*>(
 									static_cast<intptr_t>(-1)));
 
-	// SAFE PATH: storage allocated -- delegate to the original. We ignore
-	// a NULL dict here because that is a real corruption case the engine
-	// would crash on anyway, and our short-circuit above wouldn't help.
+	// SAFE PATH: storage allocated -- refuse a miss / OOB index (0xFFFF,
+	// negative, or past 0x3FFF) then IsValidIndex, then the original.
 	if (!storageNull && !storageBad && dict)
 	{
+		const int idx = ResolveStringNumber(thisp, stringNumber);
+		if (!DictIndexValid(dict, idx))
+		{
+			static std::atomic<int> s_badIdxWarns{0};
+			if (s_badIdxWarns.fetch_add(1, std::memory_order_relaxed) < 8)
+			{
+				Warning(eDLL_T::ENGINE,
+					"[stbl-diag] GetEntryUserData idx=%d invalid table='%s' -- NULL\n",
+					stringNumber, tblName);
+			}
+			if (length) *length = 0;
+			return nullptr;
+		}
 		return v_CNetworkStringTable_GetEntryUserData_S21(
 			thisp, stringNumber, length);
 	}

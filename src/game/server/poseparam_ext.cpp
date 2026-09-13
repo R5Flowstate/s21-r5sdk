@@ -82,7 +82,7 @@ static QAngle*(__fastcall* v_CPlayer_EyeAngles)(void* player, QAngle* out) = nul
 // ConVars.
 //-----------------------------------------------------------------------------
 static ConVar bridge_pose_param_ext(
-	"bridge_pose_param_ext", "1", FCVAR_RELEASE | FCVAR_GAMEDLL,
+	"bridge_pose_param_ext", "1", FCVAR_RELEASE | FCVAR_GAMEDLL | FCVAR_CHEAT,
 	"Store script pose-param indices 12..23 in a server-side side table instead "
 	"of raising Parameter index invalid. Required for S21 models whose pose "
 	"count exceeds the S3 native 12. LookupPoseParameterIndex returns -1 on a "
@@ -94,7 +94,7 @@ static ConVar bridge_pose_param_ext_diag(
 	"2 = also one line per store (hard-capped). Default 0.");
 
 static ConVar bridge_pose_moveyaw(
-	"bridge_pose_moveyaw", "1", FCVAR_RELEASE | FCVAR_GAMEDLL,
+	"bridge_pose_moveyaw", "1", FCVAR_RELEASE | FCVAR_GAMEDLL | FCVAR_CHEAT,
 	"After server animstate Update, write move_yaw / move_yaw_backward from "
 	"abs-velocity vs EyeAngles so remotes receive the strafe lean. 0 = stock.");
 

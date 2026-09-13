@@ -276,6 +276,8 @@ static bool Chat_CommandVerbDenied(const char* const pszVerb)
 		"sdk_splitpacket_recv_clamp",
 		"bridge_akimbo",
 		"bridge_akimbo_deploy_partner",
+		"bridge_pose_param_ext",
+		"bridge_pose_moveyaw",
 	};
 
 	for (size_t i = 0; i < SDK_ARRAYSIZE(kDeny); i++)

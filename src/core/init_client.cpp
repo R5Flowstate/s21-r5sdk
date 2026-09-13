@@ -95,6 +95,9 @@
 #include "engine/skinnames_stub.h"
 #include "engine/weapon_precache_redirect.h"
 #include "engine/mdl_precache_client_grow.h"
+#include "engine/client/cl_parse_ents.h"
+#include "engine/client/pdef_parse.h"
+#include "engine/client/camo_index.h"
 #include "engine/staticpropmgr.h"
 #include "engine/modelloader.h"
 #include "engine/cmodel_bsp_debug.h"
@@ -628,6 +631,9 @@ void DetourRegister()
 	REGISTER(VBridgeFlagSet);
 	REGISTER(VModelLoader);
 	REGISTER(VModelPrecacheClientGrowS21);
+	REGISTER(VCLParsePacketEntitiesBound);
+	REGISTER(VPdefParseBound);
+	REGISTER(VCamoIndexClamp);
 	REGISTER(VMaterialMissingLogS21);
 	REGISTER(VTexStreamFeedbackSyncS21);
 	REGISTER(VMaterialGlue);

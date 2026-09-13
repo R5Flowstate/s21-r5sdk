@@ -76,18 +76,28 @@ static bool s_bFpsMaxApplying = false;
 static bool s_bFpsMaxBound = false;
 
 static void FpsMaxChanged_f(IConVar* var, const char* pOldValue, float flOldValue, ChangeUserData_t pUserData);
-static void FpsMax_ApplyUnlocked(void);
+static void FpsMax_ApplyUnlocked(IConVar* var);
 
 static ConVar fps_max_unlimited("fps_max_unlimited", "0", FCVAR_RELEASE | FCVAR_ARCHIVE,
 	"When 1, force fps_max to 0 (unlocked).", FpsMaxChanged_f);
 
-static void FpsMax_ApplyUnlocked(void)
+static void FpsMax_ApplyUnlocked(IConVar* var)
 {
 	if (s_bFpsMaxApplying || !fps_max)
 		return;
 
 	s_bFpsMaxApplying = true;
-	if (fps_max_unlimited.GetBool())
+	if (var == static_cast<IConVar*>(&fps_max_unlimited))
+	{
+		if (fps_max_unlimited.GetBool() && fps_max->GetFloat() != 0.f)
+			fps_max->SetValue(0);
+	}
+	else if (fps_max->GetFloat() > 0.f)
+	{
+		if (fps_max_unlimited.GetBool())
+			fps_max_unlimited.SetValue(0);
+	}
+	else if (fps_max_unlimited.GetBool())
 	{
 		if (fps_max->GetFloat() != 0.f)
 			fps_max->SetValue(0);
@@ -132,11 +142,10 @@ static void ClientRenderCvars_BindShipped(void)
 
 static void FpsMaxChanged_f(IConVar* var, const char* pOldValue, float flOldValue, ChangeUserData_t pUserData)
 {
-	NOTE_UNUSED(var);
 	NOTE_UNUSED(pOldValue);
 	NOTE_UNUSED(flOldValue);
 	NOTE_UNUSED(pUserData);
-	FpsMax_ApplyUnlocked();
+	FpsMax_ApplyUnlocked(var);
 }
 
 static void FpsMax_BindShipped(void)
@@ -178,7 +187,7 @@ static void FpsMax_BindShipped(void)
 			fps_absolute_max->SetValue(10000.f);
 	}
 
-	FpsMax_ApplyUnlocked();
+	FpsMax_ApplyUnlocked(nullptr);
 }
 
 //-----------------------------------------------------------------------------

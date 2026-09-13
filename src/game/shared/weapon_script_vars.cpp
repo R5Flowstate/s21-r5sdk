@@ -2467,25 +2467,22 @@ static ConVar bridge_turret_driver_log("bridge_turret_driver_log", "0", FCVAR_DE
 
 struct TurretDriverBind_t
 {
-	void* pTurret;
-	void* pDriver;
+	SDKEntityHandle turret;
+	SDKEntityHandle driver;
 };
 
-static std::unordered_map<void*, TurretDriverBind_t> s_turretByDriver;
-static std::unordered_map<void*, TurretDriverBind_t> s_driverByTurret;
+static SDKEntityMap<TurretDriverBind_t> s_turretByDriver(ESide::Server, "turret.byDriver");
+static SDKEntityMap<TurretDriverBind_t> s_driverByTurret(ESide::Server, "turret.byTurret");
 
 static void TurretDriver_LevelShutdown(void)
 {
-	s_turretByDriver.clear();
-	s_driverByTurret.clear();
+	s_turretByDriver.Clear();
+	s_driverByTurret.Clear();
 }
 
-static uint32_t TurretDriver_EntHandle(const void* pEnt)
+static void* TurretDriver_Resolve(SDKEntityHandle h)
 {
-	if (!pEnt)
-		return TURRET_HANDLE_NONE;
-	return *reinterpret_cast<const uint32_t*>(
-		reinterpret_cast<const uint8_t*>(pEnt) + 0x08);
+	return SDKEntityState_Resolve(h, ESide::Server);
 }
 
 static bool TurretDriver_IsPlayer(void* pEnt)
@@ -2522,7 +2519,7 @@ static void TurretDriver_DisarmPlayer(void* pPlayer)
 	if (!pPlayer)
 		return;
 	TurretDriver_WriteCam(pPlayer, TURRET_HANDLE_NONE);
-	s_turretByDriver.erase(pPlayer);
+	s_turretByDriver.Erase(pPlayer);
 }
 
 static void TurretDriver_ClearPair(void* pTurret, void* pPlayer)
@@ -2530,7 +2527,7 @@ static void TurretDriver_ClearPair(void* pTurret, void* pPlayer)
 	if (pPlayer)
 		TurretDriver_DisarmPlayer(pPlayer);
 	if (pTurret)
-		s_driverByTurret.erase(pTurret);
+		s_driverByTurret.Erase(pTurret);
 }
 
 static SQRESULT Script_SetDriver(HSQUIRRELVM v)
@@ -2551,18 +2548,24 @@ static SQRESULT Script_SetDriver(HSQUIRRELVM v)
 		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 	}
 
-	const auto itPlayer = s_turretByDriver.find(pPlayer);
-	if (itPlayer != s_turretByDriver.end() && itPlayer->second.pTurret != pTurret)
-		TurretDriver_ClearPair(itPlayer->second.pTurret, pPlayer);
+	if (TurretDriverBind_t* const prevPlayer = s_turretByDriver.Find(pPlayer))
+	{
+		void* const pOldTurret = TurretDriver_Resolve(prevPlayer->turret);
+		if (pOldTurret && pOldTurret != pTurret)
+			TurretDriver_ClearPair(pOldTurret, pPlayer);
+	}
+	if (TurretDriverBind_t* const prevTurret = s_driverByTurret.Find(pTurret))
+	{
+		void* const pOldDriver = TurretDriver_Resolve(prevTurret->driver);
+		if (pOldDriver && pOldDriver != pPlayer)
+			TurretDriver_ClearPair(pTurret, pOldDriver);
+	}
 
-	const auto itTurret = s_driverByTurret.find(pTurret);
-	if (itTurret != s_driverByTurret.end() && itTurret->second.pDriver != pPlayer)
-		TurretDriver_ClearPair(pTurret, itTurret->second.pDriver);
+	const SDKEntityHandle hTurret = SDKEntityState_GetHandle(pTurret);
+	const SDKEntityHandle hPlayer = SDKEntityState_GetHandle(pPlayer);
+	TurretDriver_WriteCam(pPlayer, hTurret.Raw());
 
-	const uint32_t hTurret = TurretDriver_EntHandle(pTurret);
-	TurretDriver_WriteCam(pPlayer, hTurret);
-
-	const TurretDriverBind_t bind = { pTurret, pPlayer };
+	const TurretDriverBind_t bind = { hTurret, hPlayer };
 	s_turretByDriver[pPlayer] = bind;
 	s_driverByTurret[pTurret] = bind;
 
@@ -2574,7 +2577,7 @@ static SQRESULT Script_SetDriver(HSQUIRRELVM v)
 	}
 	if (bridge_turret_driver_log.GetBool())
 		Msg(eDLL_T::SERVER, "[SHEILA] SetDriver turret=%p player=%p handle=0x%08X\n",
-			pTurret, pPlayer, hTurret);
+			pTurret, pPlayer, hTurret.Raw());
 
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
@@ -2586,9 +2589,8 @@ static SQRESULT Script_ClearDriver(HSQUIRRELVM v)
 		return SQ_ERROR;
 
 	void* pPlayer = nullptr;
-	const auto it = s_driverByTurret.find(pTurret);
-	if (it != s_driverByTurret.end())
-		pPlayer = it->second.pDriver;
+	if (TurretDriverBind_t* const bind = s_driverByTurret.Find(pTurret))
+		pPlayer = TurretDriver_Resolve(bind->driver);
 
 	TurretDriver_ClearPair(pTurret, pPlayer);
 
@@ -2605,9 +2607,12 @@ static SQRESULT Script_GetDriver(HSQUIRRELVM v)
 		return SQ_ERROR;
 
 	void* pPlayer = nullptr;
-	const auto it = s_driverByTurret.find(pTurret);
-	if (it != s_driverByTurret.end())
-		pPlayer = it->second.pDriver;
+	if (TurretDriverBind_t* const bind = s_driverByTurret.Find(pTurret))
+	{
+		pPlayer = TurretDriver_Resolve(bind->driver);
+		if (!pPlayer)
+			s_driverByTurret.Erase(pTurret);
+	}
 
 	OffhandOverride_PushEntityOrNull(v, pPlayer);
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
@@ -2619,7 +2624,7 @@ static SQRESULT Script_IsTurretEnt(HSQUIRRELVM v)
 	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pTurret)) || !pTurret)
 		return SQ_ERROR;
 
-	sq_pushbool(v, s_driverByTurret.find(pTurret) != s_driverByTurret.end());
+	sq_pushbool(v, s_driverByTurret.Find(pTurret) != nullptr);
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
@@ -2629,12 +2634,15 @@ static SQRESULT Script_GetTurret(HSQUIRRELVM v)
 	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pPlayer)) || !pPlayer)
 		return SQ_ERROR;
 
-	void* pTurret = nullptr;
-	const auto it = s_turretByDriver.find(pPlayer);
-	if (it != s_turretByDriver.end())
-		pTurret = it->second.pTurret;
+	void* pTurretOut = nullptr;
+	if (TurretDriverBind_t* const bind = s_turretByDriver.Find(pPlayer))
+	{
+		pTurretOut = TurretDriver_Resolve(bind->turret);
+		if (!pTurretOut)
+			s_turretByDriver.Erase(pPlayer);
+	}
 
-	OffhandOverride_PushEntityOrNull(v, pTurret);
+	OffhandOverride_PushEntityOrNull(v, pTurretOut);
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 

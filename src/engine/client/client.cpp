@@ -1425,7 +1425,9 @@ bool CClient::VProcessStringCmd(CClient* pClient, NET_StringCmd* pMsg)
 				|| !_stricmp(pszVerb, "sdk_splitpacket_recv_clamp")
 				|| !_stricmp(pszVerb, "language")
 				|| !_stricmp(pszVerb, "bridge_akimbo")
-				|| !_stricmp(pszVerb, "bridge_akimbo_deploy_partner")))
+				|| !_stricmp(pszVerb, "bridge_akimbo_deploy_partner")
+				|| !_stricmp(pszVerb, "bridge_pose_param_ext")
+				|| !_stricmp(pszVerb, "bridge_pose_moveyaw")))
 			{
 				Warning(eDLL_T::SERVER,
 					"[BRIDGE-SCMD] drop '%s' from slot=%i (cheat)\n",

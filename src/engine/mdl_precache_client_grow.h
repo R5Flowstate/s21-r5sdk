@@ -8,6 +8,7 @@
 
 #include "tier0/dbg.h"
 #include "tier0/module.h"
+#include "tier0/memaddr.h"
 #include "thirdparty/detours/include/idetour.h"
 
 // Resolved at GetFun time (Phase A) so the IDetour framework's pattern
@@ -18,6 +19,8 @@ inline char*  (__fastcall* v_CL_StringChanged_Grow) (__int64 a1, __int64 table,
 													  __int64 userdata,
 													  __int64 userdataLen) = nullptr;
 inline __int64(__fastcall* v_CL_ClientStateClear_Grow)(void* clstate) = nullptr;
+inline __int64(__fastcall* v_CL_SetModelByIndex_Grow)(unsigned int idx) = nullptr;
+inline void** v_CL_ModelPrecacheStringTableLoc = nullptr;
 
 // Stats for the dump probe. Returns base + count + entries_populated. Safe to
 // call before / after the detour attaches: when not attached, returns nullptr +
@@ -38,6 +41,8 @@ class VModelPrecacheClientGrowS21 : public IDetour
 		LogFunAdr("CModelInfoClient::GetModelByIndex_S21", v_CL_GetModelByIndex_Grow);
 		LogFunAdr("CModelPrecache::OnStringChanged_S21",   v_CL_StringChanged_Grow);
 		LogFunAdr("CClientState::Clear_S21",               v_CL_ClientStateClear_Grow);
+		LogFunAdr("CL_SetModelByIndex_S21",               v_CL_SetModelByIndex_Grow);
+		LogVarAdr("modelprecache stringtable",            v_CL_ModelPrecacheStringTableLoc);
 	}
 	virtual void GetFun(void) const
 	{
@@ -59,6 +64,18 @@ class VModelPrecacheClientGrowS21 : public IDetour
 			"40 57 48 83 EC 20 48 89 6C 24 38 48 8B F9 33 ED "
 			"C7 81 B8 00 00 00 FF FF FF FF")
 			.GetPtr(v_CL_ClientStateClear_Grow);
+
+		Module_FindPattern(g_GameDll,
+			"40 53 48 81 EC ?? ?? ?? ?? 48 63 D9")
+			.GetPtr(v_CL_SetModelByIndex_Grow);
+		if (v_CL_SetModelByIndex_Grow)
+		{
+			v_CL_ModelPrecacheStringTableLoc =
+				CMemory(reinterpret_cast<const void*>(v_CL_SetModelByIndex_Grow))
+					.Offset(0x0C)
+					.ResolveRelativeAddress(3, 7)
+					.RCast<void**>();
+		}
 	}
 	virtual void GetVar(void) const { }
 	virtual void GetCon(void) const { }

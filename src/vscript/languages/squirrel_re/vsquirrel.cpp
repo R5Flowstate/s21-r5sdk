@@ -11,6 +11,7 @@
 #include "sqfuncproto.h"
 #include "sqstring.h"
 #include "vsquirrel.h"
+#include "core/logdef.h"
 #ifndef CLIENT_DLL
 #include "engine/host_state.h"
 #include "game/shared/scriptremotefunctions_server.h"
@@ -377,12 +378,33 @@ SQRESULT Script_PrintFunc(HSQUIRRELVM v, SQChar* fmt, ...)
 	LogLevel_t level = LogLevel_t(script_show_output.GetInt());
 	LogType_t type = bLogLevelOverride ? LogType_t::SQ_WARNING : LogType_t::SQ_INFO;
 
-	// Always log script related problems to the console.
+#ifdef DEDICATED
+	// WriteConsole hitches sim. Mute info only while HS_RUN; load/status still
+	// console even when the cvar is 0. SCRIPT ERROR still promotes.
+	if (type == LogType_t::SQ_INFO && script_show_output.GetInt() <= 0)
+	{
+		const bool bInGame = g_pHostState && g_pHostState->IsRunning();
+		if (bInGame)
+		{
+			if (!SpdLog_FileLogsEnabled())
+				return SQ_OK;
+		}
+		else if (level == LogLevel_t::LEVEL_DISK_ONLY)
+			level = LogLevel_t::LEVEL_CONSOLE;
+	}
+	if (type == LogType_t::SQ_WARNING &&
+		level == LogLevel_t::LEVEL_DISK_ONLY &&
+		bLogLevelOverride)
+	{
+		level = LogLevel_t::LEVEL_CONSOLE;
+	}
+#else
 	if (type == LogType_t::SQ_WARNING &&
 		level == LogLevel_t::LEVEL_DISK_ONLY)
 	{
 		level = LogLevel_t::LEVEL_CONSOLE;
 	}
+#endif
 
 	va_list args;
 	va_start(args, fmt);

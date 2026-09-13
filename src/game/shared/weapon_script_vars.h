@@ -254,9 +254,9 @@ class VWeaponScriptVars : public IDetour
 		if (!v_WeaponX_HolsterInternal)
 			Warning(eDLL_T::SERVER, "[WeaponScriptVars] CWeaponX::HolsterInternal pattern unresolved -- weapon.Holster()/FastHolster() script bindings will no-op\n");
 
-		// CBaseCombatCharacter::Weapon_SetSelectedOffhandCleared(character, activeSlot).
+		// C half: 48 63 DA and vtable+0xA60. C_ half is 8B DA / +0x850 -- do not attach that.
 		Module_FindPattern(g_GameDll,
-			"48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC ?? 48 8B 01 48 8B F9 8B DA 48 8D 34 9D ?? ?? ?? ?? FF 90 ?? ?? ?? ?? 8B 14 30 83 FA ?? 0F 84 ?? ?? ?? ?? 0F B7 C2 48 8D 2D")
+			"48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC ?? 48 8B 01 48 8B F9 48 63 DA 48 8D 34 9D ?? ?? ?? ?? FF 90 60 0A 00 00")
 			.GetPtr(v_Weapon_SetSelectedOffhandCleared);
 		if (!v_Weapon_SetSelectedOffhandCleared)
 			Warning(eDLL_T::SERVER, "[WeaponScriptVars] Weapon_SetSelectedOffhandCleared pattern unresolved -- player.CancelOffhandWeapon() will holster only\n");

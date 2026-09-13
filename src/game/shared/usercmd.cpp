@@ -71,6 +71,13 @@ void ClampUserCmd(CUserCmd* ucmd)
 			ucmd->cycleslot = WEAPON_INVENTORY_SLOT_INVALID;
 	}
 
+	// HOLSTERED/ANY skip the block above. Native UpdateWeaponSlots movsx-indexes
+	// activeWeapons[2] from weaponindex; pin INVALID to PRIMARY_0. Leave 0xFD/0xFE.
+	if ((ucmd->cycleslot == WEAPON_INVENTORY_SLOT_HOLSTERED
+		|| ucmd->cycleslot == WEAPON_INVENTORY_SLOT_ANY)
+		&& ucmd->weaponindex == WEAPON_INVENTORY_SLOT_INVALID)
+		ucmd->weaponindex = WEAPON_INVENTORY_SLOT_PRIMARY_0;
+
 	// Fold the hand unconditionally. Weapon_UpdateSelection indexes unchecked.
 	if (ucmd->weaponindex != WEAPON_INVENTORY_SLOT_INVALID
 		&& ucmd->weaponindex >= WEAPON_INVENTORY_SLOT_PRIMARY_1)
@@ -200,6 +207,13 @@ void ClampUserCmd(CUserCmd* ucmd)
 		if (ucmd->weaponindex == WEAPON_INVENTORY_SLOT_INVALID)
 			ucmd->cycleslot = WEAPON_INVENTORY_SLOT_INVALID;
 	}
+
+	// HOLSTERED/ANY skip the block above. Native UpdateWeaponSlots movsx-indexes
+	// activeWeapons[2] from weaponindex; pin INVALID to PRIMARY_0. Leave 0xFD/0xFE.
+	if ((ucmd->cycleslot == WEAPON_INVENTORY_SLOT_HOLSTERED
+		|| ucmd->cycleslot == WEAPON_INVENTORY_SLOT_ANY)
+		&& ucmd->weaponindex == WEAPON_INVENTORY_SLOT_INVALID)
+		ucmd->weaponindex = WEAPON_INVENTORY_SLOT_PRIMARY_0;
 
 	// Fold the hand unconditionally. Weapon_UpdateSelection indexes unchecked.
 	if (ucmd->weaponindex != WEAPON_INVENTORY_SLOT_INVALID

@@ -1652,7 +1652,20 @@ static ConCommand bridge_dbg_mark("bridge_dbg_mark", CC_BridgeDbg_Mark_f,
 //-----------------------------------------------------------------------------
 static float DebugOverlay_ReplicatedDuration(const float duration)
 {
-    return (duration <= 0.0f) ? NDEBUG_PERSIST_TILL_NEXT_CLIENT : duration;
+    if (!isfinite(duration) || duration < 0.0f)
+        return NDEBUG_PERSIST_TILL_NEXT_CLIENT;
+    if (duration > 5.0f)
+        return 5.0f;
+    return (duration == 0.0f) ? NDEBUG_PERSIST_TILL_NEXT_CLIENT : duration;
+}
+
+static int DebugOverlay_ClampSphereSegs(const int n)
+{
+    if (n < 8)
+        return 8;
+    if (n > 32)
+        return 32;
+    return n;
 }
 
 //------------------------------------------------------------------------------
@@ -1830,8 +1843,8 @@ static void DebugOverlay_InsertSphere(const Vector3D& origin, const float radius
 
     item->vOrigin = origin;
     item->flRadius = radius;
-    item->nTheta = theta;
-    item->nPhi = phi;
+    item->nTheta = DebugOverlay_ClampSphereSegs(theta);
+    item->nPhi = DebugOverlay_ClampSphereSegs(phi);
     item->r = r;
     item->g = g;
     item->b = b;

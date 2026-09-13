@@ -145,8 +145,8 @@ struct ServerObjectPlacementState
     Vector3D angles;
     Vector3D specialOrigin;
     Vector3D specialAngles;
-    void* parent = nullptr;
-    void* specialParent = nullptr;
+    uint32_t parentHandle = INVALID_EHANDLE_INDEX;
+    uint32_t specialParentHandle = INVALID_EHANDLE_INDEX;
     int specialResult = 1;
 };
 
@@ -284,6 +284,19 @@ static void* ServerScript_LookupEntityFromRawHandle(const uint32_t rawHandle)
         return g_serverEntityList->LookupEntityByNetworkIndex(entIndex);
 
     return nullptr;
+}
+
+static uint32_t ServerScript_PlacementHandleFromEntity(void* pEnt)
+{
+    if (!pEnt)
+        return INVALID_EHANDLE_INDEX;
+    return *reinterpret_cast<const uint32_t*>(
+        reinterpret_cast<const uint8_t*>(pEnt) + 0x08);
+}
+
+static void* ServerScript_PlacementEntityFromHandle(const uint32_t rawHandle)
+{
+    return ServerScript_LookupEntityFromRawHandle(rawHandle);
 }
 
 static Vector3D ServerScript_PlayerEyeOrigin(CPlayer* player)
@@ -1138,7 +1151,8 @@ static void ServerScript_SetPlacementFromTrace(
     state.origin = tr.endpos;
     // Special/portal placement wants FORWARD along the wall normal. Ground props re-orient in PlacementFindAngles.
     VectorAngles(normal, state.angles.AsQAngle());
-    state.parent = ServerScript_PlacementParentFromTrace(tr);
+    state.parentHandle = ServerScript_PlacementHandleFromEntity(
+        ServerScript_PlacementParentFromTrace(tr));
 }
 
 static unsigned int ServerScript_PlacementTraceMask(const ServerObjectPlacementSettings& settings)
@@ -3329,7 +3343,7 @@ static bool ServerScript_CalcSpecialPlacement(
 
     state.origin = entranceOrigin;
     VectorAngles(entranceNormal, state.angles.AsQAngle());
-    state.parent = entranceParent;
+    state.parentHandle = ServerScript_PlacementHandleFromEntity(entranceParent);
 
     const int entrancePortalDir = ServerScript_ClassifyPortalDir(entranceNormal);
 
@@ -3473,7 +3487,7 @@ static bool ServerScript_CalcSpecialPlacement(
     state.special = true;
     state.specialOrigin = exitPoint;
     VectorAngles(exitNormal, state.specialAngles.AsQAngle());
-    state.specialParent = exitParent;
+    state.specialParentHandle = ServerScript_PlacementHandleFromEntity(exitParent);
     state.specialResult = OPSPR_SUCCESS;
 
     if (s_serverPlacementDiagBudget > 0)
@@ -4296,7 +4310,7 @@ static bool ServerScript_CalcNormalPlacement(
 
     state.origin = origin;
     state.angles = angles;
-    state.parent = parent;
+    state.parentHandle = ServerScript_PlacementHandleFromEntity(parent);
     state.specialOrigin = state.origin;
     state.specialAngles = state.angles;
     state.valid = true;
@@ -4342,8 +4356,9 @@ static void ServerScript_CacheLastGoodPose(
     cache.lastGoodEyeOrigin = eyeOrigin;
     cache.lastGoodEyeDir = eyeDir;
 
-    CBaseEntity* const parentEnt = reinterpret_cast<CBaseEntity*>(state.parent);
-    cache.lastGoodParentHandle = ServerScript_EntityOwnHandle(parentEnt);
+    CBaseEntity* const parentEnt = reinterpret_cast<CBaseEntity*>(
+        ServerScript_PlacementEntityFromHandle(state.parentHandle));
+    cache.lastGoodParentHandle = state.parentHandle;
 
     Vector3D parentOrigin(0.0f, 0.0f, 0.0f);
     cache.lastGoodParentYaw = 0.0f;
@@ -4362,8 +4377,9 @@ static void ServerScript_CacheLastGoodPose(
         ServerScript_SubVector(state.origin, parentOrigin), Vector3D(0.0f, 0.0f, 1.0f), -yawRadians);
     cache.lastGoodLocalAngles = state.angles;
 
-    CBaseEntity* const specialParentEnt = reinterpret_cast<CBaseEntity*>(state.specialParent);
-    cache.lastGoodSpecialParentHandle = ServerScript_EntityOwnHandle(specialParentEnt);
+    CBaseEntity* const specialParentEnt = reinterpret_cast<CBaseEntity*>(
+        ServerScript_PlacementEntityFromHandle(state.specialParentHandle));
+    cache.lastGoodSpecialParentHandle = state.specialParentHandle;
 
     Vector3D specialParentOrigin(0.0f, 0.0f, 0.0f);
     cache.lastGoodSpecialParentYaw = 0.0f;
@@ -4494,8 +4510,8 @@ static bool ServerScript_TryLastKnownGoodPlacement(
     out.specialAngles = Vector3D(cache.lastGoodLocalSpecialAngles.x,
         cache.lastGoodLocalSpecialAngles.y + (specialParentYawNow - cache.lastGoodSpecialParentYaw),
         cache.lastGoodLocalSpecialAngles.z);
-    out.parent = parentEnt;
-    out.specialParent = specialParentEnt;
+    out.parentHandle = ServerScript_EntityOwnHandle(parentEnt);
+    out.specialParentHandle = ServerScript_EntityOwnHandle(specialParentEnt);
     out.specialResult = 0;
 
     // Re-validate before reuse; a mover may have re-blocked the spot. Either side failing rejects.
@@ -4801,7 +4817,7 @@ static SQRESULT ServerScript_GetPlacementParentShim(HSQUIRRELVM v)
     ServerObjectPlacementState placement;
     void* pParent = nullptr;
     if (ServerScript_GetWeaponPlacement(pWeapon, false, placement) && placement.valid)
-        pParent = placement.parent;
+        pParent = ServerScript_PlacementEntityFromHandle(placement.parentHandle);
 
     if (v_CSquirrelVM_PushEntity_Server)
         v_CSquirrelVM_PushEntity_Server(v, pParent);
@@ -4865,9 +4881,9 @@ static SQRESULT ServerScript_GetPlacementSpecialParentShim(HSQUIRRELVM v)
     ServerObjectPlacementState placement;
     void* pParent = nullptr;
     if (ServerScript_GetWeaponPlacement(pWeapon, true, placement) && placement.valid && placement.special)
-        pParent = placement.specialParent;
+        pParent = ServerScript_PlacementEntityFromHandle(placement.specialParentHandle);
     if (!pParent)
-        pParent = placement.parent;
+        pParent = ServerScript_PlacementEntityFromHandle(placement.parentHandle);
 
     if (v_CSquirrelVM_PushEntity_Server)
         v_CSquirrelVM_PushEntity_Server(v, pParent);
