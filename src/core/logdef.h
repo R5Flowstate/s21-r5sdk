@@ -40,8 +40,10 @@ void SpdLog_Init(const bool bAnsiColor);
 void SpdLog_Shutdown(void);
 
 // False unless -devsdk/-dev/-developer or -logfiles is on the command line
-// (-nologfiles wins over all three). When false, no rotating file sinks are
-// created: stdout is the log, crash-time files still land in the session dir.
+// (-nologfiles wins over all three). When false, the full rotating set is
+// skipped (stdout stays the live log). Dedi still keeps warning.log /
+// error.log / script_warning.log unless -nologfiles. Crash-time files
+// still land in the session dir.
 bool SpdLog_FileLogsEnabled(void);
 
 #ifdef _TOOLS

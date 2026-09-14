@@ -21,7 +21,9 @@
 #include "game/shared/pluginsystem/modsystem.h"
 #include "engine/host_state.h"
 #include "engine/cmd.h"
-#include <filesystem>
+#include <mutex>
+#include <string>
+#include <unordered_map>
 
 extern void Cvar_ForceCommandLineDevModeForScripts();
 
@@ -135,9 +137,10 @@ void VScriptS21Override::Detour(const bool bAttach) const
 
 FS_AsyncReadScript_fn v_FS_AsyncReadScript_S21 = nullptr;
 
-// --- Loose menu-layout (.res/.menu) DISK-OVERRIDE machinery ----------
-// Forward decl: true when `path` is a.res/.menu with a loose file at platform\<path>.
+// --- Loose menu-layout (.res/.menu/.lst) DISK-OVERRIDE machinery ----------
+// Forward decl: true when `path` is a .res/.menu/.lst with a loose file at platform\<path>.
 static bool FSRes_HasLooseOverride_S21(const char* path);
+static bool ModPath_IsSafeRel(const char* path);
 
 // Native CUtlBuffer EnsureCapacity/Put (same shape as slot-15).
 typedef void    (__fastcall* Buf_EnsureCapacity_fn)(void* buf, __int64 cap);
@@ -145,7 +148,7 @@ typedef __int64 (__fastcall* Buf_Put_fn)(void* buf, const void* src, size_t size
 static Buf_EnsureCapacity_fn v_Buf_EnsureCapacity_S21 = nullptr;
 static Buf_Put_fn            v_Buf_Put_S21            = nullptr;
 
-// Packed .res/.menu ignore search paths; fill slot-15's CUtlBuffer from disk.
+// Packed .res/.menu/.lst ignore search paths; fill slot-15's CUtlBuffer from disk.
 static bool FSRes_FillBufferFromMemory_S21(void* buf, const char* data, const size_t size)
 {
 	if (!buf || !data || !size || !v_Buf_EnsureCapacity_S21 || !v_Buf_Put_S21)
@@ -196,7 +199,7 @@ static bool FSRes_FillBufferFromDiskPath_S21(const char* disk, void* buf)
 
 static bool FSRes_FillBufferFromDisk_S21(const char* path, void* buf)
 {
-	if (!path || !buf)
+	if (!path || !buf || !ModPath_IsSafeRel(path))
 		return false;
 
 	char disk[1024];
@@ -208,7 +211,7 @@ static bool FSRes_FillBufferFromDisk_S21(const char* path, void* buf)
 
 static bool FSRes_PlatformFileExists_S21(const char* path)
 {
-	if (!path)
+	if (!path || !ModPath_IsSafeRel(path))
 		return false;
 
 	char disk[1024];
@@ -593,10 +596,374 @@ static bool FSRes_FillBufferFromModScripts_S21(const char* path, void* buf)
 	return ok;
 }
 
+struct ScriptCacheEntry_t
+{
+	char* data;
+	size_t size;
+};
+
+static std::unordered_map<std::string, ScriptCacheEntry_t> s_scriptCache;
+static std::mutex s_scriptCacheMtx;
+static HANDLE s_prefetchDone = nullptr;
+static volatile LONG s_prefetchStarted = 0;
+static volatile LONG s_prefetchWalkCount = 0;
+static size_t s_prefetchBytes = 0;
+
+static constexpr int kScriptCacheMaxFiles = 8000;
+static constexpr size_t kScriptCacheMaxFile = 8u * 1024u * 1024u;
+static constexpr size_t kScriptCacheMaxTotal = 96u * 1024u * 1024u;
+
+static void ScriptCache_MakeKey(const char* path, char* out, size_t outCap)
+{
+	size_t n = 0;
+	if (!path)
+	{
+		if (outCap)
+			out[0] = '\0';
+		return;
+	}
+	for (; path[n] && n + 1 < outCap; ++n)
+	{
+		char c = path[n];
+		if (c == '\\')
+			c = '/';
+		else if (c >= 'A' && c <= 'Z')
+			c = static_cast<char>(c + 32);
+		out[n] = c;
+	}
+	out[n] = '\0';
+}
+
+static bool ScriptCache_IsSourceName(const char* name)
+{
+	if (!name)
+		return false;
+	const size_t len = strlen(name);
+	if (len > 4 && !_stricmp(name + len - 4, ".nut"))
+		return true;
+	if (len > 5 && !_stricmp(name + len - 5, ".gnut"))
+		return true;
+	if (len > 5 && !_stricmp(name + len - 5, ".rson"))
+		return true;
+	return false;
+}
+
+static void ScriptCache_Store(const char* key, char* data, size_t size)
+{
+	if (!key || !data || !size)
+	{
+		free(data);
+		return;
+	}
+
+	std::lock_guard<std::mutex> lock(s_scriptCacheMtx);
+	const auto it = s_scriptCache.find(key);
+	if (it != s_scriptCache.end())
+	{
+		free(data);
+		return;
+	}
+	if (s_prefetchBytes + size > kScriptCacheMaxTotal)
+	{
+		free(data);
+		return;
+	}
+
+	ScriptCacheEntry_t e;
+	e.data = data;
+	e.size = size;
+	s_scriptCache.emplace(key, e);
+	s_prefetchBytes += size;
+}
+
+static bool ScriptCache_FindUnlocked(const char* key, const char** outData, size_t* outSize)
+{
+	const auto it = s_scriptCache.find(key);
+	if (it == s_scriptCache.end() || !it->second.data || !it->second.size)
+		return false;
+	*outData = it->second.data;
+	*outSize = it->second.size;
+	return true;
+}
+
+static bool ScriptCache_ReadFile(const char* diskPath, char** outData, size_t* outSize)
+{
+	*outData = nullptr;
+	*outSize = 0;
+	if (!diskPath)
+		return false;
+
+	HANDLE h = CreateFileA(diskPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+		nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+	if (h == INVALID_HANDLE_VALUE)
+		return false;
+
+	LARGE_INTEGER li;
+	if (!GetFileSizeEx(h, &li) || li.QuadPart <= 0
+		|| li.QuadPart > static_cast<LONGLONG>(kScriptCacheMaxFile))
+	{
+		CloseHandle(h);
+		return false;
+	}
+
+	const size_t size = static_cast<size_t>(li.QuadPart);
+	char* const buf = static_cast<char*>(malloc(size));
+	if (!buf)
+	{
+		CloseHandle(h);
+		return false;
+	}
+
+	DWORD readBytes = 0;
+	const BOOL ok = ReadFile(h, buf, static_cast<DWORD>(size), &readBytes, nullptr);
+	CloseHandle(h);
+	if (!ok || readBytes != size)
+	{
+		free(buf);
+		return false;
+	}
+
+	*outData = buf;
+	*outSize = size;
+	return true;
+}
+
+static void ScriptCache_LoadDisk(const char* relKey, const char* diskPath)
+{
+	if (s_prefetchWalkCount >= kScriptCacheMaxFiles)
+		return;
+
+	{
+		std::lock_guard<std::mutex> lock(s_scriptCacheMtx);
+		if (s_scriptCache.find(relKey) != s_scriptCache.end())
+			return;
+		if (s_prefetchBytes >= kScriptCacheMaxTotal)
+			return;
+	}
+
+	char* data = nullptr;
+	size_t size = 0;
+	if (!ScriptCache_ReadFile(diskPath, &data, &size))
+		return;
+
+	InterlockedIncrement(&s_prefetchWalkCount);
+	ScriptCache_Store(relKey, data, size);
+}
+
+static void ScriptCache_Walk(char* diskBuf, const size_t diskCap,
+	char* relBuf, const size_t relCap)
+{
+	if (s_prefetchWalkCount >= kScriptCacheMaxFiles)
+		return;
+
+	const size_t diskLen = strlen(diskBuf);
+	const size_t relLen = strlen(relBuf);
+	if (diskLen + 4 >= diskCap || relLen + 2 >= relCap)
+		return;
+
+	memcpy(diskBuf + diskLen, "\\*", 3);
+
+	WIN32_FIND_DATAA fd;
+	const HANDLE h = FindFirstFileA(diskBuf, &fd);
+	diskBuf[diskLen] = '\0';
+	if (h == INVALID_HANDLE_VALUE)
+		return;
+
+	int nSafety = 0;
+	do
+	{
+		if (++nSafety > kScriptCacheMaxFiles)
+			break;
+		if (fd.cFileName[0] == '.' &&
+			(fd.cFileName[1] == '\0' || (fd.cFileName[1] == '.' && fd.cFileName[2] == '\0')))
+			continue;
+
+		const size_t nameLen = strlen(fd.cFileName);
+		if (diskLen + 1 + nameLen + 1 >= diskCap)
+			continue;
+		if (relLen + 1 + nameLen + 1 >= relCap)
+			continue;
+
+		_snprintf_s(diskBuf + diskLen, diskCap - diskLen, _TRUNCATE, "\\%s", fd.cFileName);
+		_snprintf_s(relBuf + relLen, relCap - relLen, _TRUNCATE, "/%s", fd.cFileName);
+
+		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+		{
+			ScriptCache_Walk(diskBuf, diskCap, relBuf, relCap);
+		}
+		else if (ScriptCache_IsSourceName(fd.cFileName))
+		{
+			char key[1024];
+			ScriptCache_MakeKey(relBuf, key, sizeof(key));
+			ScriptCache_LoadDisk(key, diskBuf);
+		}
+
+		diskBuf[diskLen] = '\0';
+		relBuf[relLen] = '\0';
+	}
+	while (FindNextFileA(h, &fd));
+
+	FindClose(h);
+}
+
+static bool ScriptCache_ExeRoot(char* out, size_t cap)
+{
+	if (!out || cap < 8)
+		return false;
+	const DWORD n = GetModuleFileNameA(NULL, out, static_cast<DWORD>(cap));
+	if (n == 0 || n >= cap)
+		return false;
+	char* slash = strrchr(out, '\\');
+	if (!slash)
+		return false;
+	*slash = '\0';
+	return true;
+}
+
+static DWORD WINAPI ScriptCache_PrefetchThread(LPVOID)
+{
+	const DWORD t0 = GetTickCount();
+
+	char disk[1024];
+	char rel[1024];
+	char root[MAX_PATH];
+	if (ScriptCache_ExeRoot(root, sizeof(root)))
+		_snprintf_s(disk, sizeof(disk), _TRUNCATE, "%s\\platform\\scripts", root);
+	else
+		_snprintf_s(disk, sizeof(disk), _TRUNCATE, "platform\\scripts");
+	_snprintf_s(rel, sizeof(rel), _TRUNCATE, "scripts");
+	ScriptCache_Walk(disk, sizeof(disk), rel, sizeof(rel));
+
+	const DWORD ms = GetTickCount() - t0;
+	int nFiles = 0;
+	{
+		std::lock_guard<std::mutex> lock(s_scriptCacheMtx);
+		nFiles = static_cast<int>(s_scriptCache.size());
+	}
+
+	if (nFiles <= 0)
+	{
+		Warning(eDLL_T::FS,
+			"[FS-SCRIPT] prefetch found 0 files under '%s'\n", disk);
+	}
+	else
+	{
+		Msg(eDLL_T::FS,
+			"[FS-SCRIPT] prefetched %d files (%zu KB) in %u ms\n",
+			nFiles, s_prefetchBytes / 1024, ms);
+	}
+
+	if (s_prefetchDone)
+		SetEvent(s_prefetchDone);
+	return 0;
+}
+
+static void ScriptCache_StartPrefetch(void)
+{
+	if (InterlockedCompareExchange(&s_prefetchStarted, 1, 0) != 0)
+		return;
+
+	s_prefetchDone = CreateEventA(nullptr, TRUE, FALSE, nullptr);
+	if (!s_prefetchDone)
+	{
+		ScriptCache_PrefetchThread(nullptr);
+		return;
+	}
+
+	const HANDLE h = CreateThread(nullptr, 0, ScriptCache_PrefetchThread, nullptr, 0, nullptr);
+	if (!h)
+	{
+		ScriptCache_PrefetchThread(nullptr);
+		return;
+	}
+	CloseHandle(h);
+}
+
+static void ScriptCache_WaitReady(void)
+{
+	ScriptCache_StartPrefetch();
+	if (s_prefetchDone)
+		WaitForSingleObject(s_prefetchDone, 60000);
+}
+
+static bool ScriptCache_Lookup(const char* path, const char** outData, size_t* outSize)
+{
+	char key[1024];
+	ScriptCache_MakeKey(path, key, sizeof(key));
+
+	std::lock_guard<std::mutex> lock(s_scriptCacheMtx);
+	if (ScriptCache_FindUnlocked(key, outData, outSize))
+		return true;
+
+	const size_t len = strlen(key);
+	if (len > 7 && !strcmp(key + len - 7, ".client"))
+	{
+		key[len - 7] = '\0';
+		if (ScriptCache_FindUnlocked(key, outData, outSize))
+			return true;
+	}
+	else if (len > 3 && !strcmp(key + len - 3, ".ui"))
+	{
+		key[len - 3] = '\0';
+		if (ScriptCache_FindUnlocked(key, outData, outSize))
+			return true;
+	}
+	else if (len > 7 && !strcmp(key + len - 7, ".server"))
+	{
+		key[len - 7] = '\0';
+		if (ScriptCache_FindUnlocked(key, outData, outSize))
+			return true;
+	}
+	return false;
+}
+
+static bool ScriptCache_TryFill(const char* path, void* buf)
+{
+	if (!path || !buf)
+		return false;
+	if (!ModPath_IsSafeRel(path))
+		return false;
+
+	ScriptCache_WaitReady();
+
+	const char* data = nullptr;
+	size_t size = 0;
+	if (ScriptCache_Lookup(path, &data, &size))
+		return FSRes_FillBufferFromMemory_S21(buf, data, size);
+
+	char disk[1024];
+	char root[MAX_PATH];
+	if (ScriptCache_ExeRoot(root, sizeof(root)))
+	{
+		if (_snprintf_s(disk, sizeof(disk), _TRUNCATE, "%s\\platform\\%s", root, path) < 0)
+			return false;
+	}
+	else if (_snprintf_s(disk, sizeof(disk), _TRUNCATE, "platform\\%s", path) < 0)
+	{
+		return false;
+	}
+	for (char* p = disk; *p; ++p)
+	{
+		if (*p == '/')
+			*p = '\\';
+	}
+
+	char* loaded = nullptr;
+	size_t loadedSize = 0;
+	if (!ScriptCache_ReadFile(disk, &loaded, &loadedSize))
+		return false;
+
+	char key[1024];
+	ScriptCache_MakeKey(path, key, sizeof(key));
+	const bool ok = FSRes_FillBufferFromMemory_S21(buf, loaded, loadedSize);
+	ScriptCache_Store(key, loaded, loadedSize);
+	return ok;
+}
+
 static bool __fastcall Hook_FS_AsyncReadScript_S21(
 	void* iface, const char* path, void* flags, void* outBuf)
 {
-	if (path && ModScript_IsCompileListPath(path))
+	if (path && ModPath_IsSafeRel(path) && ModScript_IsCompileListPath(path))
 	{
 		size_t sz = 0;
 		char* const spliced = ModScript_BuildSpliced(path, &sz);
@@ -609,9 +976,22 @@ static bool __fastcall Hook_FS_AsyncReadScript_S21(
 		}
 	}
 
+	if (path && FSRes_IsScriptSourcePath_S21(path)
+		&& ScriptCache_TryFill(path, outBuf))
+	{
+		return true;
+	}
+
 	if (path && FSRes_HasLooseOverride_S21(path)
 		&& FSRes_FillBufferFromDisk_S21(path, outBuf))
 	{
+		static volatile LONG s_lstFillLogged = 0;
+		const size_t len = strlen(path);
+		if (len > 4 && _stricmp(path + len - 4, ".lst") == 0
+			&& InterlockedCompareExchange(&s_lstFillLogged, 1, 0) == 0)
+		{
+			Msg(eDLL_T::FS, "[FS-RES] disk-fill lst '%s'\n", path);
+		}
 		return true;
 	}
 
@@ -692,20 +1072,21 @@ static void PatchNutRejects_S21(uintptr_t exeBase)
 	}
 }
 
-// Loose .res/.menu: fill slot-15 from disk; null preloaded KV / skip cache so the file is re-read.
+// Loose .res/.menu/.lst: fill slot-15 from disk; null preloaded KV / skip cache so the file is re-read.
 
-// True if `path` is a menu-layout file (.res/.menu) -- or the VGUI screen class
-// table -- with a loose override present on disk at platform\<path>.
+// True if `path` is a menu-layout file (.res/.menu), a bind list (.lst), or the
+// VGUI screen class table -- with a loose override present on disk at platform\<path>.
 // vgui_screens.txt is the PanelMetaClass registry CreateClientsideVGuiScreen looks up.
 static bool FSRes_HasLooseOverride_S21(const char* path)
 {
-	if (!path)
+	if (!path || !ModPath_IsSafeRel(path))
 		return false;
 	const size_t len = strlen(path);
 	const bool isRes  = len > 4 && _stricmp(path + len - 4, ".res")  == 0;
 	const bool isMenu = len > 5 && _stricmp(path + len - 5, ".menu") == 0;
+	const bool isLst  = len > 4 && _stricmp(path + len - 4, ".lst")  == 0;
 	const bool isVguiScreens = _stricmp(path, "scripts/vgui_screens.txt") == 0;
-	if (!isRes && !isMenu && !isVguiScreens)
+	if (!isRes && !isMenu && !isLst && !isVguiScreens)
 		return false;
 
 	char disk[1024];
@@ -791,6 +1172,8 @@ static void Stage_FS_HeadSearchPath(void)
 
 void EnsureScriptDiskRedirect_S21(void)
 {
+	ScriptCache_StartPrefetch();
+
 	if (InterlockedCompareExchange(&s_diskRedirectInitialized, 1, 0) != 0)
 		return;  // already done (or in flight on another thread)
 
@@ -1323,7 +1706,7 @@ static char __fastcall Hook_RSON_LoadFileFromPath_S21(
 	const char* usePath = path;
 	bool bTmp = false;
 
-	if (path && ModScript_IsCompileListPath(path)
+	if (path && ModPath_IsSafeRel(path) && ModScript_IsCompileListPath(path)
 		&& ModScript_WriteSplicedTemp(path, tmpPath, sizeof(tmpPath)))
 	{
 		usePath = tmpPath;

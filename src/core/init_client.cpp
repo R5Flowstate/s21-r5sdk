@@ -110,6 +110,8 @@
 #include "game/client/pred_diag.h"
 #include "game/client/grapple_rope_diag.h"
 #include "game/client/mantle_boost.h"
+#include "game/client/dodge_bind.h"
+#include "game/client/aimassist.h"
 #include "game/client/trigger_cannon.h"
 #include "game/client/halfduck_zip_parity.h"
 #include "game/client/move_sim_trace.h"
@@ -603,6 +605,8 @@ void DetourRegister()
 	REGISTER(VJumpPadViewPunchDiag);
 	REGISTER(VTriggerClientPredictForce);
 	REGISTER(VMantleBoostClient);
+	REGISTER(VDodgeBind);
+	REGISTER(VAimAssist);
 	REGISTER(VMantleBoostRuiCl);
 	REGISTER(VTriggerCannonClient);
 	REGISTER(VMeleeLungeProbe);

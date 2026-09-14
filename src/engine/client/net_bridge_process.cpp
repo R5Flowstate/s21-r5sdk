@@ -141,7 +141,8 @@ static bool        s_dumpClassInventoryAfterClassInfo = false;
 // One in-flight split per slot; a fragment lost on the wire must never pin
 // the reassembler to its request while every later split gets skipped.
 static SplitPacket s_splitSlots[4];
-static volatile LONG s_splitFrags = 0, s_splitDone = 0, s_splitAbandoned = 0, s_splitBadCount = 0;
+static volatile LONG s_splitFrags = 0, s_splitDone = 0, s_splitBadCount = 0;
+volatile LONG s_splitAbandoned = 0;
 
 void S21Bridge_ResetSplitReassembly(void)
 {
@@ -7785,7 +7786,8 @@ static bool S21Bridge_TryConsumeDataBlockOOB(const uint8_t* h, int recvd)
 	if (!S21Bridge_Handle0x4F(h, recvd))
 		return true;
 
-	if (s_bridgeChan)
+	CNetChan* const pChan = s_bridgeChan;
+	if (pChan && s_bridgeActive)
 	{
 		static double* s_pNetTime = nullptr;
 		if (!s_pNetTime)
@@ -7798,7 +7800,7 @@ static bool S21Bridge_TryConsumeDataBlockOOB(const uint8_t* h, int recvd)
 		if (s_pNetTime)
 		{
 			*reinterpret_cast<double*>(
-				reinterpret_cast<char*>(s_bridgeChan) + 0x20F0) = *s_pNetTime;
+				reinterpret_cast<char*>(pChan) + 0x20F0) = *s_pNetTime;
 
 			static int s_keepaliveLog = 0;
 			if (++s_keepaliveLog <= 5 || (s_keepaliveLog % 5000) == 0)
@@ -7920,34 +7922,9 @@ bool S21Bridge_PollReceive(int iSocket, netpacket_s* pInpacket)
 
 	for (int drainIter = 0; drainIter < 512; drainIter++)
 	{
-		// First: drain the split packet queue (pushed by Hook_sendto).
-		// These are S3 server S2C split fragments that can't reach the bridge
-		// socket via network loopback (destPort mismatch in listen server).
-		const long tail = s_splitQueueTail;
-		if (tail != s_splitQueueHead)
+		// First: drain the split packet queue (pushed by Hook_sendto / keepalive).
+		if (S21Bridge_TryDequeueS2C(pollBuf, (int)sizeof(pollBuf), &recvd))
 		{
-			if (s_splitQueueGen[tail] != s_splitSessionGen)
-			{
-				InterlockedIncrement(&s_splitAbandoned);
-				s_splitQueueTail = (tail + 1) % SPLIT_QUEUE_SIZE;
-				recvd = 0;
-				continue;
-			}
-			recvd = s_splitQueue[tail].len;
-			if (recvd > 0 && recvd <= (int)sizeof(pollBuf))
-				memcpy(pollBuf, s_splitQueue[tail].data, recvd);
-			else
-				recvd = 0;
-			s_splitQueueTail = (tail + 1) % SPLIT_QUEUE_SIZE;
-
-			if (recvd <= 0)
-			{
-				recvd = 0;
-				continue; // bad entry, try next
-			}
-
-			// The queue only ever holds peer packets; the engine drops an
-			// injected packet whose source is not the channel's address.
 			from = s_bridgeDest;
 			InterlockedIncrement(&s_pollFromQueue);
 		}

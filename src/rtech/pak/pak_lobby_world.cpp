@@ -40,7 +40,7 @@ static char s_pendingWorldMap[64] = {};
 
 extern bool s_connAcceptDone;
 extern bool s_bridgeActive;
-extern void S21Bridge_DrainSocketToQueue(void);
+extern int S21Bridge_DrainSocketToQueue(void);
 
 static bool IsBareMapName(const char* psz)
 {

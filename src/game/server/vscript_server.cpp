@@ -2056,15 +2056,15 @@ static void Script_RegisterServerPlayerClassFuncs()
     JetDrive_RegisterScriptFunctions(g_serverScriptPlayerStruct);
     UpdraftBridge_RegisterScriptFunctions(g_serverScriptPlayerStruct);
     SkydiveBridge_RegisterScriptFunctions(g_serverScriptPlayerStruct);
-    PlayerOverheat_RegisterPlayerFuncs(g_serverScriptPlayerStruct);
     Translocation_RegisterPlayerFuncs(g_serverScriptPlayerStruct);
 
     // Register SERVER-ONLY player setters (NonRewind setters must not be on CLIENT)
     Script_RegisterPlayerScriptSetters(g_serverScriptPlayerStruct);
 }
 //---------------------------------------------------------------------------------
-// Offhand natives and PhaseShiftBegin bind on the combat character. Registering
-// them on the player struct rebinds the name and NPC call sites throw.
+// Offhand natives, PhaseShiftBegin, and player-overheat bind on the combat
+// character. Registering them on the player struct rebinds the name and NPC
+// call sites throw.
 static void Script_RegisterServerCombatCharacterClassFuncs()
 {
     v_Script_RegisterServerCombatCharacterClassFuncs();
@@ -2078,6 +2078,7 @@ static void Script_RegisterServerCombatCharacterClassFuncs()
     WeaponScriptVars_RegisterPhaseShiftOverride(g_serverScriptCombatCharacterStruct);
     WeaponScriptVars_RegisterOffhandOverrides(g_serverScriptCombatCharacterStruct, /*isServerStruct=*/true);
     ContextAction_RegisterScriptFunctions(g_serverScriptCombatCharacterStruct);
+    PlayerOverheat_RegisterCombatCharacterFuncs(g_serverScriptCombatCharacterStruct);
 }
 //---------------------------------------------------------------------------------
 static void Script_RegisterServerAIClassFuncs()

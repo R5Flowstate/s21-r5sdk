@@ -29,6 +29,7 @@
 #include "public/globalvars_base.h"
 #include "tier1/cvar.h"
 #include "rtech/playlists/playlists.h"
+#include "windows/pso_cache.h"
 
 #include "game/shared/activity.h"
 #include "game/shared/activity_s3_to_s21_client.h"
@@ -96,6 +97,7 @@ static ULONGLONG s_signonEchoArmedMs   = 0;
 static ULONGLONG s_signonEchoLogNextMs = 0;
 static long long s_signonEchoSends     = 0;
 static uint32_t  s_signonEchoArmedInSeq = 0;   // s_bridgeInSeqNr when the rung armed
+static long      s_signonEchoArmedPso = 0;
 static bool      s_signonEchoDeadWarned = false;
 
 void S21Bridge_QueueSignon(int state, int spawn);
@@ -163,6 +165,7 @@ void S21Bridge_QueueSignon(int state, int spawn)
 		s_signonEchoLogNextMs = 0;
 		s_signonEchoSends     = 0;
 		s_signonEchoArmedInSeq  = s_bridgeInSeqNr;
+		s_signonEchoArmedPso    = g_pPsoCreateCount ? *g_pPsoCreateCount : 0;
 		s_signonEchoDeadWarned  = false;
 	}
 }
@@ -1552,9 +1555,11 @@ int S21Bridge_BuildS3Packet(uint8_t* outBuf, int outBufSize,
 			// A re-ask that goes unanswered is normal for seconds. A re-ask
 			// that goes unanswered while not one S2C packet has arrived since
 			const int nDeadMs = bridge_signon_dead_ms.GetInt();
+			const long nPsoNow = g_pPsoCreateCount ? *g_pPsoCreateCount : 0;
 			if (!s_signonEchoDeadWarned && nDeadMs > 0
 				&& s_bridgeInSeqNr == s_signonEchoArmedInSeq
-				&& (echoNow - s_signonEchoArmedMs) >= (ULONGLONG)nDeadMs)
+				&& (echoNow - s_signonEchoArmedMs) >= (ULONGLONG)nDeadMs
+				&& nPsoNow <= s_signonEchoArmedPso)
 			{
 				s_signonEchoDeadWarned = true;
 				Error(eDLL_T::ENGINE, NO_ERROR,
@@ -1809,7 +1814,8 @@ bool S21Bridge_FlushC2SNow(const char* reason)
 	{
 		AckXlate_s& x = s_ackXlate[bridgeSeq & 0x3FF];
 		x.bridgeSeq = bridgeSeq;
-		x.engineSeq = s_bridgeChan ? *(int*)((char*)s_bridgeChan + 4) : -1;
+		CNetChan* const pChan = s_bridgeChan;
+		x.engineSeq = (pChan && s_bridgeActive) ? *(int*)((char*)pChan + 4) : -1;
 	}
 	const int s3len = S21Bridge_BuildS3Packet(s3pkt, sizeof(s3pkt),
 		bridgeSeq, s_bridgeInSeqNr);
@@ -1851,7 +1857,8 @@ bool S21Bridge_FlushC2SNow(const char* reason)
 		s_relaySendTime[retrySeq & 0x3FF] = Bridge_NetTime();
 		AckXlate_s& rx = s_ackXlate[retrySeq & 0x3FF];
 		rx.bridgeSeq = retrySeq;
-		rx.engineSeq = s_bridgeChan ? *(int*)((char*)s_bridgeChan + 4) : -1;
+		CNetChan* const pRetryChan = s_bridgeChan;
+		rx.engineSeq = (pRetryChan && s_bridgeActive) ? *(int*)((char*)pRetryChan + 4) : -1;
 		const int retryLen = S21Bridge_BuildS3Packet(s3pkt, sizeof(s3pkt),
 			retrySeq, s_bridgeInSeqNr);
 		if (retryLen > 0)
@@ -1900,24 +1907,26 @@ static void S21Bridge_KeepaliveWorker(void)
 	{
 		Sleep(50);
 
-		const int nGapMs = bridge_c2s_keepalive_ms.GetInt();
-		if (nGapMs <= 0 || !s_bridgeActive
+		if (!s_bridgeActive
 			|| s_bridgeSocket == INVALID_SOCKET || !s_origSendto)
 			continue;
 
-		const ULONGLONG ullNow = GetTickCount64();
-		if (s_lastC2SFlushMs == 0.0)
+		S21Bridge_PumpWhileStalled();
+
+		const int nGapMs = bridge_c2s_keepalive_ms.GetInt();
+		if (nGapMs <= 0)
 			continue;
 
-		const ULONGLONG ullSince = ullNow - static_cast<ULONGLONG>(s_lastC2SFlushMs);
+		const ULONGLONG ullNow = GetTickCount64();
+		const ULONGLONG ullSince = (s_lastC2SFlushMs == 0.0)
+			? (ULONGLONG)nGapMs
+			: (ullNow - static_cast<ULONGLONG>(s_lastC2SFlushMs));
 		if (ullSince < static_cast<ULONGLONG>(nGapMs))
 			continue;
 
 		if (!S21Bridge_FlushC2SNow("stall-keepalive"))
 			continue;
 
-		// One line when a stall starts, then a rate-limited line carrying the
-		// count. The stall is unbounded, so the trace has to be bounded in rate.
 		++nFired;
 		if (ullNow >= ullLogNextMs)
 		{

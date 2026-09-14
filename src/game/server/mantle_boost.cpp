@@ -73,9 +73,9 @@ static float (*v_CPlayer__GetPoseSpeed_Sprint)(CPlayer* player, int nPose) = nul
 static ConVar mantle_boost_enabled("mantle_boost_enabled", "1", FCVAR_RELEASE,
 	"[MANTLE-BOOST] Master enable for the mantle-exit boost bridge (S21 mantle_boost enable). "
 	"Must match the client-side default.");
-static ConVar bridge_mantle_boost_button_mask("bridge_mantle_boost_button_mask", "4", FCVAR_RELEASE,
-	"[MANTLE-BOOST] Custom/Movement-Ability activation button bitmask (used when mantle_boost_input_setting=3). "
-	"4=IN_DUCK, 2=IN_JUMP, 6=either. Advanced override.");
+static ConVar bridge_mantle_boost_button_mask("bridge_mantle_boost_button_mask", "268435456", FCVAR_RELEASE,
+	"[MANTLE-BOOST] Held-button bitmask when mantle_boost_input_setting=3 (Movement Ability). "
+	"Default 268435456 (bit 28 / +dodge). 4 is remapped to bit 28.");
 // Per-client preference; client twin is FCVAR_USERINFO. This ConVar is the fallback.
 static ConVar mantle_boost_input_setting("mantle_boost_input_setting", "1", FCVAR_RELEASE,
 	"[MANTLE-BOOST] Activation input FALLBACK default (per-client value comes from the client's "
@@ -85,10 +85,9 @@ static ConVar bridge_mantle_boost_sweet_spot_auto("bridge_mantle_boost_sweet_spo
 	"[MANTLE-BOOST] derive the sweet-spot threshold per traversal state from the baked curve so "
 	"the window is the last min_valid_traversal_frac of the climb, as S21's is. 0 uses the "
 	"authored bridge_mantle_boost_sweet_spot_angle. Must match the client-side default.");
-static ConVar bridge_mantle_boost_sweet_spot_angle("bridge_mantle_boost_sweet_spot_angle", "1.5", FCVAR_RELEASE,
+static ConVar bridge_mantle_boost_sweet_spot_angle("bridge_mantle_boost_sweet_spot_angle", "2", FCVAR_RELEASE,
 	"[MANTLE-BOOST] trigger: max |animViewPitch - eyePitch| (degrees) that still counts as the sweet spot. "
-	"1.5 is the live value (the enable_mantle_boost mod leaves the base threshold "
-	"unmodded; Octane's stim mod doubles it). Must match the client-side default.");
+	"Must match the client-side default.");
 static ConVar mantle_boost_require_increasing_view_angle("mantle_boost_require_increasing_view_angle", "0", FCVAR_RELEASE,
 	"[MANTLE-BOOST] tweak (default 0): require |delta| still opening (moving away from zero). Must match client.");
 static ConVar mantle_boost_require_decreasing_view_angle("mantle_boost_require_decreasing_view_angle", "1", FCVAR_RELEASE,
@@ -97,17 +96,14 @@ static ConVar mantle_boost_min_valid_traversal_frac("mantle_boost_min_valid_trav
 	"[MANTLE-BOOST] tweak (default 0.5): the traversal must have progressed past this fraction at the"
 	"press for the superglide to be valid -- final decision-cascade step (at/below -> FAILED (3), above -> BOOST (4)). "
 	"Must match the client-side default.");
-// GetPoseSpeed_Sprint(STANDING) stand-in; authored sprintspeed is 260.
-static ConVar bridge_mantle_boost_exit_speed("bridge_mantle_boost_exit_speed", "260", FCVAR_RELEASE,
-	"[MANTLE-BOOST] Base horizontal exit speed (u/s). S21 GetPoseSpeed_Sprint(STANDING) -- "
-	"poseSettings sprintspeed = 260 (settings/player/mp/*.stgs). State 4 multiplies by sprint_mult.");
+static ConVar bridge_mantle_boost_exit_speed("bridge_mantle_boost_exit_speed", "200", FCVAR_RELEASE,
+	"[MANTLE-BOOST] Base horizontal exit speed (u/s). State 4 multiplies by sprint_mult.");
 static ConVar bridge_mantle_boost_sprint_mult("bridge_mantle_boost_sprint_mult", "1.5", FCVAR_RELEASE,
 	"[MANTLE-BOOST] Exit-speed multiplier on full boost (state 4). S21 "
 	"player_mantleBoostSprintSpeedMultiplier = 1.5 (29/30 legends; Sparrow is 1.0).");
-static ConVar bridge_mantle_boost_jump_height("bridge_mantle_boost_jump_height", "120", FCVAR_RELEASE,
-	"[MANTLE-BOOST] Jump height (u) for state-4 forced Jump (sqrt(2*gravity*height)). 120 is "
-	"the base profile's authored player_mantleBoostJumpHeight; state 3 keeps player_jumpHeight "
-	"(56), so the sweet spot arcs above the weak tier.");
+static ConVar bridge_mantle_boost_jump_height("bridge_mantle_boost_jump_height", "90", FCVAR_RELEASE,
+	"[MANTLE-BOOST] Jump height (u) for state-4 forced Jump (sqrt(2*gravity*height)). "
+	"State 3 keeps player_jumpHeight (56).");
 static ConVar bridge_mantle_boost_gravity("bridge_mantle_boost_gravity", "750", FCVAR_RELEASE,
 	"[MANTLE-BOOST] Fallback gravity for the state-4 vz solve, used only if sv_gravity fails to resolve. "
 	"Real Jump reads sv_gravity directly ( JumpHeightToVelocity) -- this is a safety net, not the primary source.");
@@ -129,7 +125,11 @@ static int MantleBoost_MaskFromSetting(const int setting)
 	{
 	case 1:  return IN_JUMP;
 	case 2:  return 0x04000004;   // IN_DUCK | controller duck-toggle
-	case 3:  return bridge_mantle_boost_button_mask.GetInt();
+	case 3:
+	{
+		const int mask = bridge_mantle_boost_button_mask.GetInt();
+		return mask == 4 ? 0x10000000 : mask;
+	}
 	default: return 0;
 	}
 }

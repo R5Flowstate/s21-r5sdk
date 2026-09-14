@@ -739,6 +739,8 @@ static const PredAuthEntry_t s_authTable[] =
 		"wallrun floor-height bookkeeping: S21-only, unfed." },
 	{ "m_wallClimbSetUp", PredAuthClass_t::CLIENT_TIMING, AUTH_SCOPE_ANY, nullptr, &bridge_wallclimb_setup_client, 0,
 		"client-predicted wall-climb latch; dedi's copy is a lagged echo of a gate evaluated differently, so the client owns it." },
+	{ "m_prepClimbPusher", PredAuthClass_t::CLIENT_TIMING, AUTH_SCOPE_ANY, nullptr, nullptr, 0,
+		"S21-only climb pusher handle; dedi has no member and publishes null." },
 	{ "m_ziplineReattachCooldownTime", PredAuthClass_t::CLIENT_TIMING, AUTH_SCOPE_ANY, nullptr, nullptr, 0,
 		"zipline reattach cooldown: S21-only, unfed (srv==0 6/6 measured)." },
 	{ "m_canStand", PredAuthClass_t::CLIENT_TIMING, AUTH_SCOPE_ANY, nullptr, nullptr, 0,
@@ -918,6 +920,8 @@ static const PredAuthEntry_t s_authTable[] =
 		"traversal facing snapshotted at ride start; unit vector, so it takes an angular tolerance rather than the positional one." },
 	{ "m_traversalMidFrac", PredAuthClass_t::TOLERANCE, AUTH_SCOPE_ANY, &sdk_pred_tol_traversal_frac, nullptr, 0,
 		"traversal arc parameter derived from the same snapshot; median divergence is one float32 ULP." },
+	{ "m_lastWallRunStartPos", PredAuthClass_t::TOLERANCE, AUTH_SCOPE_ANY, &sdk_pred_tol_traversal, nullptr, 0,
+		"once-written wall-attach stamp of m_localOrigin; exact-compared while origin is tolerated at 0.60." },
 	// 1P viewmodel traversal playback rate is forced to 0; both 1P and 3P cycles
 	// are written from this field alone, so the client owns the phase.
 	{ "m_currentFramePlayer.m_traversalAnimProgress", PredAuthClass_t::CLIENT_TIMING, AUTH_SCOPE_ANY, nullptr, nullptr, 0,

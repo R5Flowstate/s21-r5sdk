@@ -211,7 +211,8 @@ static void SpdLog_AtExitMarkDead(void)
 
 #ifndef _TOOLS
 //-----------------------------------------------------------------------------
-// File sinks only with -devsdk/-dev/-developer/-logfiles; -nologfiles forces off.
+// Full rotating set only with -devsdk/-dev/-developer/-logfiles.
+// -nologfiles forces everything off, including the always-on warning trio.
 //-----------------------------------------------------------------------------
 bool SpdLog_FileLogsEnabled(void)
 {
@@ -231,6 +232,24 @@ bool SpdLog_FileLogsEnabled(void)
 	return s_fileLogs != 0;
 }
 
+static void SpdLog_CreateNamedRotating(const char* pszName, const char* pszFile)
+{
+	spdlog::rotating_logger_mt<spdlog::async_factory_nonblock>(pszName
+		, fmt::format("{:s}/{:s}", g_LogSessionDirectory, pszFile), SPDLOG_MAX_SIZE, SPDLOG_NUM_FILE)
+		->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %v");
+}
+
+// Dedi-only when the full file set is off: C2S-SR / SCRIPT ERROR / Error()
+// must stay greppable after printt is muted. Do not add squirrel_re / sdk
+// here -- those are the printt and boot-chatter sinks. The client stays
+// minimum-disk (crash files only) unless -devsdk / -logfiles.
+static void SpdLog_CreateAlwaysOnLoggers()
+{
+	SpdLog_CreateNamedRotating("squirrel_re(warning)", "script_warning.log");
+	SpdLog_CreateNamedRotating("sdk(warning)", "warning.log");
+	SpdLog_CreateNamedRotating("sdk(error)", "error.log");
+}
+
 static void SpdLog_CreateRotatingLoggers()
 {
 	/************************
@@ -238,24 +257,14 @@ static void SpdLog_CreateRotatingLoggers()
 	 ************************/
 	// async_factory_nonblock: a sync sink fwrite blocks the emitting (often net) thread.
 	// overrun_oldest drops old lines instead of stalling; timestamps are taken at the call.
-	spdlog::rotating_logger_mt<spdlog::async_factory_nonblock>("squirrel_re(warning)"
-		, fmt::format("{:s}/{:s}", g_LogSessionDirectory, "script_warning.log"), SPDLOG_MAX_SIZE, SPDLOG_NUM_FILE)->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %v");
-	spdlog::rotating_logger_mt<spdlog::async_factory_nonblock>("squirrel_re"
-		, fmt::format("{:s}/{:s}", g_LogSessionDirectory, "script.log"), SPDLOG_MAX_SIZE, SPDLOG_NUM_FILE)->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %v");
-	spdlog::rotating_logger_mt<spdlog::async_factory_nonblock>("sdk"
-		, fmt::format("{:s}/{:s}", g_LogSessionDirectory, "message.log"), SPDLOG_MAX_SIZE, SPDLOG_NUM_FILE)->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %v");
-	spdlog::rotating_logger_mt<spdlog::async_factory_nonblock>("sdk(warning)"
-		, fmt::format("{:s}/{:s}", g_LogSessionDirectory, "warning.log"), SPDLOG_MAX_SIZE, SPDLOG_NUM_FILE)->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %v");
-	spdlog::rotating_logger_mt<spdlog::async_factory_nonblock>("sdk(error)"
-		, fmt::format("{:s}/{:s}", g_LogSessionDirectory, "error.log"), SPDLOG_MAX_SIZE, SPDLOG_NUM_FILE)->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %v");
-	spdlog::rotating_logger_mt<spdlog::async_factory_nonblock>("net_trace"
-		, fmt::format("{:s}/{:s}", g_LogSessionDirectory, "net_trace.log"), SPDLOG_MAX_SIZE, SPDLOG_NUM_FILE)->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %v");
+	SpdLog_CreateAlwaysOnLoggers();
+	SpdLog_CreateNamedRotating("squirrel_re", "script.log");
+	SpdLog_CreateNamedRotating("sdk", "message.log");
+	SpdLog_CreateNamedRotating("net_trace", "net_trace.log");
 #ifndef DEDICATED
-	spdlog::rotating_logger_mt<spdlog::async_factory_nonblock>("netconsole"
-		, fmt::format("{:s}/{:s}", g_LogSessionDirectory, "netconsole.log"), SPDLOG_MAX_SIZE, SPDLOG_NUM_FILE)->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %v");
+	SpdLog_CreateNamedRotating("netconsole", "netconsole.log");
 #endif // !DEDICATED
-	spdlog::rotating_logger_mt<spdlog::async_factory_nonblock>("filesystem"
-		, fmt::format("{:s}/{:s}", g_LogSessionDirectory, "filesystem.log"), SPDLOG_MAX_SIZE, SPDLOG_NUM_FILE)->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %v");
+	SpdLog_CreateNamedRotating("filesystem", "filesystem.log");
 }
 #endif // !_TOOLS
 
@@ -340,11 +349,24 @@ void SpdLog_Init(const bool bAnsiColor)
 	{
 		SpdLog_CreateRotatingLoggers();
 	}
+#ifdef DEDICATED
+	else if (!CommandLine()->CheckParm("-nologfiles"))
+	{
+		SpdLog_CreateAlwaysOnLoggers();
+		g_TermLogger->info("Minimum-disk: warning.log / error.log / script_warning.log on. "
+			"Full file set: -logfiles or -devsdk.\n");
+	}
+	else
+	{
+		g_TermLogger->info("File logs disabled (-nologfiles): stdout + crash files only.\n");
+	}
+#else
 	else
 	{
 		g_TermLogger->info("File logs disabled (release minimum): stdout + crash files only. "
 			"-logfiles or -devsdk re-enables.\n");
 	}
+#endif // DEDICATED
 #endif // !_TOOLS
 
 	spdlog::set_level(spdlog::level::trace);

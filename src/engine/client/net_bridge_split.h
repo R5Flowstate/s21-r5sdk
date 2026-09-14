@@ -430,7 +430,10 @@ extern const char* S21Bridge_PickChallengeMap(const unsigned char* pPkt, int nLe
 extern void S21Bridge_RememberChallengeMap(const char* pszMap);
 extern int S21Bridge_WriteChallenge04(unsigned char* pBuf, int nBufLen, const char* pszMap);
 extern bool S21Bridge_RewritePollToDestChallenge04(unsigned char* pBuf, int nBufLen, int* pOutLen);
-extern void S21Bridge_DrainSocketToQueue(void);
+extern int S21Bridge_DrainSocketToQueue(void);
+extern bool S21Bridge_TryDequeueS2C(void* buf, int cap, int* pLen);
+extern void S21Bridge_PumpWhileStalled(void);
+extern volatile LONG s_splitAbandoned;
 extern void S21Bridge_RequestValidatorDisconnect(const char* tag);
 extern void S21Bridge_FlushValidatorDisconnect(void);
 extern volatile LONG s_tickAckLog;

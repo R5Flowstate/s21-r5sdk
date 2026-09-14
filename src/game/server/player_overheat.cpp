@@ -19,6 +19,7 @@
 #include "game/server/entitylist.h"
 #include "game/server/r1/weapon_x.h"
 #include "public/tier1/sdk_parse.h"
+#include "public/tier1/strtools.h"
 #include "public/globalvars_base.h"
 
 #include <unordered_map>
@@ -54,10 +55,10 @@ struct PlayerOverheatWeaponConfig
 static std::unordered_map<std::string, PlayerOverheatWeaponConfig> s_weaponOverheatConfigs;
 
 //-----------------------------------------------------------------------------
-// Resolve the implicit this; reject non-BCC entities (appended props only
-// exist inside a grown BaseCombatCharacter allocation).
+// Resolve the implicit this. Callers must fail-soft -- SQ_ERROR here is a
+// host shutdown.
 //-----------------------------------------------------------------------------
-static bool PlayerOverheat_ResolvePlayer(HSQUIRRELVM v, void** ppEnt)
+static bool PlayerOverheat_ResolveEntity(HSQUIRRELVM v, void** ppEnt)
 {
 	void* pEnt = nullptr;
 	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pEnt)) || !pEnt)
@@ -73,7 +74,7 @@ static bool PlayerOverheat_ResolvePlayer(HSQUIRRELVM v, void** ppEnt)
 		{
 			Warning(eDLL_T::SERVER,
 				"[PlayerOverheat] entity is not a BaseCombatCharacter -- "
-				"overheat props only exist on grown BCC allocations\n");
+				"overheat props only exist on BCC send tables\n");
 		}
 		*ppEnt = nullptr;
 		return false;
@@ -211,13 +212,16 @@ static bool GetDoesWeaponPlayerOverheat(const char* weaponClassName)
 }
 
 //-----------------------------------------------------------------------------
-// Script natives -- player
+// Script natives -- combat character
 //-----------------------------------------------------------------------------
 static SQRESULT Script_IsPlayerOverheating(HSQUIRRELVM v)
 {
 	void* pEnt = nullptr;
-	if (!PlayerOverheat_ResolvePlayer(v, &pEnt))
-		SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+	if (!PlayerOverheat_ResolveEntity(v, &pEnt))
+	{
+		sq_pushbool(v, false);
+		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+	}
 
 	const bool bOverheating =
 		BCCExtend_GetI32(pEnt, offsetof(BCCExtendWire, m_bIsPlayerOverheating)) != 0;
@@ -228,12 +232,12 @@ static SQRESULT Script_IsPlayerOverheating(HSQUIRRELVM v)
 static SQRESULT Script_SetPlayerOverheatState(HSQUIRRELVM v)
 {
 	void* pEnt = nullptr;
-	if (!PlayerOverheat_ResolvePlayer(v, &pEnt))
-		SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+	if (!PlayerOverheat_ResolveEntity(v, &pEnt))
+		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 
 	SQBool bState = SQFalse;
 	if (SQ_FAILED(sq_getbool(v, 2, &bState)))
-		SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 
 	const int nNormalized = (bState != SQFalse) ? 1 : 0;
 	if (BCCExtend_GetI32(pEnt, offsetof(BCCExtendWire, m_bIsPlayerOverheating)) == nNormalized)
@@ -247,8 +251,11 @@ static SQRESULT Script_SetPlayerOverheatState(HSQUIRRELVM v)
 static SQRESULT Script_GetPlayerOverheatValue(HSQUIRRELVM v)
 {
 	void* pEnt = nullptr;
-	if (!PlayerOverheat_ResolvePlayer(v, &pEnt))
-		SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+	if (!PlayerOverheat_ResolveEntity(v, &pEnt))
+	{
+		sq_pushfloat(v, 0.0f);
+		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+	}
 
 	sq_pushfloat(v, BCCExtend_GetF32(pEnt, offsetof(BCCExtendWire, m_playerOverheatValue)));
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
@@ -261,10 +268,16 @@ static SQRESULT Script_DoesWeaponPlayerOverheat(HSQUIRRELVM v)
 {
 	void* pWeapon = nullptr;
 	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pWeapon)) || !pWeapon)
-		SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+	{
+		sq_pushbool(v, false);
+		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+	}
 
-	const char* const className =
-		reinterpret_cast<const char*>(reinterpret_cast<uintptr_t>(pWeapon) + SERVER_WEAPON_NAME_OFFSET);
+	char className[65];
+	V_strncpy(className,
+		reinterpret_cast<const char*>(reinterpret_cast<uintptr_t>(pWeapon) + SERVER_WEAPON_NAME_OFFSET),
+		sizeof(className));
+	className[sizeof(className) - 1] = '\0';
 	const bool doesOverheat = GetDoesWeaponPlayerOverheat(className);
 
 	static bool s_bAnnounced = false;
@@ -337,8 +350,11 @@ void PlayerOverheat_OnWeaponFired(void* pWeapon)
 	if (BCCExtend_GetI32(pPlayer, offsetof(BCCExtendWire, m_bIsPlayerOverheating)) == 0)
 		return;
 
-	const char* const className =
-		reinterpret_cast<const char*>(reinterpret_cast<uintptr_t>(pWeapon) + SERVER_WEAPON_NAME_OFFSET);
+	char className[65];
+	V_strncpy(className,
+		reinterpret_cast<const char*>(reinterpret_cast<uintptr_t>(pWeapon) + SERVER_WEAPON_NAME_OFFSET),
+		sizeof(className));
+	className[sizeof(className) - 1] = '\0';
 	const PlayerOverheatWeaponConfig& config = GetPlayerOverheatWeaponConfig(className);
 	if (!config.doesPlayerOverheat)
 		return;
@@ -395,38 +411,43 @@ void PlayerOverheat_LevelShutdown(void)
 //-----------------------------------------------------------------------------
 // Registration
 //-----------------------------------------------------------------------------
-void PlayerOverheat_RegisterPlayerFuncs(ScriptClassDescriptor_t* playerStruct)
+void PlayerOverheat_RegisterCombatCharacterFuncs(ScriptClassDescriptor_t* combatCharStruct)
 {
-	if (!playerStruct)
+	if (!combatCharStruct)
+	{
+		Warning(eDLL_T::SERVER,
+			"[PlayerOverheat] combat character script class descriptor is null; "
+			"overheat natives not registered\n");
 		return;
+	}
 
 	static bool s_bAnnounced = false;
 	if (!s_bAnnounced)
 	{
 		s_bAnnounced = true;
 		Msg(eDLL_T::SERVER,
-			"[PlayerOverheat] register player funcs (sidecar)\n");
+			"[PlayerOverheat] register combat-character funcs (sidecar)\n");
 	}
 
-	playerStruct->AddFunction(
+	combatCharStruct->AddFunction(
 		"IsPlayerOverheating",
 		"Script_IsPlayerOverheating",
-		"Returns whether this player is currently overheating",
+		"Returns whether this combat character is currently overheating",
 		"bool",
 		"",
 		false,
 		Script_IsPlayerOverheating);
 
-	playerStruct->AddFunction(
+	combatCharStruct->AddFunction(
 		"SetPlayerOverheatState",
 		"Script_SetPlayerOverheatState",
-		"Sets whether this player is currently overheating",
+		"Sets whether this combat character is currently overheating",
 		"void",
 		"bool state",
 		false,
 		Script_SetPlayerOverheatState);
 
-	playerStruct->AddFunction(
+	combatCharStruct->AddFunction(
 		"GetPlayerOverheatValue",
 		"Script_GetPlayerOverheatValue",
 		"Returns the current player overheat value",

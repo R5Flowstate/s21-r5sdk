@@ -27,10 +27,9 @@ static constexpr ptrdiff_t MB_MV_OFF_PRESSED    = 0x2C;   // int m_nButtonsPress
 static ConVar mantle_boost_enabled("mantle_boost_enabled", "1", FCVAR_RELEASE,
 	"[MB] master enable for the client-predicted mantle-exit boost. "
 	"Must match the dedi-side default.");
-static ConVar bridge_mantle_boost_sweet_spot_angle("bridge_mantle_boost_sweet_spot_angle", "1.5", FCVAR_RELEASE,
+static ConVar bridge_mantle_boost_sweet_spot_angle("bridge_mantle_boost_sweet_spot_angle", "2", FCVAR_RELEASE,
 	"[MB] sweet-spot angle threshold (deg): |animPitch - eyePitch| must stay BELOW this. "
-	"1.5 is the live value (the enable_mantle_boost mod leaves the base threshold "
-	"unmodded; Octane's stim mod doubles it). Must match the dedi-side default.");
+	"Must match the dedi-side default.");
 static ConVar bridge_mantle_boost_sweet_spot_auto("bridge_mantle_boost_sweet_spot_auto", "1", FCVAR_RELEASE,
 	"[MB] derive the sweet-spot threshold per traversal state from the baked curve so the "
 	"window is the last min_valid_traversal_frac of the climb, as S21's is. 0 uses the "
@@ -38,10 +37,11 @@ static ConVar bridge_mantle_boost_sweet_spot_auto("bridge_mantle_boost_sweet_spo
 // FCVAR_USERINFO: mode-3 (Movement Ability/custom) uses this mask as the
 // activation button -- network it per-client like mantle_boost_input_setting so the dedi
 // gates the authoritative boost on the same bits the client predicts.
-static ConVar bridge_mantle_boost_button_mask("bridge_mantle_boost_button_mask", "4",
+static ConVar bridge_mantle_boost_button_mask("bridge_mantle_boost_button_mask", "268435456",
 	FCVAR_RELEASE | FCVAR_ARCHIVE | FCVAR_USERINFO,
-	"[MB] Custom/Movement-Ability held-button bitmask (used when mantle_boost_input_setting=3). "
-	"Default IN_DUCK=4. FCVAR_USERINFO -> networked to the dedi per-client.");
+	"[MB] Held-button bitmask when mantle_boost_input_setting=3 (Movement Ability). "
+	"Default 268435456 (bit 28 / +dodge). 4 is remapped to bit 28. "
+	"FCVAR_USERINFO -> networked to the dedi per-client.");
 static ConVar mantle_boost_input_setting("mantle_boost_input_setting", "1",
 	FCVAR_RELEASE | FCVAR_ARCHIVE | FCVAR_USERINFO,
 	"[MB] Activation input: 0=Off, 1=Jump (S21 default), 2=Crouch, 3=Movement Ability/custom "
@@ -55,14 +55,13 @@ static ConVar mantle_boost_min_valid_traversal_frac("mantle_boost_min_valid_trav
 	"[MB] Min traversal frac at press for BOOST vs FAILED (default 0.5); at/below -> FAILED (3), above -> BOOST (4). Must match dedi.");
 // Fallback when the native standing-pose sprint getter is unresolved; the dedi
 // uses the same fallback. State 4 multiplies by sprint_mult.
-static ConVar bridge_mantle_boost_exit_speed("bridge_mantle_boost_exit_speed", "260", FCVAR_RELEASE,
+static ConVar bridge_mantle_boost_exit_speed("bridge_mantle_boost_exit_speed", "200", FCVAR_RELEASE,
 	"[MB] base exit speed (u/s) when GetPoseSpeed_Sprint is unresolved. State 4 multiplies by sprint_mult. Must match dedi.");
 static ConVar bridge_mantle_boost_sprint_mult("bridge_mantle_boost_sprint_mult", "1.5", FCVAR_RELEASE,
 	"[MB] exit speed multiplier on BOOST (state 4); default 1.5 (most legends; Sparrow 1.0). Must match dedi.");
-static ConVar bridge_mantle_boost_jump_height("bridge_mantle_boost_jump_height", "120", FCVAR_RELEASE,
-	"[MB] jump height (u) for BOOST (state 4) via sqrt(2*gravity*height). 120 is the base "
-	"profile's authored player_mantleBoostJumpHeight; state 3 keeps player_jumpHeight (56), "
-	"so the sweet spot arcs above the weak tier. Must match dedi.");
+static ConVar bridge_mantle_boost_jump_height("bridge_mantle_boost_jump_height", "90", FCVAR_RELEASE,
+	"[MB] jump height (u) for BOOST (state 4) via sqrt(2*gravity*height). "
+	"State 3 keeps player_jumpHeight (56). Must match dedi.");
 static ConVar bridge_mantle_boost_gravity("bridge_mantle_boost_gravity", "750", FCVAR_RELEASE,
 	"[MB] fallback gravity for the BOOST (state 4) vz solve, used only if sv_gravity fails to resolve. "
 	"Real Jump reads sv_gravity directly ( JumpHeightToVelocity) -- this is a safety net, not the"
@@ -98,7 +97,11 @@ static int MantleBoost_ActivationButtonMask()
 	{
 	case 1:  return 2;            // Jump (IN_JUMP)
 	case 2:  return 0x04000004;   // Crouch (IN_DUCK | duck-toggle bit)
-	case 3:  return bridge_mantle_boost_button_mask.GetInt();   // Movement Ability / custom bind
+	case 3:
+	{
+		const int mask = bridge_mantle_boost_button_mask.GetInt();
+		return mask == 4 ? 0x10000000 : mask;
+	}
 	default: return 0;            // Off -> feature inert
 	}
 }

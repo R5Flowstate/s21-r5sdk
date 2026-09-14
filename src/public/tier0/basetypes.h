@@ -141,8 +141,8 @@
 #define MAX_MAP_NAME      64 // Max BSP file name len.
 #define MAX_PLAYLIST_NAME 64 // Max playlist name len.
 
-#define SDK_VERSION "R5FlowstateSDK001" // Increment this with every /breaking/ SDK change (i.e. security/backend changes breaking compatibility).
-#define SDK_DISPLAY_VERSION "1.0.4" // Player-facing product label. Not the wire gate.
+#define SDK_VERSION "R5FlowstateSDK002" // Increment this with every /breaking/ SDK change (i.e. security/backend changes breaking compatibility).
+#define SDK_DISPLAY_VERSION "1.0.5" // Player-facing product label. Not the wire gate.
 #define SDK_ARRAYSIZE(arr) ((sizeof(arr) / sizeof(*arr))) // Name due to IMGUI implementation and NT implementation that we shouldn't share across everywhere.
 
 #define SDK_SYSTEM_CFG_PATH "cfg/system/"

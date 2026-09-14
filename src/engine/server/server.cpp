@@ -44,7 +44,7 @@ static ConVar sv_validatePersonaName("sv_validatePersonaName", "1", FCVAR_RELEAS
 static ConVar sv_minPersonaNameLength("sv_minPersonaNameLength", "1", FCVAR_RELEASE, "The minimum length of the client's textual persona name.", true, 0.f, false, 0.f);
 static ConVar sv_maxPersonaNameLength("sv_maxPersonaNameLength", "32", FCVAR_RELEASE, "The maximum length of the client's textual persona name.", true, 0.f, false, 0.f);
 static ConVar sv_allowIconsInNames("sv_allowIconsInNames", "0", FCVAR_RELEASE, "Allow game icon characters in player names. 0 = Block icons, 1 = Allow icons");
-static ConVar sv_nameFilterEnabled("sv_nameFilterEnabled", "1", FCVAR_RELEASE, "Kick players whose names contain words from the bad word list asset");
+static ConVar sv_nameFilterEnabled("sv_nameFilterEnabled", "0", FCVAR_RELEASE, "Kick players whose names contain words from the bad word list asset");
 static ConVar sv_nameFilterPath("sv_nameFilterPath", "chatfilters/badwords.txt", FCVAR_RELEASE, "Relative path (in VPK) to the bad word list file");
 
 //---------------------------------------------------------------------------------

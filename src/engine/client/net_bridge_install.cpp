@@ -435,8 +435,9 @@ volatile long s_splitQueueTail = 0; // read by PollReceive
 volatile long s_splitSessionGen = 1;
 volatile long s_splitQueueGen[SPLIT_QUEUE_SIZE] = {};
 volatile long s_splitSlotGen[4] = {};
+static SRWLOCK s_s2cQueueLock = SRWLOCK_INIT;
 
-static void S21Bridge_EnqueueS2C(const char* buf, int len)
+static void S21Bridge_EnqueueS2C_NoLock(const char* buf, int len)
 {
 	if (!buf || len <= 0)
 		return;
@@ -465,13 +466,22 @@ static void S21Bridge_EnqueueS2C(const char* buf, int len)
 	s_splitQueueHead = next;
 }
 
-void S21Bridge_DrainSocketToQueue(void)
+static void S21Bridge_EnqueueS2C(const char* buf, int len)
+{
+	AcquireSRWLockExclusive(&s_s2cQueueLock);
+	S21Bridge_EnqueueS2C_NoLock(buf, len);
+	ReleaseSRWLockExclusive(&s_s2cQueueLock);
+}
+
+int S21Bridge_DrainSocketToQueue(void)
 {
 	if (!s_bridgeActive || s_bridgeSocket == INVALID_SOCKET || !s_origRecvfrom)
-		return;
+		return 0;
 
+	int nGot = 0;
 	char szBuf[SPLIT_QUEUE_PKT_MAX];
 	sockaddr_in6 from = {};
+	AcquireSRWLockExclusive(&s_s2cQueueLock);
 	for (int i = 0; i < 128; ++i)
 	{
 		int nFromLen = sizeof(from);
@@ -493,8 +503,69 @@ void S21Bridge_DrainSocketToQueue(void)
 		}
 		if (!S21Bridge_FromMatchesPeer(reinterpret_cast<sockaddr*>(&from), nFromLen))
 			continue;
-		S21Bridge_EnqueueS2C(szBuf, n);
+		S21Bridge_EnqueueS2C_NoLock(szBuf, n);
+		++nGot;
 	}
+	ReleaseSRWLockExclusive(&s_s2cQueueLock);
+	return nGot;
+}
+
+bool S21Bridge_TryDequeueS2C(void* buf, int cap, int* pLen)
+{
+	if (!buf || cap <= 0 || !pLen)
+		return false;
+
+	AcquireSRWLockExclusive(&s_s2cQueueLock);
+	while (s_splitQueueTail != s_splitQueueHead)
+	{
+		const long tail = s_splitQueueTail;
+		if (s_splitQueueGen[tail] != s_splitSessionGen)
+		{
+			InterlockedIncrement(&s_splitAbandoned);
+			s_splitQueueTail = (tail + 1) % SPLIT_QUEUE_SIZE;
+			continue;
+		}
+		const int n = s_splitQueue[tail].len;
+		if (n > 0 && n <= cap)
+			memcpy(buf, s_splitQueue[tail].data, static_cast<size_t>(n));
+		s_splitQueueTail = (tail + 1) % SPLIT_QUEUE_SIZE;
+		ReleaseSRWLockExclusive(&s_s2cQueueLock);
+		if (n > 0 && n <= cap)
+		{
+			*pLen = n;
+			return true;
+		}
+		AcquireSRWLockExclusive(&s_s2cQueueLock);
+	}
+	ReleaseSRWLockExclusive(&s_s2cQueueLock);
+	return false;
+}
+
+static void S21Bridge_StampNetChanReceived(void)
+{
+	CNetChan* const pChan = s_bridgeChan;
+	if (!pChan || !s_bridgeActive)
+		return;
+
+	const uintptr_t a = NetObs_NetTimeAddr();
+	if (!a)
+		return;
+
+	*reinterpret_cast<double*>(
+		reinterpret_cast<char*>(pChan) + 0x20F0) =
+		*reinterpret_cast<double*>(a);
+}
+
+void S21Bridge_PumpWhileStalled(void)
+{
+	if (!s_bridgeActive)
+		return;
+
+	const int n = S21Bridge_DrainSocketToQueue();
+	if (n <= 0 || !s_bridgeActive)
+		return;
+
+	S21Bridge_StampNetChanReceived();
 }
 
 // S21 RecvTable names: match -> needsDecoder=1, else 0.
@@ -8177,6 +8248,7 @@ void S21Bridge_OnConnAccept(const char* mapName, const char* gameMode)
 // tears down the bridge so the engine's retry timer can try again.
 static void S21Bridge_ResetAllState()
 {
+    PsoCache_Flush(false);
     s_bridgeChan          = nullptr;
     s_c2sSeqCounter       = 0;
     s_bridgeNonceHost     = 0x0000CAFE;
@@ -8229,10 +8301,12 @@ static void S21Bridge_ResetAllState()
     memset(s_dbBlockStatus, 0, sizeof(s_dbBlockStatus));
     S21Bridge_C2SUnrelSlices_Reset(); // [C2S-SLICE] extents describe a stream that is gone
     InterlockedIncrement(&s_splitSessionGen);
+    AcquireSRWLockExclusive(&s_s2cQueueLock);
     s_splitQueueHead = 0;
     s_splitQueueTail = 0;
     for (int i = 0; i < SPLIT_QUEUE_SIZE; ++i)
         s_splitQueueGen[i] = 0;
+    ReleaseSRWLockExclusive(&s_s2cQueueLock);
     for (int i = 0; i < 4; ++i)
         s_splitSlotGen[i] = 0;
     S21Bridge_ResetSplitReassembly();

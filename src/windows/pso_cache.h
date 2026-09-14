@@ -45,6 +45,11 @@ inline uint8_t* g_pPsoCacheEnabled = nullptr;   // cleared by -no_pso_caching / 
 inline volatile long* g_pPsoCreateCount = nullptr;
 inline volatile long* g_pPsoCreateMs = nullptr;
 
+// Graphics create + library Load/Store (2nd arg is the cache ctx).
+inline void* (__fastcall* v_PsoCreateGraphics)(void* pA1, void* pCtx) = nullptr;
+// Compute create + library Load/Store.
+inline void* (__fastcall* v_PsoCreateCompute)(void* pThis) = nullptr;
+
 // Per-frame auto-flush tick.
 void PsoCache_Frame(void);
 
@@ -58,6 +63,8 @@ class VPsoCacheS21 : public IDetour
 	{
 		LogFunAdr("PsoCache_GetUserDir", v_PsoCache_GetUserDir);
 		LogFunAdr("PsoCache_WriteFile", v_PsoCache_WriteFile);
+		LogFunAdr("PsoCreateGraphics", v_PsoCreateGraphics);
+		LogFunAdr("PsoCreateCompute", v_PsoCreateCompute);
 		LogVarAdr("PsoCacheCtx", g_pPsoCacheCtx);
 		LogVarAdr("PsoCacheEnabled", g_pPsoCacheEnabled);
 		LogVarAdr("PsoCreateCount", const_cast<const long*>(g_pPsoCreateCount));
@@ -66,7 +73,7 @@ class VPsoCacheS21 : public IDetour
 	virtual void GetFun(void) const;
 	virtual void GetVar(void) const;
 	virtual void GetCon(void) const { }
-	virtual void Detour(const bool bAttach) const { }
+	virtual void Detour(const bool bAttach) const;
 };
 ///////////////////////////////////////////////////////////////////////////////
 

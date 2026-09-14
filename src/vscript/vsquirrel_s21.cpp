@@ -538,6 +538,8 @@ static char* DevInject_BuildSourceWithPrelude(
 	const char* const body = orig + bomLen;
 	const size_t bodyLen = origLen - bomLen;
 
+	if (!memmem_simple(body, bodyLen, "DEVELOPER", 9))
+		return nullptr;
 	if (DevInject_AlreadyHasBoolPrelude(body, bodyLen))
 		return nullptr;
 

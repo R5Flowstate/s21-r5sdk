@@ -28,6 +28,7 @@
 #include "halfduck_zip_parity.h"
 #include "trigger_slip_diag.h"
 #include "move_sim_trace.h"
+#include "wallclimb.h"
 #include <cstring>
 #include <unordered_map>
 #include <unordered_set>
@@ -1416,6 +1417,7 @@ static __int64 __fastcall Hook_CGameMovement_FullWalkMove_JetDrive(void* ctx)
 	MoveSimTrace_BeforeFullWalkMove(ctx);
 	SlipDiag_BeforeFullWalkMove(ctx);
 	PlayerLaunch_BeginFullWalkMove(ctx);
+	WallClimb_BeforeFullWalkMove(ctx);
 	const __int64 ret = v_CGameMovement__FullWalkMove
 		? v_CGameMovement__FullWalkMove(ctx)
 		: 0;
@@ -1423,6 +1425,7 @@ static __int64 __fastcall Hook_CGameMovement_FullWalkMove_JetDrive(void* ctx)
 	JetDrive_AccelFromMoveCtx(ctx);
 	SlipDiag_AfterFullWalkMove(ctx);
 	MoveSimTrace_AfterFullWalkMove(ctx);
+	WallClimb_AfterFullWalkMove(ctx);
 	return ret;
 }
 

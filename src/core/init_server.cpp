@@ -132,8 +132,10 @@
 #include "game/server/mantle_boost.h"
 #include "game/server/halfduck_zip_parity.h"
 #include "game/server/move_sim_trace.h"
+#include "game/server/surfaceprop_id.h"
 #include "game/server/repel_realm_gate.h"
 #include "game/server/weapon_realm_follow.h"
+#include "game/server/weapon_holster_reselect.h"
 #include "game/server/zipline_cooldown.h"
 #include "game/server/zipline_exit_parity.h"
 #include "game/server/poseparam_ext.h"
@@ -143,6 +145,7 @@
 #include "game/shared/alliance_compat.h"
 #include "game/shared/deathfield_system.h"
 #include "game/server/tapstrafe.h"
+#include "game/server/wallclimb.h"
 #include "game/server/trigger_slip_diag.h"
 #include "game/server/trigger_starttouch_dedupe.h"
 #include "game/server/trigger_clientpredict.h"
@@ -575,14 +578,17 @@ REGISTER(VConnectPasswordGate);   // REGISTER SERVER ONLY! challenge-bind the co
 	REGISTER(VMoveScaleWeaponParity);   // REGISTER SERVER ONLY! move-scale weapon term -> client parity
 	REGISTER(VHalfDuckZipParity);       // REGISTER SERVER ONLY! [HALFDUCK] m_doingHalfDuck is latched once at duck-start and is not networked; duck is suppressed while ziplining, so the two engines sample it one command apart and only one applies the (standHull-duckHull)*0.5 origin step. Forces the latch on a duck that begins just after a zipline release. Twin: VHalfDuckZipParityClient.
 	REGISTER(VMoveSimTrace);            // REGISTER SERVER ONLY! [MOVE-TRACE] per-command FullWalkMove state dump; twin: VMoveSimTraceClient (attaches nothing; sampled from VJetDrive's hook)
+	REGISTER(VSurfPropIdUnclamp);       // REGISTER SERVER ONLY! [SURFPROP-ID] S3 remaps surface id >127 to default; S21 does not. Digital_Water is 133.
 	REGISTER(VRepelRealmGate);          // REGISTER SERVER ONLY! [REPEL-REALM] player-vs-player repel pass gated on shared m_realmsBitMask; disjoint-realm players no longer push each other
 	REGISTER(VWeaponRealmFollow);       // REGISTER SERVER ONLY! [REALM-FOLLOW] carried weapons adopt owner realms at activation + on every SetRealmsBitMask (opponent tracers)
+	REGISTER(VHolsterReselect);         // REGISTER SERVER ONLY! [HOLSTER-RESEL] holstered 0xFD + leftover activeWeapons must still write m_selectedWeapons
 	REGISTER(VZiplineExitParity);       // REGISTER SERVER ONLY! [ZIP-EXIT] auto-detach exit-velocity rewrite (client rope clamp + vertical magnitude) so both engines leave the rope with the same velocity
 	REGISTER(VMeleeActivityTraceServer);   // REGISTER SERVER ONLY! [MELEE-ACT] bridge_melee_trace: melee custom-activity lifetime, diffed against the client twin
 	REGISTER(VMeleeLungeProbeServer);   // REGISTER SERVER ONLY! [LUNGE-PROBE] bridge_melee_lunge_probe: melee-lunge overspeed-clamp cap value, diffed against the client twin
 	REGISTER(VAllianceCompat);          // REGISTER SERVER! FreeDM/Control alliance matrix + IsEnemyTeam detour (SetTeamIsInAlliance native)
 	REGISTER(VDeathFieldSystem);        // REGISTER SERVER! SetDeathFieldParams hook + g_pWorldEntity resolve for realm rings
 	REGISTER(VTapStrafeBridge);         // REGISTER SERVER ONLY! [TAPSTRAFE] Gap B: from-scratch port of 's "jump grace"/tap-strafe (lurch) assist -- S3 has zero trace of the mechanic (confirmed via convar-string sweep, only 2 leftover ConVar-registration stubs survive). ONE detour on CGameMovement::FullWalkMove, airborne-gated, mantle_boost_disables_tap_strafes-gated via MantleBoost_ShouldSuppressTapStrafe. See tapstrafe.h.
+	REGISTER(VWallClimb);               // REGISTER SERVER ONLY! [WALLCLIMB] remap S21-layout wallrun/climb finders + bind disable_wall_run. Tap sampled from VJetDrive FullWalkMove.
 	REGISTER(VTriggerSlipDiag);         // REGISTER SERVER ONLY! [SLIP-TOUCH]/[SLIP-END]/[SLIP-FORCE] enter/leave/force diag for CTriggerSlip (promoted CTriggerSlipSphere). sdk_slip_diag 0/1/2. StartTouch EndTouch FullWalkMove.
 	REGISTER(VBridgeFireClock);         // REGISTER SERVER ONLY! [FIRE-CLOCK] bounded command_time stamp on weapon-sim latestPredictedTime for one shared fire clock.
 	REGISTER(VTriggerStartTouchDedupe); // REGISTER SERVER ONLY! [TRIG-DEDUP] CBaseTrigger::StartTouch fires OnStartTouch + the script m_enterCallback on EVERY call, not just the first (EndTouch guards the same lookup) -- one detour restores the guard for the 19 trigger classes that reach that body.

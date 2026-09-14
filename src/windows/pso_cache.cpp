@@ -20,12 +20,25 @@ static ConVar sdk_pso_cache_autoflush_secs("sdk_pso_cache_autoflush_secs", "300"
 	"Seconds between automatic psoCache.pso flushes. 0 disables; a flush stalls "
 	"pipeline creation for the length of the serialize.", true, 0.f, true, 3600.f);
 
+static ConVar sdk_pso_cache_burst_n("sdk_pso_cache_burst_n", "16", FCVAR_RELEASE,
+	"Flush psoCache.pso after this many new pipeline creates while dirty. "
+	"0 disables the create-hook flush. A load-screen timeout otherwise "
+	"discards every pipeline compiled that join.", true, 0.f, true, 4096.f);
+
+static ConVar sdk_pso_cache_burst_secs("sdk_pso_cache_burst_secs", "10", FCVAR_RELEASE,
+	"Also flush psoCache.pso when dirty for this many seconds during creates. "
+	"0 disables the time trigger.", true, 0.f, true, 3600.f);
+
 static ConVar sdk_pso_cache_diag("sdk_pso_cache_diag", "0", FCVAR_DEVELOPMENTONLY,
 	"Log every psoCache flush attempt and its cost.");
 
 static double s_flLastFlushTime = 0.0;
 static uint64_t s_nFlushCount = 0;
 static uint64_t s_nBytesWritten = 0;
+static long s_nLastBurstCount = 0;
+static ULONGLONG s_ullLastPumpMs = 0;
+
+extern void S21Bridge_PumpWhileStalled(void);
 
 //-----------------------------------------------------------------------------
 // Purpose: <Saved Games>/Respawn/<profile>/local/psoCache.pso
@@ -151,8 +164,10 @@ bool PsoCache_Flush(const bool bForce)
 
 	s_nFlushCount++;
 	s_nBytesWritten = nTotal;
+	if (g_pPsoCreateCount)
+		s_nLastBurstCount = *g_pPsoCreateCount;
 
-	if (sdk_pso_cache_diag.GetBool())
+	if (s_nFlushCount == 1 || sdk_pso_cache_diag.GetBool())
 		Msg(eDLL_T::MS, "[PSO-CACHE] wrote %zu bytes in %.1f ms -> '%s'\n",
 			nTotal, flElapsed * 1000.0, szPath);
 
@@ -182,6 +197,56 @@ void PsoCache_Frame(void)
 		return;
 
 	PsoCache_Flush(false);
+}
+
+static void PsoCache_OnCreated(void)
+{
+	const ULONGLONG ullNow = GetTickCount64();
+	if (ullNow - s_ullLastPumpMs >= 50)
+	{
+		s_ullLastPumpMs = ullNow;
+		S21Bridge_PumpWhileStalled();
+	}
+
+	if (!PsoCache_Resolved() || !*g_pPsoCacheEnabled || !g_pPsoCacheCtx->m_pLibrary)
+		return;
+	if (!g_pPsoCacheCtx->m_bDirty)
+		return;
+
+	const int nBurst = sdk_pso_cache_burst_n.GetInt();
+	const float flBurstSecs = sdk_pso_cache_burst_secs.GetFloat();
+	if (nBurst <= 0 && flBurstSecs <= 0.f)
+		return;
+
+	const long nCreated = g_pPsoCreateCount ? *g_pPsoCreateCount : 0;
+	const double flNow = Plat_StallClockSeconds();
+	if (s_flLastFlushTime == 0.0)
+		s_flLastFlushTime = flNow;
+
+	const bool bByCount = (nBurst > 0) && (nCreated - s_nLastBurstCount >= nBurst);
+	const bool bByTime = (flBurstSecs > 0.f)
+		&& (flNow - s_flLastFlushTime >= double(flBurstSecs));
+	if (!bByCount && !bByTime)
+		return;
+
+	PsoCache_Flush(false);
+}
+
+static void* __fastcall Hook_PsoCreateGraphics(void* pA1, void* pCtx)
+{
+	void* const p = v_PsoCreateGraphics(pA1, pCtx);
+	static volatile LONG s_once = 0;
+	if (InterlockedCompareExchange(&s_once, 1, 0) == 0)
+		Msg(eDLL_T::MS, "[PSO-CACHE] create-hook live\n");
+	PsoCache_OnCreated();
+	return p;
+}
+
+static void* __fastcall Hook_PsoCreateCompute(void* pThis)
+{
+	void* const p = v_PsoCreateCompute(pThis);
+	PsoCache_OnCreated();
+	return p;
 }
 
 void PsoCache_PrintStatus(void)
@@ -244,8 +309,28 @@ void VPsoCacheS21::GetFun(void) const
 		"48 89 6C 24 ?? 56 57 41 56 48 83 EC ?? 49 8B F1")
 		.GetPtr(v_PsoCache_WriteFile);
 
+	// Graphics PSO create + library Load/Store. DX12 only (n=0 on DX11).
+	Module_FindPattern(g_GameDll,
+		"48 89 5C 24 ?? 48 89 74 24 ?? 57 48 81 EC ?? ?? ?? ?? 48 8B F2 33 FF")
+		.GetPtr(v_PsoCreateGraphics);
+
+	// Compute PSO create + library Load/Store. DX12 only.
+	Module_FindPattern(g_GameDll,
+		"48 89 5C 24 ?? 57 48 81 EC ?? ?? ?? ?? 48 8B 51 ?? 4C 8D 84 24")
+		.GetPtr(v_PsoCreateCompute);
+
 	if (!v_PsoCache_GetUserDir || !v_PsoCache_WriteFile)
 		Warning(eDLL_T::MS, "[PSO-CACHE] function patterns unresolved -- flush disabled\n");
+	if (!v_PsoCreateGraphics)
+		Warning(eDLL_T::MS, "[PSO-CACHE] graphics create unresolved -- load flush off (DX11 is fine)\n");
+}
+
+void VPsoCacheS21::Detour(const bool bAttach) const
+{
+	if (v_PsoCreateGraphics)
+		DetourSetup(&v_PsoCreateGraphics, &Hook_PsoCreateGraphics, bAttach);
+	if (v_PsoCreateCompute)
+		DetourSetup(&v_PsoCreateCompute, &Hook_PsoCreateCompute, bAttach);
 }
 
 void VPsoCacheS21::GetVar(void) const

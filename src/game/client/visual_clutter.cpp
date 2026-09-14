@@ -2,8 +2,8 @@
 //
 // Purpose: "Visual clutter" setting for the S21 client.
 //
-// cl_visual_clutter 0 = Full (ship behavior, every hook passes through).
-// cl_visual_clutter 1 = Minimal:
+// cl_visual_clutter 0 = Full (every hook passes through).
+// cl_visual_clutter 1 = Minimal (ship default):
 //   - H1: all weapon muzzle flashes (1P + 3P, self + enemies) dropped at the
 //     merged PlayWeaponParticleEffect funnel, matched by effect name.
 //   - H2: engine anim-event weapon FX (event classes 18/20/115) dropped.
@@ -36,10 +36,13 @@ static void VisualClutter_Changed_f(IConVar* var, const char* pOldValue, float f
 	VisualClutter_ApplyPin();
 }
 
-static ConVar cl_visual_clutter("cl_visual_clutter", "0", FCVAR_RELEASE | FCVAR_ARCHIVE,
+static ConVar cl_visual_clutter("cl_visual_clutter", "1", FCVAR_RELEASE | FCVAR_ARCHIVE,
 	"Visual clutter: 0=Full (all weapon and shield FX), 1=Minimal (no muzzle "
 	"flashes, no body-shield hit wrap or regen loop, softened kill/death FX pinned on).",
 	VisualClutter_Changed_f);
+
+static ConVar cl_visual_clutter_ship("cl_visual_clutter_ship", "0", FCVAR_ARCHIVE,
+	"Internal: 1 after applying the Minimal Visual Clutter default.");
 
 // Per-bucket kill-switches. Default 1 (bucket active under minimal); set 0
 // to force that bucket to passthrough for bisection.

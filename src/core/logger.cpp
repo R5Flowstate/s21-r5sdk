@@ -832,8 +832,8 @@ void EngineLoggerSink(LogType_t logType, LogLevel_t logLevel, eDLL_T context,
 		Plat_DebugString(message.c_str());
 
 #ifndef _TOOLS
-	// File loggers are absent in minimum-disk mode; the terminal sink above is
-	// then the only output for these lines.
+	// Full file set is off in minimum-disk mode. Dedi still has sdk(warning) /
+	// sdk(error) / squirrel_re(warning). Missing logger = no file line.
 	std::shared_ptr<spdlog::logger> ntlogger = spdlog::get(pszLogger); // <-- Obtain by 'pszLogger'.
 
 	if (ntlogger && !bDropFirehose)

@@ -11,7 +11,7 @@
 
 struct ScriptClassDescriptor_t;
 
-void PlayerOverheat_RegisterPlayerFuncs(ScriptClassDescriptor_t* playerStruct);
+void PlayerOverheat_RegisterCombatCharacterFuncs(ScriptClassDescriptor_t* combatCharStruct);
 void PlayerOverheat_RegisterWeaponFuncs(ScriptClassDescriptor_t* weaponStruct);
 
 // Per-shot accumulate + script overheat event when the meter tops out.
