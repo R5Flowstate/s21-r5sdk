@@ -5,19 +5,7 @@ This repository mixes material under different terms. Read this file
 before redistributing any part of it.
 
 
-1. OUR WORK, AGPL-3.0
----------------------
-
-The R5Flowstate additions to this tree -- the Season 21 client product, the
-Season 3 dedicated-server product, the loader, and the bridge, detour and
-script-binding work authored for this project -- are licensed under the GNU
-Affero General Public License, version 3, as set out in LICENSE.txt.
-
-That grant covers only those additions. It does not relicense anything in
-sections 2 or 3.
-
-
-2. VALVE SOURCE SDK TERMS
+1. VALVE SOURCE SDK TERMS
 -------------------------
 
 The Valve Source 1 SDK licence in license/LICENSE applies to the Valve
@@ -26,18 +14,18 @@ the SDK include that file and license/thirdpartylegalnotices.txt. Those
 terms are unchanged.
 
 
-3. RESPAWN AND EA MATERIAL, NOT OURS TO LICENSE
+2. RESPAWN AND EA MATERIAL, NOT OURS TO LICENSE
 ----------------------------------------------
 
 Names, structures, protocols and assets that originate in Apex Legends are
 the property of Respawn Entertainment and Electronic Arts. None of it is
-licensed to you by us, and the AGPL grant in section 1 does not extend to it.
+licensed to you by us.
 
 This project is unaffiliated with, and not endorsed by, Respawn
 Entertainment or Electronic Arts.
 
 
-4. THIRD-PARTY
+3. THIRD-PARTY
 --------------
 
 Vendored source this tree compiles is listed in

@@ -14,9 +14,9 @@ Agent and contributor notes live in `CLAUDE.md`.
 The shipping branch of the public tree is `s21-unify`. `main` and
 `S16-S21-MERGE` are upstream credit.
 
-Licence: our additions are AGPL-3.0 (see `LICENSE.txt` and `NOTICE`). Valve
-Source SDK terms stay in `license/`. This project is unaffiliated with, and
-not endorsed by, Respawn Entertainment or Electronic Arts.
+Valve Source SDK terms stay in `license/`. See `NOTICE`. This project is
+unaffiliated with, and not endorsed by, Respawn Entertainment or
+Electronic Arts.
 
 ## Building
 R5sdk uses the CMake project generation and build tools. For more information, visit [CMake](https://cmake.org/).<br />
