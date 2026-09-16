@@ -393,6 +393,63 @@ static bool ModScript_AppendDiskFile(char* dst, size_t* pUsed, const size_t cap,
 	return true;
 }
 
+static constexpr size_t kModScriptNameCap = 128;
+
+static bool ModScript_TokenLooksLikeScript(const char* tok, const size_t n)
+{
+	if (!tok || n < 4)
+		return false;
+	if (n >= 4 && _strnicmp(tok + n - 4, ".nut", 4) == 0)
+		return true;
+	if (n >= 5 && _strnicmp(tok + n - 5, ".gnut", 5) == 0)
+		return true;
+	if (n >= 5 && _strnicmp(tok + n - 5, ".rson", 5) == 0)
+		return true;
+	return false;
+}
+
+static bool ModScript_SplicedHasOverlongName(const char* buf, const size_t used)
+{
+	if (!buf)
+		return false;
+
+	const char* p = buf;
+	const char* const end = buf + used;
+	while (p < end)
+	{
+		while (p < end && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n'
+			|| *p == ',' || *p == '[' || *p == ']' || *p == '{' || *p == '}'))
+			++p;
+		if (p >= end)
+			break;
+
+		const char* tok = p;
+		size_t n = 0;
+		if (*p == '"' || *p == '\'')
+		{
+			const char q = *p++;
+			tok = p;
+			while (p < end && *p != q && *p != '\n')
+				++p;
+			n = static_cast<size_t>(p - tok);
+			if (p < end && *p == q)
+				++p;
+		}
+		else
+		{
+			while (p < end && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n'
+				&& *p != ',' && *p != '[' && *p != ']' && *p != '{' && *p != '}')
+				++p;
+			n = static_cast<size_t>(p - tok);
+		}
+
+		if (ModScript_TokenLooksLikeScript(tok, n) && n > kModScriptNameCap)
+			return true;
+	}
+
+	return false;
+}
+
 static char* ModScript_BuildSpliced(const char* requestPath, size_t* outSize)
 {
 	if (outSize)
@@ -477,6 +534,15 @@ static char* ModScript_BuildSpliced(const char* requestPath, size_t* outSize)
 
 	if (nSpliced == 0)
 	{
+		free(buf);
+		return nullptr;
+	}
+
+	if (ModScript_SplicedHasOverlongName(buf, used))
+	{
+		Warning(eDLL_T::MODSYSTEM,
+			"[MOD-SCRIPT] Scripts name longer than %zu -- using unspliced compile list\n",
+			kModScriptNameCap);
 		free(buf);
 		return nullptr;
 	}
@@ -1000,6 +1066,18 @@ static bool __fastcall Hook_FS_AsyncReadScript_S21(
 		&& FSRes_FillBufferFromModScripts_S21(path, outBuf))
 	{
 		return true;
+	}
+
+	if (path && FSRes_IsScriptSourcePath_S21(path) && !ModPath_IsSafeRel(path))
+	{
+		static volatile LONG s_nUnsafeScript;
+		const LONG n = InterlockedIncrement(&s_nUnsafeScript);
+		if (n <= 4 || (n % 128) == 0)
+		{
+			Warning(eDLL_T::MODSYSTEM, "[MOD-SCRIPT] refused unsafe script path '%s'\n",
+				path);
+		}
+		return false;
 	}
 
 	return v_FS_AsyncReadScript_S21(iface, path, flags, outBuf);

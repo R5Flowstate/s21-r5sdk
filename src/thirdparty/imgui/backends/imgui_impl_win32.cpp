@@ -87,6 +87,10 @@
 #include <tchar.h>
 #include <dwmapi.h>
 
+#ifndef LOAD_LIBRARY_SEARCH_SYSTEM32
+#define LOAD_LIBRARY_SEARCH_SYSTEM32 0x00000800
+#endif
+
 // Using XInput for gamepad (will load DLL dynamically)
 #ifndef IMGUI_IMPL_WIN32_DISABLE_GAMEPAD
 #include <xinput.h>
@@ -193,13 +197,33 @@ static bool ImGui_ImplWin32_InitEx(void* hwnd, bool platform_has_own_dc)
         "xinput1_1.dll"    // DirectX SDK
     };
     for (int n = 0; n < IM_ARRAYSIZE(xinput_dll_names); n++)
-        if (HMODULE dll = ::LoadLibraryA(xinput_dll_names[n]))
+    {
+        HMODULE dll = ::LoadLibraryExA(xinput_dll_names[n], nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (!dll)
+        {
+            char sysDir[MAX_PATH] = {};
+            if (::GetSystemDirectoryA(sysDir, MAX_PATH) && sysDir[0])
+            {
+                char absPath[MAX_PATH] = {};
+                const int dirLen = lstrlenA(sysDir);
+                const int nameLen = lstrlenA(xinput_dll_names[n]);
+                if (dirLen > 0 && nameLen > 0 && dirLen + 1 + nameLen < MAX_PATH)
+                {
+                    lstrcpynA(absPath, sysDir, MAX_PATH);
+                    absPath[dirLen] = '\\';
+                    lstrcpynA(absPath + dirLen + 1, xinput_dll_names[n], MAX_PATH - dirLen - 1);
+                    dll = ::LoadLibraryExA(absPath, nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+                }
+            }
+        }
+        if (dll)
         {
             bd->XInputDLL = dll;
             bd->XInputGetCapabilities = (PFN_XInputGetCapabilities)::GetProcAddress(dll, "XInputGetCapabilities");
             bd->XInputGetState = (PFN_XInputGetState)::GetProcAddress(dll, "XInputGetState");
             break;
         }
+    }
 #endif // IMGUI_IMPL_WIN32_DISABLE_GAMEPAD
 
     return true;

@@ -22,6 +22,7 @@
 #include "game/shared/dt_extend.h"
 #include "game/shared/player_extend_sidecar.h"
 #include "game/shared/sdk_entity_state.h"
+#include "game/server/zipline_disconnect.h"
 #include "game/shared/edict_dirty.h"
 #include "game/shared/mantle_boost_curves.h"
 #include "game/shared/scriptremotefunctions_shared.h"
@@ -619,11 +620,18 @@ static void MantleBoost_ApplyBoost(void* const ctx, CPlayer* const player,
 
 static char Hook_CGameMovement_TraversalMove(void* ctx, char justStarted)
 {
+	CPlayer* player = nullptr;
+	if (ctx)
+	{
+		player = *reinterpret_cast<CPlayer**>(
+			reinterpret_cast<uintptr_t>(ctx) + MB_CTX_OFF_PLAYER);
+		if (player && justStarted)
+			ZipDisc_OnMantle(player);
+	}
+
 	if (!mantle_boost_enabled.GetBool() || !ctx)
 		return v_CGameMovement__TraversalMove(ctx, justStarted);
 
-	CPlayer* const player = *reinterpret_cast<CPlayer**>(
-		reinterpret_cast<uintptr_t>(ctx) + MB_CTX_OFF_PLAYER);
 	if (!player)
 		return v_CGameMovement__TraversalMove(ctx, justStarted);
 

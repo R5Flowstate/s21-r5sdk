@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: Client aim-assist magnet / pull / sniper-scope miss.
+// Purpose: Client aim-assist magnet / pull / sniper-scope miss / look PLV.
 //
 //=============================================================================//
 #ifndef CLIENT_AIMASSIST_H

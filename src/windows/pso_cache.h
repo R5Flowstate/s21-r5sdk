@@ -1,10 +1,6 @@
 //=============================================================================//
 //
-// Purpose: On-demand serialization of the S21 DX12 pipeline library.
-//
-// The engine only ever writes psoCache.pso from its render-device shutdown job,
-// so a killed or crashed client throws away every pipeline it compiled that
-// session. This flushes the same library mid-run.
+// Purpose: Mid-run serialize of the S21 DX12 pipeline library to psoCache.pso.
 //
 //=============================================================================//
 #ifndef PSO_CACHE_S21_H
@@ -37,7 +33,7 @@ static constexpr uint32_t kPsoCacheMagic = 0x0011000F;
 // Apex_r5f retarget. nWhich: 0 = local, 1 = profile, 2 = savegames.
 inline bool(__fastcall* v_PsoCache_GetUserDir)(char* pszBuf, int nSize, int nWhich) = nullptr;
 
-// Engine WriteWholeFile: unlinks, reopens "wb", fwrites in 1 MiB chunks.
+// Engine WriteWholeFile. Hooked so psoCache.pso never takes the .deleteme path.
 inline bool(__fastcall* v_PsoCache_WriteFile)(const char* pszPath, uint8_t nLogChannel, const void* pData, size_t nSize) = nullptr;
 
 inline PsoCacheCtx_t* g_pPsoCacheCtx = nullptr;
@@ -50,9 +46,7 @@ inline void* (__fastcall* v_PsoCreateGraphics)(void* pA1, void* pCtx) = nullptr;
 // Compute create + library Load/Store.
 inline void* (__fastcall* v_PsoCreateCompute)(void* pThis) = nullptr;
 
-// Per-frame auto-flush tick.
 void PsoCache_Frame(void);
-
 bool PsoCache_Flush(const bool bForce);
 void PsoCache_PrintStatus(void);
 

@@ -480,8 +480,23 @@ void CBanSystem::LoadList(void)
 		return;
 	}
 
+	static constexpr ssize_t kMaxBanlistBytes = 1 << 20;
+	if (nFileSize > kMaxBanlistBytes)
+	{
+		Warning(eDLL_T::SERVER, "[BANSYS] banlist.json over cap (%zd bytes), skipping\n",
+			nFileSize);
+		FileSystem()->Close(pFile);
+		return;
+	}
+
 	const u64 nBufSize = FileSystem()->GetOptimalReadSize(pFile, nFileSize+2);
 	char* const pBuf = (char*)FileSystem()->AllocOptimalReadBuffer(pFile, nBufSize, 0);
+	if (!pBuf)
+	{
+		Warning(eDLL_T::SERVER, "[BANSYS] banlist.json alloc failed, skipping\n");
+		FileSystem()->Close(pFile);
+		return;
+	}
 
 	const ssize_t nRead = FileSystem()->ReadEx(pBuf, nBufSize, nFileSize, pFile);
 	FileSystem()->Close(pFile);

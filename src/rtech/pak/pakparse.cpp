@@ -1144,6 +1144,8 @@ static bool Pak_StartLoadingPak(PakLoadedInfo_s* const loadedInfo)
     }
 
     Pak_CopyPagesToSlabs(pakFile, loadedInfo, &slabDesc);
+    if (loadedInfo->status == PakStatus_e::PAK_STATUS_ERROR)
+        return false;
 
     const PakFileHeader_s& pakHdr = pakFile->GetHeader();
 
@@ -1373,7 +1375,6 @@ static bool Pak_SetupBuffersAndLoad(const PakHandle_t pakId)
     }
 
     loadedInfo->fileTime = pakHdr.fileTime;
-    loadedInfo->assetCount = pakHdr.assetCount;
 
     uint32_t assetCount = pakHdr.assetCount;
     const uint16_t patchIndex = pakHdr.patchIndex;
@@ -1381,7 +1382,22 @@ static bool Pak_SetupBuffersAndLoad(const PakHandle_t pakId)
     const uint16_t memSlabCount = pakHdr.memSlabCount;
     const __int64 v32 = *(unsigned int*)&pakHdr.unk2[4];
 
+    if (assetCount > PAK_MAX_LOADED_ASSETS)
+    {
+        Warning(eDLL_T::RTECH, "[PAK-PARSE] assetCount %u exceeds %u\n",
+            assetCount, PAK_MAX_LOADED_ASSETS);
+        loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+        return false;
+    }
+    loadedInfo->assetCount = assetCount;
+
     loadedInfo->assetGuids = (PakGuid_t*)loadedInfo->allocator->Alloc(sizeof(PakGuid_t) * assetCount, 8);
+    if (assetCount && !loadedInfo->assetGuids)
+    {
+        Warning(eDLL_T::RTECH, "[PAK-PARSE] assetGuids alloc failed (count %u)\n", assetCount);
+        loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+        return false;
+    }
 
     const size_t streamingFilesBufSize = pakHdr.streamingFilesBufSize[STREAMING_SET_OPTIONAL] + pakHdr.streamingFilesBufSize[STREAMING_SET_MANDATORY];
     const size_t memPagePointersBufSize = 8 * memPageCount;
@@ -2670,6 +2686,8 @@ static bool Pak_StartLoadingPak(PakLoadedInfo_s* const loadedInfo)
     }
 
     Pak_CopyPagesToSlabs(pakFile, loadedInfo, &slabDesc);
+    if (loadedInfo->status == PakStatus_e::PAK_STATUS_ERROR)
+        return false;
 
     const PakFileHeader_s& pakHdr = pakFile->GetHeader();
 
@@ -2840,7 +2858,6 @@ static bool Pak_SetupBuffersAndLoad(const PakHandle_t pakId)
     }
 
     loadedInfo->fileTime = pakHdr.fileTime;
-    loadedInfo->assetCount = pakHdr.assetCount;
 
     uint32_t assetCount = pakHdr.assetCount;
     const uint16_t patchIndex = pakHdr.patchIndex;
@@ -2848,7 +2865,22 @@ static bool Pak_SetupBuffersAndLoad(const PakHandle_t pakId)
     const uint16_t memSlabCount = pakHdr.memSlabCount;
     const __int64 v32 = *(unsigned int*)&pakHdr.unk2[4];
 
+    if (assetCount > PAK_MAX_LOADED_ASSETS)
+    {
+        Warning(eDLL_T::RTECH, "[PAK-PARSE] assetCount %u exceeds %u\n",
+            assetCount, PAK_MAX_LOADED_ASSETS);
+        loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+        return false;
+    }
+    loadedInfo->assetCount = assetCount;
+
     loadedInfo->assetGuids = (PakGuid_t*)loadedInfo->allocator->Alloc(sizeof(PakGuid_t) * assetCount, 8);
+    if (assetCount && !loadedInfo->assetGuids)
+    {
+        Warning(eDLL_T::RTECH, "[PAK-PARSE] assetGuids alloc failed (count %u)\n", assetCount);
+        loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+        return false;
+    }
 
     const size_t streamingFilesBufSize = pakHdr.streamingFilesBufSize[STREAMING_SET_OPTIONAL] + pakHdr.streamingFilesBufSize[STREAMING_SET_MANDATORY];
     const size_t memPagePointersBufSize = 8 * memPageCount;

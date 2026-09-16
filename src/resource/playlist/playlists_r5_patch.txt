@@ -194,6 +194,11 @@ playlists
 				aimassist_adspull_disabled                     1
 				aimassist_magnet_pc                            0.40
 				aimassist_magnet                               0.60
+				aimassist_filter_plv_enabled                   1
+				aimassist_filter_plv_aim_enabled               1
+				aimassist_filter_plv_aim_coefficient           0.05
+				aimassist_filter_plv_threshold_aim_enabled     1
+				aimassist_filter_plv_threshold_aim_coefficient 0.05
 
 
 				///////////////////////////////////////////////////////////////////////////////////

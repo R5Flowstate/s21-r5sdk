@@ -10,6 +10,7 @@
 
 #include "paktools.h"
 #include "pakdecode.h"
+#include <cstring>
 
 //-----------------------------------------------------------------------------
 // lookup table for default pak decoder
@@ -243,6 +244,34 @@ static size_t Pak_RTechDecoderInit(PakDecoder_s* const decoder, const uint8_t* c
 	return decoder->decompSize;
 }
 
+static void Pak_RingCopy(uint8_t* const dstBase, uint64_t dstPos, const uint64_t dstMask,
+	const uint8_t* const srcBase, uint64_t srcPos, const uint64_t srcMask, unsigned n)
+{
+	if (!dstBase || !srcBase || !n)
+		return;
+	if (dstMask == ~0ull || srcMask == ~0ull)
+	{
+		memcpy(dstBase + dstPos, srcBase + srcPos, n);
+		return;
+	}
+	while (n)
+	{
+		const uint64_t dOff = dstPos & dstMask;
+		const uint64_t sOff = srcPos & srcMask;
+		const uint64_t dRoom = (dstMask + 1) - dOff;
+		const uint64_t sRoom = (srcMask + 1) - sOff;
+		unsigned chunk = n;
+		if (chunk > dRoom)
+			chunk = static_cast<unsigned>(dRoom);
+		if (chunk > sRoom)
+			chunk = static_cast<unsigned>(sRoom);
+		memcpy(dstBase + dOff, srcBase + sOff, chunk);
+		dstPos += chunk;
+		srcPos += chunk;
+		n -= chunk;
+	}
+}
+
 //-----------------------------------------------------------------------------
 // decodes the RTech data stream up to available buffer or data
 //-----------------------------------------------------------------------------
@@ -311,8 +340,6 @@ static bool Pak_RTechStreamDecode(PakDecoder_s* const decoder, const size_t inLe
 	unsigned __int8 v64; // cl
 	uint64_t v65; // rax
 	unsigned int v66; // r14d
-	unsigned int j; // ecx
-	__int64 v68; // rax
 	uint64_t v69; // rcx
 	uint8_t* v70; // [rsp+0h] [rbp-58h]
 	uint32_t v71; // [rsp+60h] [rbp+8h]
@@ -382,34 +409,15 @@ static bool Pak_RTechStreamDecode(PakDecoder_s* const decoder, const size_t inLe
 				currentBit += v64 + 3;
 				v19 = v62 >> v64;
 				v66 = v63 + (v62 & ((1 << v64) - 1)) + v56;
-				for (j = v66 >> 3; j; --j)
-				{
-					v68 = *(_QWORD*)v57;
-					v57 += 8;
-					*(_QWORD*)v58 = v68;
-					v58 += 8;
-				}
-				if ((v66 & 4) != 0)
-				{
-					*(_DWORD*)v58 = *(_DWORD*)v57;
-					v58 += 4;
-					v57 += 4;
-				}
-				if ((v66 & 2) != 0)
-				{
-					*(_WORD*)v58 = *(_WORD*)v57;
-					v58 += 2;
-					v57 += 2;
-				}
-				if ((v66 & 1) != 0)
-					*v58 = *v57;
+				Pak_RingCopy(outputBuf, outBufBytePos, decoder->outputMask,
+					inputBuf, inBufBytePos, decoder->inputMask, v66);
 				inBufBytePos += v66;
 				outBufBytePos += v66;
 			}
 			else
 			{
-				*(_QWORD*)v58 = *(_QWORD*)v57;
-				*((_QWORD*)v58 + 1) = *((_QWORD*)v57 + 1);
+				Pak_RingCopy(outputBuf, outBufBytePos, decoder->outputMask,
+					inputBuf, inBufBytePos, decoder->inputMask, v56);
 				inBufBytePos += v56;
 				outBufBytePos += v56;
 			}

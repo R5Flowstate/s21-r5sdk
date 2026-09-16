@@ -20,8 +20,12 @@
 #include "rtech/stryder/stryder.h"
 #include "engine/sys_dll2.h"
 #include "engine/cmodel_bsp.h"
+#include <new>
 
 static const char* s_LastFileLoadingFrom = "unknown"; // just needed for error messages
+static constexpr ssize_t kMaxKvDiskBytes = 64 * 1024 * 1024;
+static constexpr int kKvIncludeDepthMax = 8;
+static int s_kvIncludeDepth = 0;
 CExpressionEvaluator g_ExpressionEvaluator;
 
 #define INTERNALWRITE( pData, nLen ) InternalWrite( pFileSystem, pHandle, pBuf, pData, nLen )
@@ -1889,8 +1893,23 @@ bool KeyValues::LoadFromFile(IBaseFileSystem* filesystem, const char* resourceNa
 		return false;
 	}
 
+	if (fileSize > kMaxKvDiskBytes)
+	{
+		Warning(eDLL_T::COMMON, "[KV-DISK] '%s' over cap (%zd bytes) -- skipped\n",
+			resourceName, fileSize);
+		filesystem->Close(f);
+		return false;
+	}
+
 	// +2 for the double null terminator used to detect a Unicode file.
-	char* const pBuf = new char[fileSize + 2];
+	char* const pBuf = new (std::nothrow) char[fileSize + 2];
+	if (!pBuf)
+	{
+		Warning(eDLL_T::COMMON, "[KV-DISK] '%s' alloc failed (%zd bytes) -- skipped\n",
+			resourceName, fileSize);
+		filesystem->Close(f);
+		return false;
+	}
 
 	const ssize_t nRead = filesystem->Read(pBuf, fileSize, f);
 	filesystem->Close(f);
@@ -1946,6 +1965,15 @@ void KeyValues::ParseIncludedKeys(char const* resourceName, const char* filetoin
 		return;
 	}
 
+	if (s_kvIncludeDepth >= kKvIncludeDepthMax)
+	{
+		Warning(eDLL_T::COMMON, "[KV-DISK] include depth over %d -- skipped '%s'\n",
+			kKvIncludeDepthMax, filetoinclude);
+		return;
+	}
+
+	++s_kvIncludeDepth;
+
 	// Get relative subdirectory
 	char fullpath[512];
 	V_strncpy(fullpath, resourceName, sizeof(fullpath));
@@ -1990,6 +2018,7 @@ void KeyValues::ParseIncludedKeys(char const* resourceName, const char* filetoin
 		delete newKV;
 	}
 
+	--s_kvIncludeDepth;
 	// s_CurrentFileSymbol = save;
 }
 
@@ -2216,8 +2245,12 @@ KeyValues* KeyValues::MakeCopy(void) const
 #include "rtech/stryder/stryder.h"
 #include "engine/sys_dll2.h"
 #include "engine/cmodel_bsp.h"
+#include <new>
 
 static const char* s_LastFileLoadingFrom = "unknown"; // just needed for error messages
+static constexpr ssize_t kMaxKvDiskBytes = 64 * 1024 * 1024;
+static constexpr int kKvIncludeDepthMax = 8;
+static int s_kvIncludeDepth = 0;
 CExpressionEvaluator g_ExpressionEvaluator;
 
 #define INTERNALWRITE( pData, nLen ) InternalWrite( pFileSystem, pHandle, pBuf, pData, nLen )
@@ -4082,8 +4115,23 @@ bool KeyValues::LoadFromFile(IBaseFileSystem* filesystem, const char* resourceNa
 		return false;
 	}
 
+	if (fileSize > kMaxKvDiskBytes)
+	{
+		Warning(eDLL_T::COMMON, "[KV-DISK] '%s' over cap (%zd bytes) -- skipped\n",
+			resourceName, fileSize);
+		filesystem->Close(f);
+		return false;
+	}
+
 	const uint64_t bufSize = ((IFileSystem*)filesystem)->GetOptimalReadSize(f, fileSize+2);
 	char* const pBuf = (char*)((IFileSystem*)filesystem)->AllocOptimalReadBuffer(f, bufSize, 0);
+	if (!pBuf)
+	{
+		Warning(eDLL_T::COMMON, "[KV-DISK] '%s' alloc failed (%zd bytes) -- skipped\n",
+			resourceName, fileSize);
+		filesystem->Close(f);
+		return false;
+	}
 
 	const ssize_t nRead = ((IFileSystem*)filesystem)->ReadEx(pBuf, bufSize, fileSize, f);
 	filesystem->Close(f);
@@ -4139,6 +4187,15 @@ void KeyValues::ParseIncludedKeys(char const* resourceName, const char* filetoin
 		return;
 	}
 
+	if (s_kvIncludeDepth >= kKvIncludeDepthMax)
+	{
+		Warning(eDLL_T::COMMON, "[KV-DISK] include depth over %d -- skipped '%s'\n",
+			kKvIncludeDepthMax, filetoinclude);
+		return;
+	}
+
+	++s_kvIncludeDepth;
+
 	// Get relative subdirectory
 	char fullpath[512];
 	V_strncpy(fullpath, resourceName, sizeof(fullpath));
@@ -4183,6 +4240,7 @@ void KeyValues::ParseIncludedKeys(char const* resourceName, const char* filetoin
 		delete newKV;
 	}
 
+	--s_kvIncludeDepth;
 	// s_CurrentFileSymbol = save;
 }
 

@@ -3679,6 +3679,24 @@ static char __fastcall BaseEntityKeyValueDedi_Hook(uintptr_t ent,
 static char __fastcall ZiplineKeyValueDedi_Hook(uintptr_t ent,
 	const char* key, const char* value)
 {
+	if (key && Ziprail_StrStartsWith(key, "_zipline_rest_point_"))
+	{
+		const char* const suffix = key + strlen("_zipline_rest_point_");
+		const int index = Ziprail_ParseInt(suffix);
+		if (index < 0 || index >= kZiprailMaxRestPoints)
+		{
+			static volatile LONG s_nRestRefuse;
+			const LONG n = InterlockedIncrement(&s_nRestRefuse);
+			if (n <= 4 || (n % 128) == 0)
+			{
+				Warning(eDLL_T::SERVER,
+					"[ZIPRAIL-DEDI] refusing rest-point key '%s' index %d\n",
+					key, index);
+			}
+			return 1;
+		}
+	}
+
 	// Ziprail-only observer -- not attached when parked.
 	if (ent && s_ziplineVtable.load(std::memory_order_relaxed) == 0)
 	{

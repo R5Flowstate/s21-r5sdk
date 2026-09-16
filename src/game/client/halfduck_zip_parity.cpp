@@ -11,6 +11,7 @@
 #include "tier1/cvar.h"
 #include "engine/client/net_bridge_internal.h"
 #include "game/client/halfduck_zip_parity.h"
+#include "game/client/zipline_disconnect.h"
 
 //-----------------------------------------------------------------------------
 // Raw layout constants -- read off this engine's own Duck.
@@ -475,6 +476,9 @@ static double __fastcall Hook_C_GameMovement_Duck(void* ctx)
 	post.bHalf = *reinterpret_cast<const bool*>(player + HD_PLAYER_OFF_DOINGHALFDUCK);
 
 	HalfDuck_FsmTraceEmit(player, pre, post, bZiplining, nZipGrace);
+
+	const bool bZipNow = v_C_Player__Zipline_IsZiplining(player);
+	ZipDisc_OnCommand(player, post.nGroundEnt != -1, bZipNow);
 
 	return flResult;
 }

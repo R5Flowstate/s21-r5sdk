@@ -11,6 +11,7 @@
 #include "tier1/cvar.h"
 #include "halfduck_zip_parity.h"
 #include "game/server/zipline_cooldown.h"
+#include "game/server/zipline_disconnect.h"
 #include "game/shared/dt_extend.h"
 #include "game/shared/edict_dirty.h"
 
@@ -352,8 +353,9 @@ static double __fastcall Hook_CGameMovement_Duck(void* ctx)
 	}
 
 	// Ground state every command: remount ladder clears on landing.
-	ZiplineCooldown_OnGroundState(player, post.nGroundEnt != -1,
-		v_CPlayer__Zipline_IsZiplining(player));
+	const bool bZipNow = v_CPlayer__Zipline_IsZiplining(player);
+	ZiplineCooldown_OnGroundState(player, post.nGroundEnt != -1, bZipNow);
+	ZipDisc_OnCommand(player, post.nGroundEnt != -1, bZipNow);
 
 	const int nDuckState = post.nDs;
 

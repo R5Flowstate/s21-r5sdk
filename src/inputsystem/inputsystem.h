@@ -171,6 +171,7 @@ extern bool(**g_fnSyncRTWithIn)(void); // Belongs to an array of functions, see 
 
 inline void(*v_ApplyRawMouseAccum)(int64_t timestamp, void* rawInputRecords, int64_t count);
 inline bool(*v_CInput_ControllerModeActive)(void* pInput) = nullptr;
+inline void(*v_IN_WeaponCycleDown)(void* args) = nullptr;
 
 ///////////////////////////////////////////////////////////////////////////////
 // WM_INPUT mouse-look is independent of CInputSystem::m_bEnabled; drop deltas while ImGui is up.
@@ -190,13 +191,14 @@ class VRawInputAccum : public IDetour
 };
 ///////////////////////////////////////////////////////////////////////////////
 
-// +weaponCycle (MWHEEL) hold-swaps to melee while ControllerModeActive.
-// Force the KBM cycle path for the duration of a +weaponCycle press.
+// Mouse-wheel +weaponCycle hold-swaps to melee while ControllerModeActive.
+// Force the KBM cycle path for that source only; gamepad Y stays native.
 class VWeapCycleKbm : public IDetour
 {
 	virtual void GetAdr(void) const
 	{
 		LogFunAdr("CInput::ControllerModeActive", v_CInput_ControllerModeActive);
+		LogFunAdr("IN_WeaponCycleDown", v_IN_WeaponCycleDown);
 	}
 	virtual void GetFun(void) const;
 	virtual void GetVar(void) const { }

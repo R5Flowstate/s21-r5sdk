@@ -184,6 +184,13 @@ static int __fastcall FS_OpenAsyncFile_S21(const char* const filePath, const int
             v_FS_OpenAsyncFile_S21, &guarded))
         return guarded;
 
+    if (filePath && strlen(filePath) >= MAX_PATH)
+    {
+        Warning(eDLL_T::RTECH, "[MOD-ASYNC] path longer than %d -- skipped native open\n",
+            MAX_PATH);
+        return FS_ASYNC_FILE_INVALID;
+    }
+
     const int native = v_FS_OpenAsyncFile_S21(filePath, logChannel, fileSizeOut, flags);
     if (native != FS_ASYNC_FILE_INVALID)
         return native;

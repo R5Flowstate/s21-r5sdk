@@ -702,7 +702,8 @@ static int PredDiag_CollectDiffNames(void* pEntity, unsigned int nCmd, char* out
 				c.originF = true;
 			else if (!strcmp(name, "m_vecVelocity") || !strcmp(name, "m_vecAbsVelocity"))
 				c.velF = true;
-			else if (strstr(name, "ipline") || strstr(name, "ziplineViewOffset"))
+			else if (strstr(name, "ipline") || strstr(name, "ziplineViewOffset")
+				|| !strcmp(name, "m_contextAction"))
 				c.zipline = true;
 			else if (strstr(name, "Punch") || strstr(name, "stepSmoothing") ||
 				strstr(name, "localGravityRotation") || strstr(name, "viewConeAngle"))
@@ -736,7 +737,7 @@ static int PredDiag_CollectDiffNames(void* pEntity, unsigned int nCmd, char* out
 			}
 		}
 
-		if (nDiff <= 8)
+		if (nDiff <= 16)
 		{
 			char szPair[96];
 			PredDiag_FormatPair(type, p, s, szPair, sizeof(szPair));

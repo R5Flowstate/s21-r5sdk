@@ -8,6 +8,7 @@
 #include "tier1/cvar.h"
 #include "engine/client/net_bridge_internal.h"
 #include "game/client/mantle_boost.h"
+#include "game/client/zipline_disconnect.h"
 #include "game/client/mantle_boost_rui.h"   // MantleBoostCurveDump_Think
 #include "game/client/trigger_cannon.h"
 #include "game/shared/mantle_boost_curves.h"
@@ -1087,6 +1088,15 @@ static char __fastcall Hook_AirMove_TapStrafe(void* ctxRaw)
 static char __fastcall Hook_TraversalMove(void* ctxRaw, char justStarted)
 {
 	const uintptr_t ctx = reinterpret_cast<uintptr_t>(ctxRaw);
+
+	if (justStarted && ctx)
+	{
+		const uintptr_t pDiscPlayer = *reinterpret_cast<const uintptr_t*>(ctx + 8);
+		const uintptr_t pFirstPred = NetObs_Sym(NetObsSym_t::IsFirstTimePredicted);
+		if (pDiscPlayer && pFirstPred
+			&& *reinterpret_cast<const unsigned char*>(pFirstPred) != 0)
+			ZipDisc_OnMantle(reinterpret_cast<void*>(pDiscPlayer));
+	}
 
 	if (!mantle_boost_enabled.GetBool())
 	{

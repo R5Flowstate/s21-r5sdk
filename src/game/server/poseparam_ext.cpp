@@ -545,7 +545,20 @@ static float PoseExt_PlusMinus90ToControl(const float degrees)
 //-----------------------------------------------------------------------------
 static float __fastcall Hook_NativeSetPoseParameter(void* self, void* studio, int idx, float value)
 {
-	if (!self || idx < kNativePoseSlots || idx >= kWirePoseSlots || !studio)
+	if (idx >= kWirePoseSlots)
+	{
+		static volatile LONG s_nIdxRefuse;
+		const LONG n = InterlockedIncrement(&s_nIdxRefuse);
+		if (n <= 4 || (n % 128) == 0)
+		{
+			Warning(eDLL_T::SERVER,
+				"[POSE-EXT] native SetPoseParameter idx=%d >= wire slots -- refused, stock not called\n",
+				idx);
+		}
+		return value;
+	}
+
+	if (!self || idx < kNativePoseSlots || !studio)
 	{
 		if (v_NativeSetPoseParameter)
 			return v_NativeSetPoseParameter(self, studio, idx, value);

@@ -9,6 +9,7 @@
 #include "paktools.h"
 #include "pakencode.h"
 #include "engine/client/net_bridge_addrs.h"
+#include <new>
 
 //-----------------------------------------------------------------------------
 // determines whether encoding had failed
@@ -106,15 +107,22 @@ bool Pak_EncodePakFile(const char* const inPakFile, const char* const outPakFile
 	const size_t fileSize = inPakStream.GetSize();
 
 	// file appears truncated
-	if (fileSize <= sizeof(PakFileHeader_s))
+	if (fileSize <= sizeof(PakFileHeader_s) || fileSize > (2ull << 30))
 	{
-		Error(eDLL_T::RTECH, NO_ERROR, "%s: pak '%s' appears truncated!\n",
-			__FUNCTION__, inPakFile);
-
+		Error(eDLL_T::RTECH, NO_ERROR,
+			"%s: [PAK-ENCODE] pak '%s' size %zu rejected\n",
+			__FUNCTION__, inPakFile, fileSize);
 		return false;
 	}
 
-	std::unique_ptr<uint8_t[]> inPakBufContainer(new uint8_t[fileSize]);
+	std::unique_ptr<uint8_t[]> inPakBufContainer(new (std::nothrow) uint8_t[fileSize]);
+	if (!inPakBufContainer)
+	{
+		Error(eDLL_T::RTECH, NO_ERROR,
+			"%s: [PAK-ENCODE] pak '%s' input alloc failed (%zu)\n",
+			__FUNCTION__, inPakFile, fileSize);
+		return false;
+	}
 	uint8_t* const inPakBuf = inPakBufContainer.get();
 
 	inPakStream.Read(inPakBuf, fileSize);
@@ -155,8 +163,22 @@ bool Pak_EncodePakFile(const char* const inPakFile, const char* const outPakFile
 	}
 
 	const size_t outBufSize = inHeader->decompressedSize;
+	if (outBufSize <= sizeof(PakFileHeader_s) || outBufSize < fileSize || outBufSize > (2ull << 30))
+	{
+		Error(eDLL_T::RTECH, NO_ERROR,
+			"%s: [PAK-ENCODE] pak '%s' decompressedSize %zu rejected (fileSize %zu)\n",
+			__FUNCTION__, inPakFile, outBufSize, fileSize);
+		return false;
+	}
 
-	std::unique_ptr<uint8_t[]> outPakBufContainer(new uint8_t[outBufSize]);
+	std::unique_ptr<uint8_t[]> outPakBufContainer(new (std::nothrow) uint8_t[outBufSize]);
+	if (!outPakBufContainer)
+	{
+		Error(eDLL_T::RTECH, NO_ERROR,
+			"%s: [PAK-ENCODE] pak '%s' output alloc failed (%zu)\n",
+			__FUNCTION__, inPakFile, outBufSize);
+		return false;
+	}
 	uint8_t* const outPakBuf = outPakBufContainer.get();
 
 	PakFileHeader_s* const outHeader = reinterpret_cast<PakFileHeader_s* const>(outPakBuf);
@@ -317,15 +339,22 @@ bool Pak_EncodePakFileOodle(const char* const inPakFile, const char* const outPa
 	const size_t fileSize = inPakStream.GetSize();
 
 	// file appears truncated
-	if (fileSize <= sizeof(PakFileHeader_s))
+	if (fileSize <= sizeof(PakFileHeader_s) || fileSize > (2ull << 30))
 	{
-		Error(eDLL_T::RTECH, NO_ERROR, "%s: pak '%s' appears truncated!\n",
-			__FUNCTION__, inPakFile);
-
+		Error(eDLL_T::RTECH, NO_ERROR,
+			"%s: [PAK-ENCODE] pak '%s' size %zu rejected\n",
+			__FUNCTION__, inPakFile, fileSize);
 		return false;
 	}
 
-	std::unique_ptr<uint8_t[]> inPakBufContainer(new uint8_t[fileSize]);
+	std::unique_ptr<uint8_t[]> inPakBufContainer(new (std::nothrow) uint8_t[fileSize]);
+	if (!inPakBufContainer)
+	{
+		Error(eDLL_T::RTECH, NO_ERROR,
+			"%s: [PAK-ENCODE] pak '%s' input alloc failed (%zu)\n",
+			__FUNCTION__, inPakFile, fileSize);
+		return false;
+	}
 	uint8_t* const inPakBuf = inPakBufContainer.get();
 
 	inPakStream.Read(inPakBuf, fileSize);
@@ -371,7 +400,14 @@ bool Pak_EncodePakFileOodle(const char* const inPakFile, const char* const outPa
 	const uint64_t bodyLen = fileSize - sizeof(PakFileHeader_s);
 	const uint64_t outBufSize = sizeof(PakFileHeader_s) + Pak_OodleCompressBound(bodyLen);
 
-	std::unique_ptr<uint8_t[]> outPakBufContainer(new uint8_t[outBufSize]);
+	std::unique_ptr<uint8_t[]> outPakBufContainer(new (std::nothrow) uint8_t[outBufSize]);
+	if (!outPakBufContainer)
+	{
+		Error(eDLL_T::RTECH, NO_ERROR,
+			"%s: [PAK-ENCODE] pak '%s' output alloc failed (%zu)\n",
+			__FUNCTION__, inPakFile, outBufSize);
+		return false;
+	}
 	uint8_t* const outPakBuf = outPakBufContainer.get();
 
 	PakFileHeader_s* const outHeader = reinterpret_cast<PakFileHeader_s* const>(outPakBuf);
@@ -412,6 +448,7 @@ bool Pak_EncodePakFileOodle(const char* const inPakFile, const char* const outPa
 #include "rtech/ipakfile.h"
 #include "paktools.h"
 #include "pakencode.h"
+#include <new>
 
 //-----------------------------------------------------------------------------
 // determines whether encoding had failed
@@ -509,15 +546,22 @@ bool Pak_EncodePakFile(const char* const inPakFile, const char* const outPakFile
 	const size_t fileSize = inPakStream.GetSize();
 
 	// file appears truncated
-	if (fileSize <= sizeof(PakFileHeader_s))
+	if (fileSize <= sizeof(PakFileHeader_s) || fileSize > (2ull << 30))
 	{
-		Error(eDLL_T::RTECH, NO_ERROR, "%s: pak '%s' appears truncated!\n",
-			__FUNCTION__, inPakFile);
-
+		Error(eDLL_T::RTECH, NO_ERROR,
+			"%s: [PAK-ENCODE] pak '%s' size %zu rejected\n",
+			__FUNCTION__, inPakFile, fileSize);
 		return false;
 	}
 
-	std::unique_ptr<uint8_t[]> inPakBufContainer(new uint8_t[fileSize]);
+	std::unique_ptr<uint8_t[]> inPakBufContainer(new (std::nothrow) uint8_t[fileSize]);
+	if (!inPakBufContainer)
+	{
+		Error(eDLL_T::RTECH, NO_ERROR,
+			"%s: [PAK-ENCODE] pak '%s' input alloc failed (%zu)\n",
+			__FUNCTION__, inPakFile, fileSize);
+		return false;
+	}
 	uint8_t* const inPakBuf = inPakBufContainer.get();
 
 	inPakStream.Read(inPakBuf, fileSize);
@@ -558,8 +602,22 @@ bool Pak_EncodePakFile(const char* const inPakFile, const char* const outPakFile
 	}
 
 	const size_t outBufSize = inHeader->decompressedSize;
+	if (outBufSize <= sizeof(PakFileHeader_s) || outBufSize < fileSize || outBufSize > (2ull << 30))
+	{
+		Error(eDLL_T::RTECH, NO_ERROR,
+			"%s: [PAK-ENCODE] pak '%s' decompressedSize %zu rejected (fileSize %zu)\n",
+			__FUNCTION__, inPakFile, outBufSize, fileSize);
+		return false;
+	}
 
-	std::unique_ptr<uint8_t[]> outPakBufContainer(new uint8_t[outBufSize]);
+	std::unique_ptr<uint8_t[]> outPakBufContainer(new (std::nothrow) uint8_t[outBufSize]);
+	if (!outPakBufContainer)
+	{
+		Error(eDLL_T::RTECH, NO_ERROR,
+			"%s: [PAK-ENCODE] pak '%s' output alloc failed (%zu)\n",
+			__FUNCTION__, inPakFile, outBufSize);
+		return false;
+	}
 	uint8_t* const outPakBuf = outPakBufContainer.get();
 
 	PakFileHeader_s* const outHeader = reinterpret_cast<PakFileHeader_s* const>(outPakBuf);

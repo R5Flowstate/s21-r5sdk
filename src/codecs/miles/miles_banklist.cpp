@@ -235,7 +235,15 @@ static bool MilesBankDisk_LocalizedStreamIsPoison(const char* pszBank)
 	}
 
 	if (bExists && sz.QuadPart > MILES_MSTR_HEADER_ONLY)
-		return false;
+	{
+		if (MilesBankDisk_EnglishStubIsValid(path, nBuildTag))
+			return false;
+
+		Warning(eDLL_T::AUDIO,
+			"[MILES-BANK] %s oversized without valid RTSC header -- refusing custom\n",
+			path);
+		return true;
+	}
 
 	if (bExists && sz.QuadPart == MILES_MSTR_HEADER_ONLY
 		&& MilesBankDisk_EnglishStubIsValid(path, nBuildTag))

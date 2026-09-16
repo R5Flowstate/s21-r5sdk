@@ -505,6 +505,7 @@ void CAI_NetworkManager::LoadNetworkGraph(CAI_NetworkManager* pManager, CUtlBuff
 	else
 	{
 		Error(eDLL_T::SERVER, NO_ERROR, "%s - AI node graph '%s' appears truncated\n", __FUNCTION__, szGraphPath);
+		return;
 	}
 
 	// Recover old buffer position before we call LoadNetworkGraph.

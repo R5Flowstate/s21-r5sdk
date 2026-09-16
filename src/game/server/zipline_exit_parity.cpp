@@ -17,6 +17,8 @@
 #include "engine/server/zipline_validation.h" // ZiprailDedi_GetWireBlock
 #include "trigger_cannon.h" // TriggerPass_MovementTime
 #include "zipline_cooldown.h" // ZiplineCooldown_ShouldRefuseMount / _OnMountGranted
+#include "zipline_disconnect.h"
+#include "game/shared/edict_dirty.h"
 #include <cmath>
 #include <cfloat>
 #include <cstdio>
@@ -34,6 +36,12 @@ static constexpr ptrdiff_t ZE_PLAYER_OFF_NETSTATECHANGED = 26600; // CNetworkVar
 static constexpr ptrdiff_t ZE_PLAYER_OFF_ZIPREVERSE    = 26692; // bool, riding the rope backwards
 // bit 0x02: impulse applied; bit 0x4000004: duck-detach speed clamp when enabled
 static constexpr ptrdiff_t ZE_PLAYER_OFF_PLAYERFLAGS   = 24800;
+static constexpr ptrdiff_t ZE_PLAYER_OFF_CURRENTCOMMAND = 25976; // CUserCmd*
+static constexpr ptrdiff_t ZE_PLAYER_OFF_ZIPWEAP_LATCH = 26608; // byte; S21 MoveStop +12040 twin
+static constexpr ptrdiff_t ZE_PLAYER_OFF_ZIPWEAP_BLOCK = 5902;  // byte; blocks restore when set
+static constexpr ptrdiff_t ZE_PLAYER_OFF_WEAPDISABLED  = 5900;  // byte m_weaponDisabledFlags
+static constexpr ptrdiff_t ZE_PLAYER_OFF_CONTEXTACTION = 6140;  // int; 9 = zip
+static constexpr ptrdiff_t ZE_PLAYER_OFF_FORCESTANCE   = 23212; // int; 1 = forced stand
 static constexpr ptrdiff_t ZE_PLAYER_OFF_JUMPOFFDIR    = 26156; // Vector m_jumpOffImpulseDir
 static constexpr ptrdiff_t ZE_PLAYER_OFF_PHASE_START   = 5556;  // float; gravity-bridge verified
 static constexpr ptrdiff_t ZE_PLAYER_OFF_PHASE_END     = 5560;  // float; gravity-bridge verified
@@ -129,6 +137,8 @@ static char (*v_Zipline_JumpOff)(void* zip, void* player, float* velocity,
 static char (*v_CZipline_HandleUse)(uintptr_t player, void* zipEnt,
 	uintptr_t caller, int nUseType) = nullptr;
 
+static void (*v_Zipline_MoveStop)(void* player) = nullptr;
+
 // Runtime-filled settings-field offset for ziplineSpeed (0xFFFFFFFF until loaded).
 static const uint32_t* g_pZiplineSpeedFieldOffset = nullptr;
 
@@ -211,6 +221,10 @@ static ConVar bridge_zip_rail_find_range("bridge_zip_rail_find_range", "120", FC
 static ConVar bridge_zip_mount_diag("bridge_zip_mount_diag", "0", FCVAR_DEVELOPMENTONLY,
 	"Log the dedicated server's zipline mount attempts (Zipline_Use / Zipline_Find).");
 
+static ConVar bridge_zip_movestop_weap("bridge_zip_movestop_weap", "1", FCVAR_RELEASE,
+	"Arm the zip weapon-restore latch before MoveStop so detach clears "
+	"m_weaponDisabledFlags. 0 = native gate only.");
+
 static ConVar bridge_zip_mount_alpha_seed("bridge_zip_mount_alpha_seed", "1", FCVAR_RELEASE,
 	"Seed the ride alpha from the mount position. The engine leaves the previous "
 	"ride's alpha in place, and its auto-detach gate compares that value to 1.0 "
@@ -253,6 +267,8 @@ static uint64_t s_nRailExitApps = 0;
 static uint64_t s_nRailExitDegenerateWarns = 0;
 static uint64_t s_nZeroSegWarns = 0;
 static uint64_t s_nRailJumpoffApps = 0;
+static uint64_t s_nJumpOffCalls = 0;
+static uint64_t s_nMoveStopCalls = 0;
 static uint64_t s_nLogEvents    = 0;
 static uint64_t s_nMountUseLogs = 0;
 static uint64_t s_nMountFindLogs = 0;
@@ -2149,6 +2165,48 @@ static bool Hook_Zipline_Find(uintptr_t player,
 	return found;
 }
 
+static int ZiplineExit_CmdNumber(void* player)
+{
+	if (!player)
+		return -1;
+	void* const pCmd = *reinterpret_cast<void**>(
+		reinterpret_cast<uint8_t*>(player) + ZE_PLAYER_OFF_CURRENTCOMMAND);
+	if (!pCmd)
+		return -1;
+	return *reinterpret_cast<const int*>(pCmd);
+}
+
+static void ZiplineExit_LogJumpOff(void* zip, void* player, const float* velocity, char nResult)
+{
+	++s_nJumpOffCalls;
+	if (nResult == 0 && s_nJumpOffCalls > 8
+		&& !(bridge_zip_exit_debug.GetBool() && (s_nJumpOffCalls % 32) == 0))
+		return;
+
+	int nType = -1;
+	int nState = -1;
+	unsigned nFlags = 0;
+	if (player)
+	{
+		nState = *reinterpret_cast<const int*>(
+			reinterpret_cast<const uint8_t*>(player) + ZE_PLAYER_OFF_ZIPLINESTATE);
+		nFlags = *reinterpret_cast<const unsigned*>(
+			reinterpret_cast<const uint8_t*>(player) + ZE_PLAYER_OFF_PLAYERFLAGS);
+	}
+	if (zip)
+		nType = *reinterpret_cast<const int*>(
+			reinterpret_cast<const uint8_t*>(zip) + ZE_ZIP_OFF_TYPE);
+
+	const float flVx = velocity ? velocity[0] : 0.0f;
+	const float flVy = velocity ? velocity[1] : 0.0f;
+	const float flVz = velocity ? velocity[2] : 0.0f;
+	Msg(eDLL_T::SERVER,
+		"[ZIP-JUMPOFF] result=%d type=%d flags=0x%x state=%d cmd=%d "
+		"vel=(%.1f %.1f %.1f) player=%p\n",
+		static_cast<int>(nResult), nType, nFlags, nState,
+		ZiplineExit_CmdNumber(player), flVx, flVy, flVz, player);
+}
+
 static char __fastcall Hook_Zipline_JumpOff(void* zip, void* player, float* velocity,
 	const void* eyeAngles, float flForwardMove, float flSideMove)
 {
@@ -2163,21 +2221,18 @@ static char __fastcall Hook_Zipline_JumpOff(void* zip, void* player, float* velo
 	if (!v_Zipline_JumpOff)
 		return 0;
 
-	// Jump-to-mount still has IN_JUMP pressed. Native JumpOff treats that as
-	// detach. JumpOff is only valid while already riding.
-	if (player)
+	static bool s_bFirstCall = false;
+	if (!s_bFirstCall)
 	{
-		const int nState = *reinterpret_cast<const int*>(
-			reinterpret_cast<const uint8_t*>(player) + ZE_PLAYER_OFF_ZIPLINESTATE);
-		const unsigned nHandle = *reinterpret_cast<const unsigned*>(
-			reinterpret_cast<const uint8_t*>(player) + ZE_PLAYER_OFF_ACTIVEZIPLINE);
-		if (nState == 0 || nHandle == 0xFFFFFFFFu
-			|| !ZiplineExit_ResolveHandle(nHandle))
-			return 0;
+		s_bFirstCall = true;
+		Warning(eDLL_T::SERVER, "[ZIP-JUMPOFF] hook live player=%p zip=%p\n",
+			player, zip);
 	}
 
 	const char nResult = v_Zipline_JumpOff(zip, player, velocity, eyeAngles,
 		flForwardMove, flSideMove);
+
+	ZiplineExit_LogJumpOff(zip, player, velocity, nResult);
 
 	if (nResult == 0
 		|| !bridge_zip_exit_parity.GetBool()
@@ -2464,6 +2519,9 @@ static bool Hook_Zipline_Use(uintptr_t player, bool forGrappleZipline)
 
 	// Refusing means not calling the original; the engine reads a false return
 	// as a refused mount.
+	if (ZipDisc_ShouldRefuseMount(reinterpret_cast<void*>(player)))
+		return false;
+
 	if (ZiplineCooldown_ShouldRefuseMount(reinterpret_cast<void*>(player)))
 		return false;
 
@@ -2542,11 +2600,15 @@ static bool Hook_Zipline_Use(uintptr_t player, bool forGrappleZipline)
 	}
 
 	if (result)
+	{
+		ZipDisc_OnMountGranted(reinterpret_cast<void*>(player));
 		ZiplineCooldown_OnMountGranted(reinterpret_cast<void*>(player));
+	}
 	else if (bridge_zip_mount_diag.GetBool())
 		ZiprailDedi_ReportNearestRail(player, "mount refused");
 
-	if (!ZiprailMount_ShouldLog(s_nMountUseLogs))
+	if (!result && !ZiprailMount_ShouldLog(s_nMountUseLogs)
+		&& !bridge_zip_exit_debug.GetBool())
 		return result;
 
 	uint32_t activeAfter = 0xFFFFFFFFu;
@@ -2568,14 +2630,27 @@ static bool Hook_Zipline_Use(uintptr_t player, bool forGrappleZipline)
 			reinterpret_cast<const uint8_t*>(player) + ZE_PLAYER_OFF_ZIPREVERSE)) ? 1 : 0;
 	}
 
+	int nWdf = 0;
+	int nCtx = 0;
+	int nForce = 0;
+	if (player)
+	{
+		const uint8_t* const p = reinterpret_cast<const uint8_t*>(player);
+		nWdf = static_cast<int>(p[ZE_PLAYER_OFF_WEAPDISABLED]);
+		nCtx = *reinterpret_cast<const int*>(p + ZE_PLAYER_OFF_CONTEXTACTION);
+		nForce = *reinterpret_cast<const int*>(p + ZE_PLAYER_OFF_FORCESTANCE);
+	}
+
 	Msg(eDLL_T::SERVER,
-		"[ZIPRAIL-USE] player=%p grapple=%d result=%d activeZip=%08X->%08X "
-		"state=%d->%d use=(%.2f %.2f %.2f) rev=%d\n",
+		"[ZIPRAIL-USE] player=%p grapple=%d result=%d cmd=%d activeZip=%08X->%08X "
+		"state=%d->%d wdf=%d ctx=%d force=%d use=(%.2f %.2f %.2f) rev=%d\n",
 		reinterpret_cast<void*>(player),
 		forGrappleZipline ? 1 : 0,
 		result ? 1 : 0,
+		ZiplineExit_CmdNumber(reinterpret_cast<void*>(player)),
 		activeBefore, activeAfter,
 		stateBefore, stateAfter,
+		nWdf, nCtx, nForce,
 		use[0], use[1], use[2], rev);
 
 	return result;
@@ -2612,6 +2687,103 @@ static char __fastcall Hook_CZipline_HandleUse(uintptr_t player, void* zipEnt,
 	return nResult;
 }
 
+static void Hook_Zipline_MoveStop(void* player)
+{
+	static bool s_bFirstCall = false;
+	if (!s_bFirstCall)
+	{
+		s_bFirstCall = true;
+		Warning(eDLL_T::SERVER, "[ZIP-MOVESTOP] hook live player=%p\n", player);
+	}
+
+	if (!v_Zipline_MoveStop)
+		return;
+
+	int nStateBefore = 0;
+	int nWdfBefore = 0;
+	int nCtxBefore = 0;
+	int nForceBefore = 0;
+	if (player)
+	{
+		const uint8_t* const p = reinterpret_cast<const uint8_t*>(player);
+		nStateBefore = *reinterpret_cast<const int*>(p + ZE_PLAYER_OFF_ZIPLINESTATE);
+		nWdfBefore = static_cast<int>(p[ZE_PLAYER_OFF_WEAPDISABLED]);
+		nCtxBefore = *reinterpret_cast<const int*>(p + ZE_PLAYER_OFF_CONTEXTACTION);
+		nForceBefore = *reinterpret_cast<const int*>(p + ZE_PLAYER_OFF_FORCESTANCE);
+	}
+
+	uint8_t nLatchSave = 0;
+	uint8_t nBlockSave = 0;
+	const bool bArm = bridge_zip_movestop_weap.GetBool() && player && nStateBefore != 0;
+	if (bArm)
+	{
+		uint8_t* const pLatch = reinterpret_cast<uint8_t*>(player) + ZE_PLAYER_OFF_ZIPWEAP_LATCH;
+		uint8_t* const pBlock = reinterpret_cast<uint8_t*>(player) + ZE_PLAYER_OFF_ZIPWEAP_BLOCK;
+		nLatchSave = *pLatch;
+		nBlockSave = *pBlock;
+		*pLatch = 1;
+		*pBlock = 0;
+	}
+
+	v_Zipline_MoveStop(player);
+
+	if (bArm)
+	{
+		*reinterpret_cast<uint8_t*>(
+			reinterpret_cast<uint8_t*>(player) + ZE_PLAYER_OFF_ZIPWEAP_LATCH) = nLatchSave;
+		*reinterpret_cast<uint8_t*>(
+			reinterpret_cast<uint8_t*>(player) + ZE_PLAYER_OFF_ZIPWEAP_BLOCK) = nBlockSave;
+	}
+
+	if (!player)
+		return;
+
+	uint8_t* const p = reinterpret_cast<uint8_t*>(player);
+	const int nState = *reinterpret_cast<const int*>(p + ZE_PLAYER_OFF_ZIPLINESTATE);
+	int nWdf = static_cast<int>(p[ZE_PLAYER_OFF_WEAPDISABLED]);
+	int nCtx = *reinterpret_cast<const int*>(p + ZE_PLAYER_OFF_CONTEXTACTION);
+	int nForce = *reinterpret_cast<const int*>(p + ZE_PLAYER_OFF_FORCESTANCE);
+
+	bool bDirty = false;
+	if (nState == 0)
+	{
+		if ((nWdf & 3) != 0)
+		{
+			p[ZE_PLAYER_OFF_WEAPDISABLED] = static_cast<uint8_t>(nWdf & ~3);
+			nWdf = static_cast<int>(p[ZE_PLAYER_OFF_WEAPDISABLED]);
+			bDirty = true;
+		}
+		if (nCtx == 9)
+		{
+			*reinterpret_cast<int*>(p + ZE_PLAYER_OFF_CONTEXTACTION) = 0;
+			nCtx = 0;
+			bDirty = true;
+		}
+		if (nForce == 1)
+		{
+			*reinterpret_cast<int*>(p + ZE_PLAYER_OFF_FORCESTANCE) = 0;
+			nForce = 0;
+			bDirty = true;
+		}
+		if (bDirty)
+			MarkEntityEdictDirty(player);
+	}
+
+	++s_nMoveStopCalls;
+	if (bridge_zip_exit_debug.GetBool()
+		|| s_nMoveStopCalls <= 16
+		|| (nStateBefore != 0 && nState == 0)
+		|| bDirty)
+	{
+		Msg(eDLL_T::SERVER,
+			"[ZIP-MOVESTOP] cmd=%d state=%d->%d wdf=%d->%d ctx=%d->%d force=%d->%d "
+			"arm=%d player=%p\n",
+			ZiplineExit_CmdNumber(player), nStateBefore, nState,
+			nWdfBefore, nWdf, nCtxBefore, nCtx, nForceBefore, nForce,
+			bArm ? 1 : 0, player);
+	}
+}
+
 void VZiplineExitParity::GetAdr(void) const
 {
 	LogFunAdr("CPlayer::Zipline_CheckAutoDetach", v_CPlayer__Zipline_CheckAutoDetach);
@@ -2628,6 +2800,7 @@ void VZiplineExitParity::GetAdr(void) const
 	LogFunAdr("CPlayer::Zipline_Use", v_Zipline_Use);
 	LogFunAdr("Zipline_Find", v_Zipline_Find);
 	LogFunAdr("Zipline_JumpOff", v_Zipline_JumpOff);
+	LogFunAdr("CPlayer::Zipline_MoveStop", v_Zipline_MoveStop);
 	LogFunAdr("CZipline_HandleUse", v_CZipline_HandleUse);
 	LogVarAdr("g_pZiplineSpeedFieldOffset", g_pZiplineSpeedFieldOffset);
 }
@@ -2791,6 +2964,16 @@ void VZiplineExitParity::GetFun(void) const
 		Warning(eDLL_T::SERVER,
 			"[ZIP-JUMPOFF] Zipline_JumpOff pattern unresolved -- rail jump-off rewrite disabled\n");
 
+	// Server MoveStop. [rcx+67E4h] is m_ziplineState on this half.
+	Module_FindPattern(g_GameDll,
+		"48 8B C4 53 48 81 EC ?? ?? ?? ?? 83 B9 E4 67 00 00 00")
+		.GetPtr(v_Zipline_MoveStop);
+
+	if (!v_Zipline_MoveStop)
+		Warning(eDLL_T::SERVER,
+			"[ZIP-MOVESTOP] CPlayer::Zipline_MoveStop pattern unresolved -- "
+			"detach weapon restore stays on the native latch\n");
+
 	if (!v_CZipline_HandleUse)
 		Warning(eDLL_T::SERVER,
 			"[ZIP-USEDISPATCH] CZipline_HandleUse pattern unresolved -- use-dispatch probe disabled\n");
@@ -2809,6 +2992,7 @@ void VZiplineExitParity::Detour(const bool bAttach) const
 		const void* const pUse = reinterpret_cast<const void*>(v_Zipline_Use);
 		const void* const pFind = reinterpret_cast<const void*>(v_Zipline_Find);
 		const void* const pJump = reinterpret_cast<const void*>(v_Zipline_JumpOff);
+		const void* const pStop = reinterpret_cast<const void*>(v_Zipline_MoveStop);
 		const void* const pHandle = reinterpret_cast<const void*>(v_CZipline_HandleUse);
 
 		Warning(eDLL_T::SERVER,
@@ -2819,6 +3003,7 @@ void VZiplineExitParity::Detour(const bool bAttach) const
 			"Zipline_Use=%p rva=0x%llX ok=%d "
 			"Zipline_Find=%p rva=0x%llX ok=%d "
 			"Zipline_JumpOff=%p rva=0x%llX ok=%d "
+			"Zipline_MoveStop=%p rva=0x%llX ok=%d "
 			"CZipline_HandleUse=%p rva=0x%llX ok=%d\n",
 			pMoveAlong,
 			static_cast<unsigned long long>(pMoveAlong && base
@@ -2848,6 +3033,10 @@ void VZiplineExitParity::Detour(const bool bAttach) const
 			static_cast<unsigned long long>(pJump && base
 				? reinterpret_cast<uintptr_t>(pJump) - base : 0),
 			pJump ? 1 : 0,
+			pStop,
+			static_cast<unsigned long long>(pStop && base
+				? reinterpret_cast<uintptr_t>(pStop) - base : 0),
+			pStop ? 1 : 0,
 			pHandle,
 			static_cast<unsigned long long>(pHandle && base
 				? reinterpret_cast<uintptr_t>(pHandle) - base : 0),
@@ -2874,6 +3063,9 @@ void VZiplineExitParity::Detour(const bool bAttach) const
 
 	if (v_Zipline_JumpOff)
 		DetourSetup(&v_Zipline_JumpOff, &Hook_Zipline_JumpOff, bAttach);
+
+	if (v_Zipline_MoveStop)
+		DetourSetup(&v_Zipline_MoveStop, &Hook_Zipline_MoveStop, bAttach);
 
 	if (v_CZipline_HandleUse)
 		DetourSetup(&v_CZipline_HandleUse, &Hook_CZipline_HandleUse, bAttach);

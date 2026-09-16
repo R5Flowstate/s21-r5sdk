@@ -371,6 +371,16 @@ void CHostState::LoadModConfigs()
 				continue;
 			}
 
+			static constexpr ssize_t kMaxAutoloadCfgBytes = 1 << 20;
+			if (fileSize > kMaxAutoloadCfgBytes)
+			{
+				Warning(eDLL_T::MODSYSTEM,
+					"[AUTOLOAD-CFG] skipping oversized autoload config '%s' (%zd bytes)\n",
+					filePath, fileSize);
+				FileSystem()->Close(file);
+				continue;
+			}
+
 			std::string buffer;
 			buffer.resize(size_t(fileSize));
 			const ssize_t bytesRead = FileSystem()->Read(&buffer[0], fileSize, file);
@@ -1412,6 +1422,16 @@ void CHostState::LoadModConfigs()
 			const ssize_t fileSize = FileSystem()->Size(file);
 			if (fileSize <= 0)
 			{
+				FileSystem()->Close(file);
+				continue;
+			}
+
+			static constexpr ssize_t kMaxAutoloadCfgBytes = 1 << 20;
+			if (fileSize > kMaxAutoloadCfgBytes)
+			{
+				Warning(eDLL_T::MODSYSTEM,
+					"[AUTOLOAD-CFG] skipping oversized autoload config '%s' (%zd bytes)\n",
+					filePath, fileSize);
 				FileSystem()->Close(file);
 				continue;
 			}

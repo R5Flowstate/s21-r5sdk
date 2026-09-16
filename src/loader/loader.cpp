@@ -20,6 +20,9 @@
 #ifndef LOAD_LIBRARY_SEARCH_DEFAULT_DIRS
 #define LOAD_LIBRARY_SEARCH_DEFAULT_DIRS 0x00001000
 #endif
+#ifndef LOAD_LIBRARY_SEARCH_SYSTEM32
+#define LOAD_LIBRARY_SEARCH_SYSTEM32 0x00000800
+#endif
 
 #ifndef NT_SUCCESS
 #define NT_SUCCESS(Status) (((NTSTATUS)(Status)) >= 0)
@@ -873,16 +876,14 @@ static void Loader_GatedInitSdk(void)
 
 	Loader_Trace("[SEC-LOADER] LoadLibraryExW(%ls) + SDK_Init\n", workerPath);
 
-	// Absolute path + search policy: load from host dir, not bare basename PATH.
-	const DWORD loadFlags =
-		LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
+	// Absolute worker path; dependents from System32 only (worker IAT is OS-only).
+	const DWORD loadFlags = LOAD_LIBRARY_SEARCH_SYSTEM32;
 	HMODULE sdk = LoadLibraryExW(workerPath, nullptr, loadFlags);
 	if (!sdk)
 	{
 		const DWORD errEx = GetLastError();
-		Loader_Trace("[SEC-LOADER] LoadLibraryExW flags=0x%X failed err=0x%08X; fallback LoadLibraryW\n",
+		Loader_Trace("[SEC-LOADER] LoadLibraryExW flags=0x%X failed err=0x%08X\n",
 			(unsigned)loadFlags, (unsigned)errEx);
-		sdk = LoadLibraryW(workerPath);
 	}
 	if (!sdk)
 	{

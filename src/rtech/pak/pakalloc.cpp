@@ -3,6 +3,7 @@
 // Purpose: pak page allocation and alignment
 //
 //=============================================================================//
+#include "tier0/dbg.h"
 #include "rtech/ipakfile.h"
 #include "pakstate.h"
 #include "pakalloc.h"
@@ -71,6 +72,13 @@ void Pak_CopyPagesToSlabs(PakFile_s* const pak, PakLoadedInfo_s* const loadedInf
     {
         const PakPageHeader_s* const pageHeader = pak->GetPageHeader(i);
         const uint32_t slabIndex = pageHeader->slabIndex;
+        if (slabIndex >= pak->GetSlabCount() || slabIndex >= PAK_MAX_SLABS)
+        {
+            Warning(eDLL_T::RTECH, "[PAK-SLAB] bad slabIndex %u (count %hu) in '%s'\n",
+                slabIndex, pak->GetSlabCount(), pak->GetName());
+            loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+            return;
+        }
 
         const PakSlabHeader_s* const slabHeader = pak->GetSlabHeader(slabIndex);
         const int typeFlags = slabHeader->typeFlags;

@@ -60,6 +60,18 @@ static void OffhandISwap_ScanWeaponKVs(void)
 		if (!entry.is_regular_file() || entry.path().extension() != ".txt")
 			continue;
 
+		static constexpr uintmax_t kMaxWeaponKVBytes = 256u * 1024u;
+		std::error_code sizeEc;
+		const uintmax_t nSize = entry.file_size(sizeEc);
+		if (sizeEc || nSize > kMaxWeaponKVBytes)
+		{
+			Warning(eDLL_T::SERVER,
+				"[OFFHAND-ISWAP] skipping oversized weapons KV '%s' (%llu bytes)\n",
+				entry.path().string().c_str(),
+				static_cast<unsigned long long>(nSize));
+			continue;
+		}
+
 		nScanned++;
 
 		std::ifstream file(entry.path(), std::ios::binary);

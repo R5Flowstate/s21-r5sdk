@@ -18,6 +18,112 @@
 
 static const char* s_scriptContextNames[] = { "SERVER", "CLIENT", "UI" };
 
+static bool Script_WhenWordEq(const char* const start, const int n, const char* const want)
+{
+	if (!start || !want || n <= 0)
+		return false;
+	int w = 0;
+	while (want[w])
+		++w;
+	return n == w && !_strnicmp(start, want, n);
+}
+
+static bool Script_WhenExprMatches(const char* const expr, const SQCONTEXT context)
+{
+	if (!expr || !expr[0])
+		return false;
+	const int idx = static_cast<int>(context);
+	const char* const want = (idx >= 0 && idx < 3) ? s_scriptContextNames[idx] : nullptr;
+	const char* p = expr;
+	int safety = 0;
+	while (*p && ++safety < 256)
+	{
+		while (*p && !((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z')
+			|| (*p >= '0' && *p <= '9') || *p == '_'))
+			++p;
+		if (!*p)
+			break;
+		const char* const start = p;
+		while (*p && ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z')
+			|| (*p >= '0' && *p <= '9') || *p == '_'))
+			++p;
+		const int n = static_cast<int>(p - start);
+		if (Script_WhenWordEq(start, n, "DEV") || Script_WhenWordEq(start, n, "DEVELOPER"))
+			return true;
+		if (want && Script_WhenWordEq(start, n, want))
+			return true;
+	}
+	return false;
+}
+
+static bool Script_AddListedCount(int* const total, const int add)
+{
+	if (add < 0 || add > MAX_SCRIPT_FILES_TO_LOAD)
+		return false;
+	if (*total > MAX_SCRIPT_FILES_TO_LOAD - add)
+		return false;
+	*total += add;
+	return true;
+}
+
+static bool Script_WhenNodeMatches(const RSON::Node_t* const node, const SQCONTEXT context)
+{
+	if (!node)
+		return false;
+	if (node->type & RSON::RSON_STRING)
+		return Script_WhenExprMatches(node->value.GetString(), context);
+	if (node->type & RSON::RSON_ARRAY)
+	{
+		if (node->valueCount < 0 || node->valueCount > 32)
+			return false;
+		for (int i = 0; i < node->valueCount; ++i)
+		{
+			const RSON::Value_t* const val = node->GetArrayValue(i);
+			if (val && Script_WhenExprMatches(val->GetString(), context))
+				return true;
+		}
+		return false;
+	}
+	return false;
+}
+
+static int Script_CountRsonScripts(const RSON::Node_t* const rson, const SQCONTEXT context)
+{
+	if (!rson || !(rson->type & RSON::RSON_OBJECT))
+		return 0;
+
+	int total = 0;
+	int safety = 0;
+	const RSON::Field_t* whenField = nullptr;
+	for (RSON::Field_t* key = rson->GetFirstSubKey(); key != nullptr; key = key->GetNextKey())
+	{
+		if (++safety > 4096)
+			return MAX_SCRIPT_FILES_TO_LOAD + 1;
+		if (!key->name)
+			continue;
+		if (!_stricmp(key->name, "When"))
+		{
+			whenField = key;
+			continue;
+		}
+		if (_stricmp(key->name, "Scripts"))
+			continue;
+		if (whenField && !Script_WhenNodeMatches(&whenField->node, context))
+			continue;
+		if (key->node.type & RSON::RSON_ARRAY)
+		{
+			if (!Script_AddListedCount(&total, key->node.valueCount))
+				return MAX_SCRIPT_FILES_TO_LOAD + 1;
+		}
+		else if (key->node.type & RSON::RSON_STRING)
+		{
+			if (!Script_AddListedCount(&total, 1))
+				return MAX_SCRIPT_FILES_TO_LOAD + 1;
+		}
+	}
+	return total;
+}
+
 //---------------------------------------------------------------------------------
 // Since we parse and append mod scripts to the base script list, we must defer the
 // deallocation of the RSON buffer until after the pre-compile job has finished, as
@@ -144,6 +250,15 @@ static void Script_AppendModScriptList(const SQCONTEXT context, char** const scr
 		char* modScriptPaths[MAX_SCRIPT_FILES_TO_LOAD];
 		int modScriptCount = 0;
 
+		const int listed = Script_CountRsonScripts(modRson, context);
+		if (listed > MAX_SCRIPT_FILES_TO_LOAD)
+		{
+			Warning(eDLL_T::ENGINE,
+				"[MOD-SCRIPT] '%s' Scripts count %d exceeds %d -- skipped\n",
+				mod->name.String(), listed, MAX_SCRIPT_FILES_TO_LOAD);
+			continue;
+		}
+
 		v_Script_ParseScriptList(context, pCurrentScriptList, modRson, modScriptPaths, &modScriptCount,
 			// We check on the main `scriptArray` now because `scriptArray` was
 			// already checked on `precompiledScriptArray` on the previous call.
@@ -214,8 +329,18 @@ bool Script_ParseScriptList(SQCONTEXT context, const char* scriptListPath,
 	RSON::Node_t* rson, char** scriptArray, int* pScriptCount,
 	char** precompiledScriptArray, int precompiledScriptCount)
 {
-	v_Script_ParseScriptList(context, scriptListPath, rson, scriptArray,
-		pScriptCount, precompiledScriptArray, precompiledScriptCount);
+	const int listed = Script_CountRsonScripts(rson, context);
+	if (listed > MAX_SCRIPT_FILES_TO_LOAD)
+	{
+		Warning(eDLL_T::ENGINE,
+			"[MOD-SCRIPT] Scripts count %d exceeds %d -- skipped native parse\n",
+			listed, MAX_SCRIPT_FILES_TO_LOAD);
+	}
+	else
+	{
+		v_Script_ParseScriptList(context, scriptListPath, rson, scriptArray,
+			pScriptCount, precompiledScriptArray, precompiledScriptCount);
+	}
 
 	if (ModSystem()->IsEnabled() && !s_scriptModListAppended[(int)context])
 	{

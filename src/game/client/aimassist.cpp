@@ -1,7 +1,8 @@
 //=============================================================================//
 //
-// Purpose: Client aim-assist magnet miss, L2 deadzone, yaw keep, ADS
-// distance scale, highspeed scale, and sniper-scope playlist miss.
+// Purpose: Client aim-assist magnet miss, look-only PLV filter, look-idle
+// deadzone, L2 inflate, yaw keep, ADS distance scale, highspeed scale, and
+// sniper-scope playlist miss.
 //
 //=============================================================================//
 #include "core/stdafx.h"
@@ -16,8 +17,12 @@ static ConVar bridge_aimassist_magnet("bridge_aimassist_magnet", "1", FCVAR_RELE
 	"Playlist-miss magnet 0.40 -> 0.30.");
 static ConVar bridge_aimassist_l2("bridge_aimassist_l2", "0", FCVAR_RELEASE,
 	"Inflate small look/move so AND treats L2 as alive. Off=native AND.");
+static ConVar bridge_aimassist_plv("bridge_aimassist_plv", "1", FCVAR_RELEASE,
+	"Look-only PLV filter from playlist aimassist_filter_plv_*. Move stick "
+	"untouched. When on, look_idle is skipped.");
 static ConVar bridge_aimassist_look_idle("bridge_aimassist_look_idle", "1", FCVAR_RELEASE,
-	"Grounded + look below deadzone zeros magnet even if move is alive.");
+	"Grounded + look below deadzone zeros magnet even if move is alive. "
+	"Skipped while bridge_aimassist_plv is on.");
 static ConVar bridge_aimassist_look_deadzone("bridge_aimassist_look_deadzone", "0.06", FCVAR_RELEASE,
 	"Look L2 deadzone for look_idle. Native AND is 0.03.");
 static ConVar bridge_aimassist_yaw("bridge_aimassist_yaw", "1", FCVAR_RELEASE,
@@ -30,7 +35,7 @@ static ConVar bridge_aimassist_sniper("bridge_aimassist_sniper", "1", FCVAR_RELE
 	"Playlist miss keeps sniper scopes off (zoomClass>=3). Non-sniper stay on.");
 
 static ConVar sdk_aimassist_diag("sdk_aimassist_diag", "0", FCVAR_DEVELOPMENTONLY,
-	"[AA] log miss/l2/yaw/ads/hs/sniper. 0=off.");
+	"[AA] log miss/l2/plv/lookIdle/yaw/ads/hs/sniper. 0=off.");
 
 //-----------------------------------------------------------------------------
 static constexpr ptrdiff_t kAAMoveX = 0x184; // look-compose move axes
@@ -67,6 +72,7 @@ typedef char (*AimAssist_SniperFn)(void* player, uint8_t a2, uint8_t* a3, float 
 typedef float (*AimAssist_PitchFadeFn)(void* player);
 typedef bool (*AimAssist_WallrunFn)(void* player);
 typedef char (*PlaylistVarOnFn)(const char* name, char miss);
+typedef __int64 (*PlaylistGetCurrentVarFn)(__int64 thisptr, const char* name);
 typedef void* (*GetWeaponFn)(void* player);
 typedef void (*AimAssist_PullGatherFn)(void* weapon, void* aa, void* player, void* out);
 typedef float* (*GetEyeFn)(void* player, float* out);
@@ -78,6 +84,7 @@ static AimAssist_SniperFn v_AimAssist_Sniper = nullptr;
 static AimAssist_PitchFadeFn v_AimAssist_PitchFade = nullptr;
 static AimAssist_WallrunFn v_AimAssist_IsWallrun = nullptr;
 static PlaylistVarOnFn v_PlaylistVarOn = nullptr;
+static PlaylistGetCurrentVarFn v_PlaylistGetCurrentVar = nullptr;
 static GetWeaponFn v_GetWeapon = nullptr;
 static AimAssist_PullGatherFn v_AimAssist_PullGather = nullptr;
 static GetEyeFn v_GetEye = nullptr;
@@ -87,10 +94,112 @@ static bool s_bInApply = false;
 static const float* s_pApplyTarget = nullptr;
 static int s_nDiag = 0;
 
+static const void* s_pPlvAA = nullptr;
+static float s_flPlvEmaX = 0.0f;
+static float s_flPlvEmaY = 0.0f;
+static bool s_bPlvEnabled = false;
+static bool s_bPlvAim = false;
+static bool s_bPlvThresh = false;
+static float s_flPlvCoeff = 0.05f;
+static float s_flPlvThresh = 0.05f;
+static unsigned int s_nPlvCache = 0;
+static bool s_bPlvAnnounced = false;
+
 //-----------------------------------------------------------------------------
 static bool AimAssistOn(void)
 {
 	return bridge_aimassist.GetBool();
+}
+
+static const char* PlaylistVarString(const char* const pszName)
+{
+	if (!v_PlaylistGetCurrentVar || !pszName)
+		return nullptr;
+	return reinterpret_cast<const char*>(v_PlaylistGetCurrentVar(0, pszName));
+}
+
+static bool PlaylistVarBool(const char* const pszName)
+{
+	if (v_PlaylistVarOn)
+		return v_PlaylistVarOn(pszName, 0) != 0;
+	const char* const psz = PlaylistVarString(pszName);
+	return psz && psz[0] && atof(psz) != 0.0;
+}
+
+static float PlaylistVarFloat(const char* const pszName, const float flFallback)
+{
+	const char* const psz = PlaylistVarString(pszName);
+	if (!psz || !psz[0])
+		return flFallback;
+	return static_cast<float>(atof(psz));
+}
+
+static void AimAssistPlv_Refresh(void)
+{
+	if ((s_nPlvCache++ & 31) != 0)
+		return;
+
+	if (!bridge_aimassist_plv.GetBool())
+	{
+		s_bPlvEnabled = false;
+		s_bPlvAim = false;
+		return;
+	}
+
+	s_bPlvEnabled = PlaylistVarBool("aimassist_filter_plv_enabled");
+	s_bPlvAim = PlaylistVarBool("aimassist_filter_plv_aim_enabled");
+	s_bPlvThresh = PlaylistVarBool("aimassist_filter_plv_threshold_aim_enabled");
+	s_flPlvCoeff = PlaylistVarFloat("aimassist_filter_plv_aim_coefficient", 0.05f);
+	s_flPlvThresh = PlaylistVarFloat("aimassist_filter_plv_threshold_aim_coefficient", 0.05f);
+	if (s_flPlvCoeff < 0.0f)
+		s_flPlvCoeff = 0.0f;
+	else if (s_flPlvCoeff > 1.0f)
+		s_flPlvCoeff = 1.0f;
+	if (s_flPlvThresh < 0.0f)
+		s_flPlvThresh = 0.0f;
+
+	if (!s_bPlvAnnounced && s_bPlvEnabled && s_bPlvAim)
+	{
+		s_bPlvAnnounced = true;
+		Msg(eDLL_T::CLIENT, "[AA] plv coeff=%.3f thresh=%.3f threshOn=%d\n",
+			s_flPlvCoeff, s_flPlvThresh, s_bPlvThresh ? 1 : 0);
+	}
+}
+
+static bool AimAssistPlv_Active(void)
+{
+	return s_bPlvEnabled && s_bPlvAim;
+}
+
+static float AimAssistPlv_FilterLook(void* const pAA, float* const pLookX, float* const pLookY)
+{
+	if (s_pPlvAA != pAA)
+	{
+		s_pPlvAA = pAA;
+		s_flPlvEmaX = *pLookX;
+		s_flPlvEmaY = *pLookY;
+	}
+	else
+	{
+		s_flPlvEmaX += s_flPlvCoeff * (*pLookX - s_flPlvEmaX);
+		s_flPlvEmaY += s_flPlvCoeff * (*pLookY - s_flPlvEmaY);
+	}
+
+	const float flMag = sqrtf((s_flPlvEmaX * s_flPlvEmaX) + (s_flPlvEmaY * s_flPlvEmaY));
+	if (s_bPlvThresh)
+	{
+		if (flMag <= s_flPlvThresh)
+		{
+			*pLookX = 0.0f;
+			*pLookY = 0.0f;
+		}
+	}
+	else
+	{
+		*pLookX = s_flPlvEmaX;
+		*pLookY = s_flPlvEmaY;
+	}
+	return flMag;
 }
 
 static float SignCopy(const float mag, const float sgn)
@@ -333,7 +442,13 @@ static float* Hook_Apply(void* pAA, void* pPlayer, float* pTarget, float* a3,
 	bool bMoved = false;
 	if (AimAssistOn() && pAA)
 	{
-		if (bridge_aimassist_look_idle.GetBool() && LookIdleDead(lookX, lookY)
+		AimAssistPlv_Refresh();
+		if (bridge_aimassist_plv.GetBool() && AimAssistPlv_Active())
+		{
+			const float flMag = AimAssistPlv_FilterLook(pAA, &lookX, &lookY);
+			DiagTick("plv", flMag);
+		}
+		else if (bridge_aimassist_look_idle.GetBool() && LookIdleDead(lookX, lookY)
 			&& PlayerGrounded(pPlayer))
 		{
 			lookX = 0.0f;
@@ -439,6 +554,7 @@ void VAimAssist::GetAdr(void) const
 	LogFunAdr("AimAssist_IsWallrun", v_AimAssist_IsWallrun);
 	LogFunAdr("AimAssist_PullGather", v_AimAssist_PullGather);
 	LogFunAdr("PlaylistVarOn", v_PlaylistVarOn);
+	LogFunAdr("PlaylistGetCurrentVar", v_PlaylistGetCurrentVar);
 	LogFunAdr("GetWeapon", v_GetWeapon);
 	LogFunAdr("GetEye", v_GetEye);
 }
@@ -482,6 +598,11 @@ void VAimAssist::GetFun(void) const
 		.GetPtr(v_PlaylistVarOn);
 
 	Module_FindPattern(g_GameDll,
+		"48 8B 0D ?? ?? ?? ?? 48 85 C9 75 03 33 C0 C3 4C 8B 05 ?? ?? ?? ?? "
+		"4C 8B CA 48 8B 15 ?? ?? ?? ?? E9")
+		.GetPtr(v_PlaylistGetCurrentVar);
+
+	Module_FindPattern(g_GameDll,
 		"48 83 EC ?? 48 8B 01 FF 90 ?? ?? ?? ?? 48 83 C0")
 		.GetPtr(v_GetWeapon);
 
@@ -506,6 +627,8 @@ void VAimAssist::GetFun(void) const
 		Warning(eDLL_T::CLIENT, "[AA] yaw-keep gather unresolved\n");
 	if (!v_PlaylistVarOn)
 		Warning(eDLL_T::CLIENT, "[AA] playlist var helper unresolved\n");
+	if (!v_PlaylistGetCurrentVar)
+		Warning(eDLL_T::CLIENT, "[AA] playlist current-var getter unresolved -- PLV coeffs stay 0.05\n");
 }
 
 void VAimAssist::Detour(const bool bAttach) const
@@ -520,11 +643,12 @@ void VAimAssist::Detour(const bool bAttach) const
 		DetourSetup(&v_AimAssist_Sniper, &Hook_Sniper, bAttach);
 
 	if (bAttach && v_AimAssist_GetRawMagnetScale)
-		Msg(eDLL_T::CLIENT, "[AA] aim assist attached (apply=%d pull=%d sniper=%d hs=%d)\n",
+		Msg(eDLL_T::CLIENT, "[AA] aim assist attached (apply=%d pull=%d sniper=%d hs=%d plv=%d)\n",
 			v_AimAssist_Apply ? 1 : 0,
 			v_AimAssist_Pull ? 1 : 0,
 			v_AimAssist_Sniper ? 1 : 0,
-			s_bHighspeedScale ? 1 : 0);
+			s_bHighspeedScale ? 1 : 0,
+			(v_PlaylistVarOn || v_PlaylistGetCurrentVar) ? 1 : 0);
 	else if (bAttach)
 		Warning(eDLL_T::CLIENT, "[AA] aim assist disabled -- scale pattern unresolved\n");
 }

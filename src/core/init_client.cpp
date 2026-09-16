@@ -114,6 +114,7 @@
 #include "game/client/aimassist.h"
 #include "game/client/trigger_cannon.h"
 #include "game/client/halfduck_zip_parity.h"
+#include "game/client/zipline_disconnect.h"
 #include "game/client/move_sim_trace.h"
 #include "game/client/melee_lunge_probe.h"
 #include "game/client/melee_activity_trace.h"
@@ -612,6 +613,7 @@ void DetourRegister()
 	REGISTER(VMeleeLungeProbe);
 	REGISTER(VMeleeActivityTrace);
 	REGISTER(VHalfDuckZipParityClient);
+	REGISTER(VZipDiscClient);
 	REGISTER(VMoveSimTraceClient);
 	REGISTER(VBridgeCmdSeedClient);
 	REGISTER(VBridgeFireTapClient);

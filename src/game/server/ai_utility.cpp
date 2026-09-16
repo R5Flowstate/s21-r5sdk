@@ -5,6 +5,7 @@
 //=============================================================================//
 
 #include "core/stdafx.h"
+#include <cstdint>
 #include "tier0/fasttimer.h"
 #include "tier1/cvar.h"
 #include "mathlib/bitvec.h"
@@ -72,6 +73,72 @@ static bool Detour_IsGoalPolyReachable(dtNavMesh* const nav, const dtPolyRef fro
     return nav->isGoalPolyReachable(fromRef, goalRef, !hasAnimType, traverseTableIndex);
 }
 
+static bool Navmesh_Mul(const int64_t a, const int64_t b, int64_t* const out)
+{
+    if (!out || a < 0 || b < 0)
+        return false;
+    if (a != 0 && b > (INT64_MAX / a))
+        return false;
+    *out = a * b;
+    return true;
+}
+
+static int64_t Navmesh_Align4(const int64_t x)
+{
+    return (x + 3) & ~int64_t(3);
+}
+
+static bool Navmesh_AddSection(int64_t* const required, const int64_t elem, const int64_t n)
+{
+    int64_t part = 0;
+    if (!Navmesh_Mul(elem, n, &part))
+        return false;
+    part = Navmesh_Align4(part);
+    if (*required > INT64_MAX - part)
+        return false;
+    *required += part;
+    return true;
+}
+
+static bool Detour_TileDataFits(const unsigned char* const data, const int dataSize)
+{
+    if (!data || dataSize < static_cast<int>(sizeof(dtMeshHeader)))
+        return false;
+    if (dataSize > 4 * 1024 * 1024)
+        return false;
+
+    const dtMeshHeader* const header = reinterpret_cast<const dtMeshHeader*>(data);
+    if (header->magic != DT_NAVMESH_MAGIC || header->version != DT_NAVMESH_VERSION)
+        return false;
+
+    if (header->polyCount < 0 || header->polyMapCount < 0 || header->vertCount < 0
+        || header->maxLinkCount < 0 || header->detailMeshCount < 0
+        || header->detailVertCount < 0 || header->detailTriCount < 0
+        || header->bvNodeCount < 0 || header->offMeshConCount < 0
+        || header->maxCellCount < 0)
+        return false;
+
+    int64_t mapWords = 0;
+    if (!Navmesh_Mul(header->polyCount, header->polyMapCount, &mapWords))
+        return false;
+
+    int64_t required = 0;
+    if (!Navmesh_AddSection(&required, sizeof(dtMeshHeader), 1)
+        || !Navmesh_AddSection(&required, sizeof(rdVec3D), header->vertCount)
+        || !Navmesh_AddSection(&required, sizeof(dtPoly), header->polyCount)
+        || !Navmesh_AddSection(&required, sizeof(int), mapWords)
+        || !Navmesh_AddSection(&required, sizeof(dtLink), header->maxLinkCount)
+        || !Navmesh_AddSection(&required, sizeof(dtPolyDetail), header->detailMeshCount)
+        || !Navmesh_AddSection(&required, sizeof(rdVec3D), header->detailVertCount)
+        || !Navmesh_AddSection(&required, sizeof(unsigned char) * 4, header->detailTriCount)
+        || !Navmesh_AddSection(&required, sizeof(dtBVNode), header->bvNodeCount)
+        || !Navmesh_AddSection(&required, sizeof(dtOffMeshConnection), header->offMeshConCount)
+        || !Navmesh_AddSection(&required, sizeof(dtCell), header->maxCellCount))
+        return false;
+
+    return required <= dataSize;
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: adds a tile to the NavMesh.
 // Output: the status flags for the operation.
@@ -79,6 +146,24 @@ static bool Detour_IsGoalPolyReachable(dtNavMesh* const nav, const dtPolyRef fro
 static dtStatus Detour_AddTile(dtNavMesh* nav, void* unused, unsigned char* data,
     int dataSize, int flags, dtTileRef lastRef)
 {
+    if (!nav || !Detour_TileDataFits(data, dataSize))
+    {
+        int x = 0;
+        int y = 0;
+        int layer = 0;
+        if (data && dataSize >= static_cast<int>(sizeof(dtMeshHeader)))
+        {
+            const dtMeshHeader* const header = reinterpret_cast<const dtMeshHeader*>(data);
+            x = header->x;
+            y = header->y;
+            layer = header->layer;
+        }
+        Warning(eDLL_T::SERVER,
+            "[NAVMESH] refusing tile x=%d y=%d layer=%d dataSize=%d\n",
+            x, y, layer, dataSize);
+        return DT_FAILURE | DT_INVALID_PARAM;
+    }
+
     //There are no statically allocated tiles passed through this function as it is all read from the nav files on disk
     //Set the free data flag here to avoid leaking memory when we come to destroy the tile
     flags |= DT_TILE_FREE_DATA;
