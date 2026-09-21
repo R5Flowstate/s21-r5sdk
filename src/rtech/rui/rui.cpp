@@ -38,29 +38,9 @@ void Rui_BindDrawEnable(void)
 	Msg(eDLL_T::RTECH, "[RUI] rui_drawEnable registered\n");
 }
 
-// UI stage ids: 0 vgui, 1 vgui_pre, 2 world, 3 script viewmodel, 4 staticprop,
-// 5 cockpit, 6 hud, 7 posteffects, 8 viewmodel, 9 hints, 10 crosshairs,
-// 11 targetinfos, 12 utils, 13 overlay.
-static ConVar rui_drawHideStages("rui_drawHideStages", "2624", FCVAR_RELEASE,
-	"Bitmask of UI stage ids skipped while rui_drawEnable is 0 (default hud|hints|targetinfos)");
-static ConVar rui_drawStageDiag("rui_drawStageDiag", "0", FCVAR_DEVELOPMENTONLY,
-	"Log each UI stage draw range once per stage");
-
 static __int64 Hook_UI_DrawStageInstanceRange(__int64 stage, __int64 bundles, __int64 beginIdx, __int64 endIdx)
 {
-	const uint16_t nStage = static_cast<uint16_t>(stage);
-
-	if (rui_drawStageDiag.GetBool() && nStage < 32)
-	{
-		static uint32_t s_nSeen = 0;
-		if (!(s_nSeen & (1u << nStage)))
-		{
-			s_nSeen |= (1u << nStage);
-			Msg(eDLL_T::RTECH, "[RUI-STAGE] stage=%u range=%lld..%lld\n", nStage, beginIdx, endIdx);
-		}
-	}
-
-	if (!rui_drawEnable.GetBool() && nStage < 32 && (rui_drawHideStages.GetInt() & (1 << nStage)))
+	if (!rui_drawEnable.GetBool())
 		return 0;
 	return v_UI_DrawStageInstanceRange(stage, bundles, beginIdx, endIdx);
 }

@@ -66,9 +66,11 @@ struct BotProgram_s
 	bool     m_bSprint;
 	Vector3D m_vecStrafeAnchor;
 	float    m_flStrafeHalfWidth;
+	int      m_nLastStrafeSide;
 	bool     m_bStrafeHard;
 	float    m_flStrafeWaitMin;
 	float    m_flStrafeWaitMax;
+	bool     m_bStrafeTimingSet; // script chose the leg times; BotCmd_Strafe keeps them
 	float    m_flStrafeSpeedMult;
 	int      m_nLegSide;        // -1 left, 0 hold, +1 right
 	float    m_flLegForward;    // -1..1, depth steps
@@ -394,20 +396,41 @@ static float BotCmd_Rand(float lo, float hi)
 // Tempo: weighted slow / normal / fast / spike, scaled by the Lab speed slider.
 // Lane check along the bot's right axis; a leg that would leave the lane
 // turns around instead.
-static int BotCmd_StrafeOpenSide(const CPlayer* pPlayer, const BotProgram_s& prog, int want)
+static float BotCmd_StrafeOffset(const CPlayer* pPlayer, const BotProgram_s& prog)
 {
 	const Vector3D& org = pPlayer->Diag_AbsOrigin();
 	const float yaw = DEG2RAD(prog.m_angLook.y);
 	const float rx = sinf(yaw), ry = -cosf(yaw);
-	const float off = (org.x - prog.m_vecStrafeAnchor.x) * rx + (org.y - prog.m_vecStrafeAnchor.y) * ry;
-	if (off * want > prog.m_flStrafeHalfWidth)
+	return (org.x - prog.m_vecStrafeAnchor.x) * rx + (org.y - prog.m_vecStrafeAnchor.y) * ry;
+}
+
+static int BotCmd_StrafeOpenSide(const CPlayer* pPlayer, const BotProgram_s& prog, int want)
+{
+	if (BotCmd_StrafeOffset(pPlayer, prog) * want > prog.m_flStrafeHalfWidth)
 		return -want;
 	return want;
+}
+
+// A leg is far shorter than the lane, so the side only flips at the lane
+// edge (or on a small random early flip); otherwise the width never binds.
+static int BotCmd_StrafeNextSide(const CPlayer* pPlayer, const BotProgram_s& prog, int lastSide, bool blocked)
+{
+	if (blocked)
+		return -lastSide;
+	const float off = BotCmd_StrafeOffset(pPlayer, prog);
+	const float edge = Max(prog.m_flStrafeHalfWidth - 24.0f, 8.0f);
+	if (off * lastSide >= edge)
+		return -lastSide;
+	if ((rand() % 100) < 15)
+		return -lastSide;
+	return lastSide;
 }
 
 static void BotCmd_StrafeSetLeg(BotProgram_s& prog, const CPlayer* pPlayer, int side, float forward, float dur, bool crouch)
 {
 	prog.m_nLegSide = side;
+	if (side != 0)
+		prog.m_nLastStrafeSide = side;
 	prog.m_flLegForward = forward;
 	prog.m_bLegCrouch = crouch;
 	prog.m_flLegEnd = gpGlobals->curTime + dur / Max(prog.m_flStrafeSpeedMult, 0.25f);
@@ -430,12 +453,12 @@ static void BotCmd_StrafePickLeg(CPlayer* pPlayer, BotProgram_s& prog)
 		blocked = (dx * dx + dy * dy) < (12.0f * 12.0f);
 	}
 
-	int lastSide = prog.m_nLegSide != 0 ? prog.m_nLegSide : 1;
-	int side = blocked ? -lastSide : -lastSide;
+	const int lastSide = prog.m_nLegSide != 0 ? prog.m_nLegSide : (prog.m_nLastStrafeSide != 0 ? prog.m_nLastStrafeSide : 1);
+	int side = BotCmd_StrafeNextSide(pPlayer, prog, lastSide, blocked);
 
 	if (!prog.m_bStrafeHard)
 	{
-		side = BotCmd_StrafeOpenSide(pPlayer, prog, side);
+		side = BotCmd_StrafeOpenSide(pPlayer, prog, -lastSide);
 		BotCmd_StrafeSetLeg(prog, pPlayer, side, 0.0f, BotCmd_Rand(prog.m_flStrafeWaitMin, prog.m_flStrafeWaitMax), false);
 		return;
 	}
@@ -881,10 +904,14 @@ static SQRESULT Script_BotCmd_Strafe(HSQUIRRELVM v)
 		prog.m_vecOscOrigin = prog.m_vecStrafeAnchor;
 		prog.m_flStrafeHalfWidth = Clamp(static_cast<float>(flHalfWidth), 16.0f, 2048.0f);
 		prog.m_bStrafeHard = bHard != 0;
-		prog.m_flStrafeWaitMin = bHard ? 0.22f : 0.22f;
-		prog.m_flStrafeWaitMax = bHard ? 0.42f : 0.5f;
+		if (!prog.m_bStrafeTimingSet)
+		{
+			prog.m_flStrafeWaitMin = 0.22f;
+			prog.m_flStrafeWaitMax = bHard ? 0.42f : 0.5f;
+		}
 		prog.m_flStrafeSpeedMult = Clamp(static_cast<float>(flSpeedMult), 0.5f, 2.0f);
 		prog.m_nLegSide = (rand() % 2) ? 1 : -1;
+		prog.m_nLastStrafeSide = prog.m_nLegSide;
 		prog.m_flLegEnd = 0.0f;
 		prog.m_nLegsQueued = 0;
 		prog.m_nFlipStreak = 0;
@@ -899,6 +926,32 @@ static SQRESULT Script_BotCmd_SetStrafeSpeed(HSQUIRRELVM v)
 	sq_getfloat(v, 2, &flSpeedMult);
 	if (st && st->m_nMode == BOTCMD_PROGRAM)
 		st->m_Prog.m_flStrafeSpeedMult = Clamp(static_cast<float>(flSpeedMult), 0.5f, 2.0f);
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+// Leg time bounds in seconds: how long one strafe direction is held.
+static SQRESULT Script_BotCmd_SetStrafeTiming(HSQUIRRELVM v)
+{
+	BotCmdState_s* const st = BotCmd_ThisBot(v, nullptr);
+	SQFloat flMin = 0.22f, flMax = 0.5f;
+	sq_getfloat(v, 2, &flMin);
+	sq_getfloat(v, 3, &flMax);
+	if (st && st->m_nMode == BOTCMD_PROGRAM)
+	{
+		BotProgram_s& prog = st->m_Prog;
+		float lo = Clamp(static_cast<float>(flMin), 0.05f, 3.0f);
+		float hi = Clamp(static_cast<float>(flMax), 0.05f, 3.0f);
+		if (lo > hi)
+		{
+			const float t = lo;
+			lo = hi;
+			hi = t;
+		}
+		prog.m_flStrafeWaitMin = lo;
+		prog.m_flStrafeWaitMax = hi;
+		prog.m_bStrafeTimingSet = true;
+		prog.m_flLegEnd = 0.0f;
+	}
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
@@ -1037,6 +1090,8 @@ void BotCmd_RegisterPlayerFuncs(ScriptClassDescriptor_t* pPlayerStruct)
 		"Program: strafe like the training strafer; hard adds holds, depth steps and bursts.", "void", "float halfWidth, bool hard, float speedMult", false, Script_BotCmd_Strafe);
 	pPlayerStruct->AddFunction("BotCmd_SetStrafeSpeed", "Script_BotCmd_SetStrafeSpeed",
 		"Program: change the strafe tempo multiplier on a live strafer.", "void", "float speedMult", false, Script_BotCmd_SetStrafeSpeed);
+	pPlayerStruct->AddFunction("BotCmd_SetStrafeTiming", "Script_BotCmd_SetStrafeTiming",
+		"Program: seconds one strafe direction is held, random between min and max per leg.", "void", "float minSec, float maxSec", false, Script_BotCmd_SetStrafeTiming);
 	pPlayerStruct->AddFunction("BotCmd_SetFireProfile", "Script_BotCmd_SetFireProfile",
 		"Program: trigger cadence for the held weapon (0 hold, 1 tap per shot, 2 pull per burst), seconds between pulls, aim error cone in degrees.", "void",
 		"int mode, float shotInterval, float aimErrorDeg", false, Script_BotCmd_SetFireProfile);

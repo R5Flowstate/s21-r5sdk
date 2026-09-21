@@ -86,6 +86,21 @@ static bool StudioHdrLive(void* pEntity)
 	return *reinterpret_cast<void**>(reinterpret_cast<char*>(pHdr) + 8) != nullptr;
 }
 
+static constexpr uintptr_t kViewModelWeaponHandleOffset = 0x1CF4;
+
+bool WeaponModVisual_ViewmodelShowsWeapon(void* pWeapon)
+{
+	if (!pWeapon || !v_Inv_GetSlotForActiveWeapon || !s_pEntityList)
+		return false;
+	void* const pViewModel = ViewmodelForBodygroup(pWeapon);
+	if (!pViewModel)
+		return true;
+	const uint32_t nWeapon = *reinterpret_cast<const uint32_t*>(
+		reinterpret_cast<const char*>(pWeapon) + 8);
+	return *reinterpret_cast<const uint32_t*>(
+		reinterpret_cast<const char*>(pViewModel) + kViewModelWeaponHandleOffset) == nWeapon;
+}
+
 static char __fastcall Hook_C_WeaponX_RecalcMods(void* pWeapon)
 {
 	const char result = v_C_WeaponX_RecalcMods(pWeapon);

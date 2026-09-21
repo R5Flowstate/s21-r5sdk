@@ -12,6 +12,7 @@
 #include "thirdparty/detours/include/detours.h"
 #include "game/shared/activity.h"
 #include "weapon_akimbo_activity.h"
+#include "weapon_mod_visual.h"
 #include "game/client/cliententitylist.h"
 #include "rtech/pak/settings_disk.h"
 #include "rtech/pak/rpak_observe.h"
@@ -235,6 +236,8 @@ struct AkimboWireState
 {
 	uint32_t handle;
 	char state;
+	char pending;
+	bool armed;
 };
 static AkimboWireState s_akimboWireState[kAkimboWireSlots] = {};
 
@@ -250,6 +253,8 @@ static AkimboWireState* AkimboWireSlot(const void* pPlayer)
 	{
 		st.handle = handle;
 		st.state = 0;
+		st.pending = 0;
+		st.armed = false;
 	}
 	return &st;
 }
@@ -289,10 +294,24 @@ static void __fastcall Hook_C_Player_PostDataUpdate(void* pNetworkable, int upda
 
 	const char wireState = pPlayer[kAkimboStateOffset];
 	if (wireState == st->state)
+	{
+		st->armed = false;
 		return;
+	}
 	if (wireState < 0 || wireState > 3)
 	{
 		st->state = wireState;
+		st->armed = false;
+		return;
+	}
+
+	// The viewmodels and weapons of this packet apply their own model
+	// changes after the player; replay one packet later so SetState writes
+	// bodygroups onto the model the viewmodel is actually on.
+	if (!st->armed || st->pending != wireState)
+	{
+		st->pending = wireState;
+		st->armed = true;
 		return;
 	}
 
@@ -304,11 +323,16 @@ static void __fastcall Hook_C_Player_PostDataUpdate(void* pNetworkable, int upda
 	void* const other = v_C_WeaponX_GetAkimboPartner(main);
 	if (other && !AkimboClient_WeaponReady(other))
 		return;
+	// SetState writes mod bodygroups onto the viewmodels; a viewmodel still on
+	// the previous weapon's model divides by zero inside SetBodygroup.
+	if (!WeaponModVisual_ViewmodelShowsWeapon(main) || (other && !WeaponModVisual_ViewmodelShowsWeapon(other)))
+		return;
 
 	const char oldState = st->state;
 	pPlayer[kAkimboStateOffset] = oldState;
 	v_C_Player_AkimboSetState(pPlayer, wireState);
 	st->state = pPlayer[kAkimboStateOffset];
+	st->armed = false;
 
 	static int s_budget = 32;
 	if (s_budget-- > 0)

@@ -14,6 +14,11 @@
 #include "thirdparty/detours/include/idetour.h"
 
 ///////////////////////////////////////////////////////////////////////////////
+// False while the owner's viewmodel for this weapon still shows another
+// weapon's model (deploy pending); bodygroup writes against it would index
+// a bodygroup table that model does not have.
+bool WeaponModVisual_ViewmodelShowsWeapon(void* pWeapon);
+
 class VWeaponModVisual : public IDetour
 {
 	virtual void GetAdr(void) const;
