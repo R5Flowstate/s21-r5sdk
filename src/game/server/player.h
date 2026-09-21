@@ -1096,6 +1096,7 @@ public:
 		m_slideLongJumpAllowed = true;
 		m_lastSlideWasBoost = true;
 	}
+	inline bool IsSliding(void) const { return m_sliding; }
 
 	inline PlatformUserId_t GetPlatformUserId() const { return m_platformUserId; };
 
@@ -1107,6 +1108,8 @@ public:
 
 	// Driven/occupied vehicle handle (invalid when not in one).
 	inline const EHANDLE& GetPlayerVehicle(void) const { return m_playerVehicle; }
+
+	inline float GetLastDodgeTime(void) const { return m_lastDodgeTime; }
 
 	// PlayerMelee_ClearPlayerAsLungeTarget -- zeros the networked lunge block.
 	void ClearMeleeLungeState(void)

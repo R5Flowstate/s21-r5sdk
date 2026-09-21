@@ -252,6 +252,12 @@ add_sources( SOURCE_GROUP "Client" # Client only.
     "client/datablock_receiver.cpp"
     "client/datablock_receiver.h"
     "client/bridge_flag_set.h"
+    "client/discord_ipc.cpp"
+    "client/discord_ipc.h"
+    "client/discord_presence.cpp"
+    "client/discord_presence.h"
+    "client/discord_rpc_wrapper.cpp"
+    "client/discord_rpc_wrapper.h"
 )
 
 add_sources( SOURCE_GROUP "GameUI"
@@ -265,6 +271,8 @@ add_sources( SOURCE_GROUP "GameUI"
 	"${ENGINE_SOURCE_DIR}/gameui/ITopBar.h"
 	"${ENGINE_SOURCE_DIR}/gameui/IDevMenu.cpp"
 	"${ENGINE_SOURCE_DIR}/gameui/IDevMenu.h"
+	"${ENGINE_SOURCE_DIR}/gameui/IClassVarLab.cpp"
+	"${ENGINE_SOURCE_DIR}/gameui/IClassVarLab.h"
 	"${ENGINE_SOURCE_DIR}/gameui/IDlssNrMenu.cpp"
 	"${ENGINE_SOURCE_DIR}/gameui/IDlssNrMenu.h"
 

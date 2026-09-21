@@ -7,8 +7,11 @@
 
 #include "core/stdafx.h"
 #include "tier0/memaddr.h"
+#include "tier0/memvalidate.h"
 #include "tier1/cvar.h"
 #include "tier1/cmd.h"
+#include "mathlib/mathlib.h"
+#include <cmath>
 // SCRIPT_REGISTER_FUNC is a macro the vsquirrel.h register template expands, so
 // this header has to come first.
 #include "game/shared/vscript_gamedll_defs.h"
@@ -49,6 +52,7 @@ static constexpr ptrdiff_t PLAYER_ENTRY_SERIAL = 0x8;
 
 static bool s_bClassVarResolved = false;
 static bool s_bClassVarUsable = false;
+static uint32_t s_nRebuildSerial = 0;
 
 static ConVar bridge_classvar_log_cl("bridge_classvar_log_cl", "0", FCVAR_DEVELOPMENTONLY,
 	"Log every SetLocalClassVar key/value applied on the client.");
@@ -131,6 +135,9 @@ static void ClientScript_ResolveClassVar(void)
 //-----------------------------------------------------------------------------
 static void* ClientScript_LocalPlayer(void)
 {
+	if (!g_pLocalPlayerSlot || !g_nPlayerArray)
+		return nullptr;
+
 	const uint32_t nSlot = *g_pLocalPlayerSlot;
 	if (nSlot == UINT32_MAX)
 		return nullptr;
@@ -142,6 +149,11 @@ static void* ClientScript_LocalPlayer(void)
 		return nullptr;
 
 	return *reinterpret_cast<void**>(nEntry);
+}
+
+void* ClassVar_LocalPlayer(void)
+{
+	return ClientScript_LocalPlayer();
 }
 
 //-----------------------------------------------------------------------------
@@ -197,7 +209,7 @@ static bool ClientScript_ClassVarResolveKey(const uintptr_t nPlayer, const char*
 //-----------------------------------------------------------------------------
 // Purpose: render a stored class-var the way the engine's own printer does.
 //-----------------------------------------------------------------------------
-static const char* ClientScript_ClassVarFormat(const uintptr_t nAddr,
+const char* ClassVar_FormatValue(const uintptr_t nAddr,
 	const uint16_t nType, char* pszBuf, const size_t nBufLen)
 {
 	const float* const pFlt = reinterpret_cast<const float*>(nAddr);
@@ -273,7 +285,7 @@ static void ClientScript_ClassVarGet_f(const CCommand& args)
 
 	char szValue[256];
 	Msg(eDLL_T::CLIENT, "[CLASSVAR] %s = %s (type=%u off=%u)\n", pszKey,
-		ClientScript_ClassVarFormat(nBase + nOffset, nType, szValue, sizeof(szValue)),
+		ClassVar_FormatValue(nBase + nOffset, nType, szValue, sizeof(szValue)),
 		nType, nOffset);
 }
 
@@ -355,6 +367,9 @@ static bool __fastcall Hook_C_Player_ApplySettingsChange(void* pPlayer)
 {
 	const bool bRebuilt = v_C_Player_ApplySettingsChange(pPlayer);
 
+	if (bRebuilt)
+		s_nRebuildSerial++;
+
 	if (!bRebuilt || !s_nStickyCount || pPlayer != s_pStickyOwner)
 		return bRebuilt;
 
@@ -389,6 +404,335 @@ void VClassVarNativesCl::GetFun(void) const
 		"48 89 5C 24 ?? 48 89 7C 24 ?? 55 48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? "
 		"4C 8B 81 E8 24 00 00 48 8B D9 48 8B 91 D0 24 00 00")
 		.GetPtr(v_C_Player_ApplySettingsChange);
+}
+
+// Table: +0x08 hash slots { u16 type; u16 nameOff; u32 offset }, +0x10 u16 slot index (stride 4) x count @+0x1C, +0x38 name pool.
+static constexpr ptrdiff_t CLASSVAR_TAB_ENTRIES = 0x08;
+static constexpr ptrdiff_t CLASSVAR_TAB_INDEX   = 0x10;
+static constexpr ptrdiff_t CLASSVAR_TAB_COUNT   = 0x1C;
+static constexpr ptrdiff_t CLASSVAR_TAB_POOL    = 0x38;
+static constexpr uint32_t CLASSVAR_TAB_MAX      = 4096;
+static constexpr size_t CLASSVAR_NAME_MAX       = 64;
+
+static int ClassVar_EnumTable(void* const pTable, const bool bSecondary,
+	ClassVarField_t* const pOut, const int nMax)
+{
+	if (!pTable || !pOut || nMax <= 0)
+		return 0;
+	if (!Mem_IsReadable(pTable, 0x40))
+		return 0;
+
+	const uintptr_t nTable = reinterpret_cast<uintptr_t>(pTable);
+	void* const pEntries = *reinterpret_cast<void**>(nTable + CLASSVAR_TAB_ENTRIES);
+	void* const pIndex = *reinterpret_cast<void**>(nTable + CLASSVAR_TAB_INDEX);
+	const uint32_t nCount = *reinterpret_cast<uint32_t*>(nTable + CLASSVAR_TAB_COUNT);
+	const char* const pszPool = *reinterpret_cast<const char**>(nTable + CLASSVAR_TAB_POOL);
+
+	if (!pEntries || !pIndex || !pszPool || nCount == 0 || nCount > CLASSVAR_TAB_MAX)
+		return 0;
+	if (!Mem_IsReadable(pIndex, sizeof(uint16_t)))
+		return 0;
+
+	int nOut = 0;
+	const uintptr_t nEntries = reinterpret_cast<uintptr_t>(pEntries);
+
+	const uintptr_t nIndex = reinterpret_cast<uintptr_t>(pIndex);
+
+	for (uint32_t i = 0; i < nCount && nOut < nMax; i++)
+	{
+		const uint16_t* const pSlot = reinterpret_cast<const uint16_t*>(nIndex + static_cast<uintptr_t>(i) * 4);
+		if (!Mem_IsReadable(pSlot, sizeof(uint16_t)))
+			continue;
+
+		const uintptr_t nRec = nEntries + static_cast<uintptr_t>(*pSlot) * 8;
+		if (!Mem_IsReadable(reinterpret_cast<const void*>(nRec), 8))
+			continue;
+
+		const uint16_t nType = *reinterpret_cast<const uint16_t*>(nRec);
+		const uint16_t nNameOff = *reinterpret_cast<const uint16_t*>(nRec + 2);
+		const uint32_t nOff = *reinterpret_cast<const uint32_t*>(nRec + 4);
+
+		if (nType > 7 || nNameOff == 0 || (nOff >> 24) != 0)
+			continue;
+
+		const char* const pszName = pszPool + nNameOff;
+		if (!Mem_IsReadable(pszName, 1))
+			continue;
+
+		size_t nLen = 0;
+		while (nLen < CLASSVAR_NAME_MAX && Mem_IsReadable(pszName + nLen, 1) && pszName[nLen])
+			nLen++;
+		if (nLen == 0 || nLen >= CLASSVAR_NAME_MAX)
+			continue;
+
+		pOut[nOut].pszName = pszName;
+		pOut[nOut].nType = nType;
+		pOut[nOut].nOffset = nOff & 0xFFFFFF;
+		pOut[nOut].bSecondary = bSecondary;
+		nOut++;
+	}
+
+	return nOut;
+}
+
+int ClassVar_EnumFields(ClassVarField_t* pOut, int nMax)
+{
+	ClientScript_ResolveClassVar();
+
+	if (!pOut || nMax <= 0)
+		return 0;
+	if (!s_bClassVarUsable)
+		return 0;
+	if (!Mem_IsReadable(g_ppClassVarTablePrimary, sizeof(void*))
+		|| !Mem_IsReadable(g_ppClassVarTableSecondary, sizeof(void*)))
+		return 0;
+
+	int nOut = ClassVar_EnumTable(*g_ppClassVarTablePrimary, false, pOut, nMax);
+	if (nOut < nMax)
+		nOut += ClassVar_EnumTable(*g_ppClassVarTableSecondary, true, pOut + nOut, nMax - nOut);
+
+	return nOut;
+}
+
+uintptr_t ClassVar_LocalBlock(void)
+{
+	ClientScript_ResolveClassVar();
+
+	if (!s_bClassVarUsable)
+		return 0;
+
+	void* const pPlayer = ClientScript_LocalPlayer();
+	if (!pPlayer)
+		return 0;
+
+	return *reinterpret_cast<uintptr_t*>(
+		reinterpret_cast<uintptr_t>(pPlayer) + CPLAYER_OFF_CLASSVAR_BLOCK);
+}
+
+uintptr_t ClassVar_FieldAddress(const ClassVarField_t& field)
+{
+	ClientScript_ResolveClassVar();
+
+	if (!s_bClassVarUsable)
+		return 0;
+
+	void* const pPlayer = ClientScript_LocalPlayer();
+	if (!pPlayer)
+		return 0;
+
+	const uintptr_t nPlayer = reinterpret_cast<uintptr_t>(pPlayer);
+	const uintptr_t nBlock = *reinterpret_cast<uintptr_t*>(nPlayer + CPLAYER_OFF_CLASSVAR_BLOCK);
+	if (!nBlock)
+		return 0;
+
+	if (field.bSecondary)
+		return ClientScript_ClassVarSecondaryBase(nPlayer, nBlock) + (field.nOffset & 0xFFFFFF);
+	return nBlock + (field.nOffset & 0xFFFFFF);
+}
+
+uint32_t ClassVar_SettingsRebuildSerial(void)
+{
+	ClientScript_ResolveClassVar();
+	return s_nRebuildSerial;
+}
+
+static bool ClassVar_ValidateFloats(const char* pszValue, const int nWant,
+	char* const pszReason, const size_t nReasonLen)
+{
+	static constexpr float CLASSVAR_MAX_ABS = 100000.f;
+
+	const char* p = pszValue;
+
+	for (int i = 0; i < nWant; i++)
+	{
+		while (*p == ' ' || *p == '\t')
+			p++;
+		if (!*p)
+		{
+			V_snprintf(pszReason, nReasonLen, "needs exactly %d floats", nWant);
+			return false;
+		}
+
+		char* pszEnd = nullptr;
+		const float flVal = strtof(p, &pszEnd);
+		if (pszEnd == p)
+		{
+			V_snprintf(pszReason, nReasonLen, "not a finite float");
+			return false;
+		}
+		if (!isfinite(flVal) || fabsf(flVal) > CLASSVAR_MAX_ABS)
+		{
+			V_snprintf(pszReason, nReasonLen, "component %d out of range", i);
+			return false;
+		}
+		p = pszEnd;
+	}
+
+	while (*p == ' ' || *p == '\t')
+		p++;
+
+	if (*p)
+	{
+		V_snprintf(pszReason, nReasonLen, "needs exactly %d floats", nWant);
+		return false;
+	}
+
+	return true;
+}
+
+static bool ClassVar_ValidateSet(const char* const pszKey, const char* const pszValue,
+	char* const pszReason, const size_t nReasonLen)
+{
+	if (!pszKey || !pszKey[0] || !pszValue)
+	{
+		V_snprintf(pszReason, nReasonLen, "bad key/value argument");
+		return false;
+	}
+	if (V_strlen(pszKey) > 63)
+	{
+		V_snprintf(pszReason, nReasonLen, "key longer than 63 chars");
+		return false;
+	}
+	if (V_strlen(pszValue) > 127)
+	{
+		V_snprintf(pszReason, nReasonLen, "value longer than 127 chars");
+		return false;
+	}
+
+	uint16_t nType = 0;
+	uint16_t nOffset = 0;
+	uint64_t nNamePtr = 0;
+
+	if (!v_ClassVar_Find(*g_ppClassVarTablePrimary, pszKey, &nType, &nOffset, &nNamePtr)
+		&& !v_ClassVar_Find(*g_ppClassVarTableSecondary, pszKey, &nType, &nOffset, &nNamePtr))
+	{
+		V_snprintf(pszReason, nReasonLen, "unknown key");
+		return false;
+	}
+	if (nType >= 5)
+	{
+		V_snprintf(pszReason, nReasonLen, "type %u is not settable from the console", nType);
+		return false;
+	}
+	if (nType == 0)
+	{
+		if (V_stricmp(pszValue, "0") != 0 && V_stricmp(pszValue, "1") != 0
+			&& V_stricmp(pszValue, "true") != 0 && V_stricmp(pszValue, "false") != 0)
+		{
+			V_snprintf(pszReason, nReasonLen, "bool needs 0|1|true|false");
+			return false;
+		}
+		return true;
+	}
+	if (nType == 1)
+	{
+		char* pszEnd = nullptr;
+		(void)strtol(pszValue, &pszEnd, 10);
+		if (!pszEnd || pszEnd == pszValue || *pszEnd != '\0')
+		{
+			V_snprintf(pszReason, nReasonLen, "not an int");
+			return false;
+		}
+		return true;
+	}
+
+	return ClassVar_ValidateFloats(pszValue,
+		nType == 2 ? 1 : (nType == 3 ? 2 : 3), pszReason, nReasonLen);
+}
+
+static FnCommandCallback_t s_fnSetOrig = nullptr;
+
+static void ClassVar_Set_f(const CCommand& args)
+{
+	if (!s_fnSetOrig)
+		return;
+
+	if (args.ArgC() < 3)
+	{
+		s_fnSetOrig(args);
+		return;
+	}
+
+	ClientScript_ResolveClassVar();
+
+	if (!s_bClassVarUsable)
+	{
+		s_fnSetOrig(args);
+		return;
+	}
+
+	const char* const pszKey = args.Arg(1);
+	const char* const pszValue = args.Arg(2);
+
+	char szReason[128] = { 0 };
+	if (!ClassVar_ValidateSet(pszKey, pszValue, szReason, sizeof(szReason)))
+	{
+		Warning(eDLL_T::CLIENT, "[CLASSVAR] refused '%s': %s\n",
+			pszKey ? pszKey : "", szReason);
+		return;
+	}
+
+	s_fnSetOrig(args);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: _setClassVarClient <key> <value> -- server-driven local write, no forward
+//-----------------------------------------------------------------------------
+static void ClassVar_SetClient_f(const CCommand& args)
+{
+	if (args.ArgC() < 3)
+		return;
+
+	ClientScript_ResolveClassVar();
+	if (!s_bClassVarUsable)
+		return;
+
+	const char* const pszKey = args.Arg(1);
+	const char* const pszValue = args.Arg(2);
+
+	char szReason[128] = { 0 };
+	if (!ClassVar_ValidateSet(pszKey, pszValue, szReason, sizeof(szReason)))
+	{
+		Warning(eDLL_T::CLIENT, "[CLASSVAR] server set refused '%s': %s\n", pszKey ? pszKey : "", szReason);
+		return;
+	}
+
+	void* const pPlayer = ClientScript_LocalPlayer();
+	if (!pPlayer)
+		return;
+
+	if (!ClientScript_ClassVarWrite(reinterpret_cast<uintptr_t>(pPlayer), pszKey, pszValue))
+		return;
+
+	v_ClassVar_Apply(pPlayer);
+	Msg(eDLL_T::CLIENT, "[CLASSVAR] server set %s = %s\n", pszKey, pszValue);
+}
+
+void ClassVar_BindShipped(void)
+{
+	static bool s_bSetBound = false;
+
+	if (s_bSetBound || !g_pCVar)
+		return;
+
+	// The engine registers 'set' after the SDK's cvar connect; callers retry until it exists.
+	ConCommand* const pCmd = g_pCVar->FindCommand("set");
+	if (!pCmd)
+		return;
+
+	pCmd->RemoveFlags(FCVAR_DEVELOPMENTONLY);
+	s_fnSetOrig = pCmd->m_fnCommandCallback;
+	pCmd->m_fnCommandCallback = ClassVar_Set_f;
+	s_bSetBound = true;
+
+	// The SDK's own _setClassVarClient still points at the S3 handler, which never resolves here.
+	if (ConCommand* const pClientCmd = g_pCVar->FindCommand("_setClassVarClient"))
+	{
+		pClientCmd->RemoveFlags(FCVAR_DEVELOPMENTONLY);
+		pClientCmd->m_fnCommandCallback = ClassVar_SetClient_f;
+	}
+
+	Msg(eDLL_T::CLIENT, "[CLASSVAR] set: cheat-gated, wrapped\n");
 }
 
 void VClassVarNativesCl::Detour(const bool bAttach) const
@@ -452,7 +796,7 @@ static SQRESULT ClientScript_SetLocalClassVar(HSQUIRRELVM v)
 		char szReadback[256];
 		Msg(eDLL_T::CLIENT, "[CLASSVAR] '%s' = '%s' -> readback %s (type=%u off=%u)\n",
 			pszKey, pszValue,
-			ClientScript_ClassVarFormat(nBase + nOffset, nType, szReadback,
+			ClassVar_FormatValue(nBase + nOffset, nType, szReadback,
 				sizeof(szReadback)),
 			nType, nOffset);
 	}

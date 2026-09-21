@@ -68,6 +68,10 @@ macro( add_rtech_game_lib LIB_NAME )
 		"pak/pak_lobby_world.h"
 		"pak/pak_census.cpp"
 		"pak/pak_census.h"
+		"pak/ui_image_skip.cpp"
+		"pak/ui_image_skip.h"
+		"pak/mapedit_paks_cl.cpp"
+		"pak/mapedit_paks_cl.h"
 	)
 	add_sources( SOURCE_GROUP "Vfx"
 		"vfx_alias.cpp"

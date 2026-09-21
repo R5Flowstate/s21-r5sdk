@@ -4,11 +4,15 @@
 //
 //=============================================================================//
 #include "core/stdafx.h"
+#include <intrin.h>
 #include "bridge_zoom_gate.h"
 
 #include "entitylist.h"
 #include "mathlib/vector.h"
 #include "weapon_kv_s21_ext.h"
+#include "akimbo.h"
+#include "public/edict.h"
+#include "game/shared/sdk_entity_state.h"
 
 #include <cctype>
 #include <unordered_set>
@@ -32,7 +36,12 @@ typedef Vector3D*(__fastcall* PFN_CBaseEntity_GetAbsVelocity)(void* entity, Vect
 
 static PFN_CPlayer_GetZoomFrac       v_CPlayer_GetZoomFrac       = nullptr;
 static PFN_CPlayer_UpdateZoom        v_CPlayer_UpdateZoom        = nullptr;
+extern CGlobalVars* gpGlobals;
 static PFN_CPlayer_StartZooming      v_CPlayer_StartZooming      = nullptr;
+static char (__fastcall* v_CPlayer_CanZoom)(__int64 player) = nullptr;
+static bool (__fastcall* v_CPlayer_IsDualWieldingNative)(__int64 player) = nullptr;
+// Return address of CanZoom's dual-wield call, taken before the detour moves the prologue.
+static uintptr_t s_canZoomDualWieldReturn = 0;
 static PFN_CBaseCombatCharacter_Weapon_GetTargetingWeapon
 	v_CBaseCombatCharacter_Weapon_GetTargetingWeapon = nullptr;
 static PFN_CWeaponX_FireWeaponBolt   v_CWeaponX_FireWeaponBolt   = nullptr;
@@ -61,6 +70,16 @@ static ConVar bridge_spread_air_priority("bridge_spread_air_priority", "1",
 	"even while sliding/sprinting. The S3 engine checks isMovingFast first, "
 	"which desyncs m_moveSpread from the S21 client during sprint-jumps and "
 	"slide-hops. 0 = legacy S3 order (A/B).");
+
+// Name-matched to the S21 client convar, whose default is 1: both akimbo
+// hands fire from IN_ATTACK and ADS stays available while dual wielding.
+static ConVar akimbo_weapon_can_zoom("akimbo_weapon_can_zoom", "1", FCVAR_RELEASE,
+	"Allow ADS while dual wielding akimbo pistols (1 = S21 client default; the alt hand then fires from the attack button).");
+
+bool ZoomGate_AkimboCanZoom(void)
+{
+	return akimbo_weapon_can_zoom.GetBool();
+}
 
 static ConVar bridge_ads_reload_parity("bridge_ads_reload_parity", "1",
 	FCVAR_RELEASE,
@@ -271,11 +290,59 @@ static float __fastcall Hook_CPlayer_GetZoomFrac(__int64 player)
 	return flFrac;
 }
 
+// CanZoom opens with the engine's own dual-wield test and refuses outright;
+// S21 gates that on akimbo_weapon_can_zoom instead. Only the CanZoom call
+// site is answered false -- every other caller keeps the native answer.
+static bool __fastcall Hook_CPlayer_IsDualWieldingNative(__int64 player)
+{
+	if (akimbo_weapon_can_zoom.GetBool() && s_canZoomDualWieldReturn
+		&& reinterpret_cast<uintptr_t>(_ReturnAddress()) == s_canZoomDualWieldReturn)
+		return false;
+	return v_CPlayer_IsDualWieldingNative(player);
+}
+
+// Names every CanZoom term the moment it refuses while dual wielding. [ZOOM-AKIMBO]
+static char __fastcall Hook_CPlayer_CanZoom(__int64 player)
+{
+	const char result = v_CPlayer_CanZoom(player);
+	if (result || !player || !AkimboBridge_IsDualWielding(reinterpret_cast<void*>(player)))
+		return result;
+
+	const uint8_t* const p = reinterpret_cast<const uint8_t*>(player);
+	const uint32_t eh = *reinterpret_cast<const uint32_t*>(p + PLAYER_OFF_ACTIVEWEAPON);
+	const uint8_t* const w = reinterpret_cast<const uint8_t*>(SDKEntityState_Resolve(SDKEntityHandle(eh), ESide::Server));
+	if (!w)
+		return result;
+	const int state = *reinterpret_cast<const int*>(w + WEAPON_OFF_WEAPSTATE);
+	const int8_t sel0 = *reinterpret_cast<const int8_t*>(p + PLAYER_OFF_SWITCHSLOT);
+	const uint64_t key = (static_cast<uint64_t>(state) << 32) ^ (static_cast<uint8_t>(sel0) << 8) ^ w[9212] ^ (static_cast<uint64_t>(w[4666]) << 16)
+		^ (static_cast<uint64_t>(w[4758]) << 17) ^ (static_cast<uint64_t>(p[5900]) << 24) ^ (static_cast<uint64_t>(v_CPlayer_IsDualWieldingNative ? v_CPlayer_IsDualWieldingNative(player) : 9) << 40);
+	static uint64_t s_lastKey = ~0ull;
+	static int s_budget = 24;
+	if (key == s_lastKey || s_budget <= 0)
+		return result;
+	s_lastKey = key;
+	--s_budget;
+	Warning(eDLL_T::SERVER,
+		"[ZOOM-AKIMBO] canzoom=0 global=%d sel0=%d state=%d ready=%.3f t=%.3f zoomFx=%d inReload=%d rech=%d/%d clip=%d shots=%d btn=0x%X pflags=0x%X slotDis=%d/%d moveType=%d parent=0x%X custom=%d/0x%X\n",
+		v_CPlayer_IsDualWieldingNative ? (v_CPlayer_IsDualWieldingNative(player) ? 1 : 0) : 9, sel0, state,
+		*reinterpret_cast<const float*>(w + WEAPON_OFF_NEXTREADYTIME), gpGlobals ? gpGlobals->curTime : 0.f,
+		w[9212], w[4666], w[7308], w[4758], *reinterpret_cast<const int*>(w + 4644), *reinterpret_cast<const int*>(w + 4652),
+		*reinterpret_cast<const unsigned int*>(p + PLAYER_OFF_BUTTONS), *reinterpret_cast<const unsigned int*>(p + 24872),
+		p[5900], *reinterpret_cast<const int*>(p + 5892), p[776], *reinterpret_cast<const unsigned int*>(p + 784),
+		*reinterpret_cast<const int*>(w + 4676), w[4692]);
+	return result;
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: clear m_semiAutoNeedsRechamber during StartZooming if the weapon is reloading.
 //-----------------------------------------------------------------------------
 static void __fastcall Hook_CPlayer_StartZooming(__int64 player)
 {
+	if (player && !akimbo_weapon_can_zoom.GetBool()
+		&& AkimboBridge_IsDualWielding(reinterpret_cast<void*>(player)))
+		return;
+
 	if (bridge_ads_reload_parity.GetBool()
 		&& player
 		&& v_CBaseCombatCharacter_Weapon_GetTargetingWeapon)
@@ -317,6 +384,12 @@ static char __fastcall Hook_CPlayer_UpdateZoom(__int64 player)
 	const bool bWas = player && *reinterpret_cast<unsigned char*>(player + PLAYER_OFF_BZOOMING) != 0;
 	const unsigned int nButtonsBefore = player
 		? *reinterpret_cast<unsigned int*>(player + PLAYER_OFF_BUTTONS) : 0u;
+
+	// Dual wielding: IN_ZOOM is the left-hand trigger. Let a zoom already in
+	// progress unwind, never start one.
+	if (player && !bWas && !akimbo_weapon_can_zoom.GetBool()
+		&& AkimboBridge_IsDualWielding(reinterpret_cast<void*>(player)))
+		return 0;
 
 	const char result = v_CPlayer_UpdateZoom(player);
 
@@ -760,6 +833,17 @@ void VBridgeZoomGate::GetFun(void) const
 	// (`movzx ebx, byte ptr [rdi+5A61h]`), so the pattern cannot slide onto a
 	// sibling getter.
 	Module_FindPattern(g_GameDll,
+		"40 57 48 83 EC 30 48 8B F9 E8 ?? ?? ?? ?? 84 C0 74 08 32 C0 48 83 C4 30 5F C3 8B 8F CC 16 00 00")
+		.GetPtr(v_CPlayer_CanZoom);
+	if (v_CPlayer_CanZoom)
+	{
+		v_CPlayer_IsDualWieldingNative = CMemory(v_CPlayer_CanZoom).Offset(0x9).FollowNearCallSelf().RCast<bool (__fastcall*)(__int64)>();
+		s_canZoomDualWieldReturn = reinterpret_cast<uintptr_t>(v_CPlayer_CanZoom) + 0xE;
+	}
+	if (!v_CPlayer_CanZoom)
+		Warning(eDLL_T::SERVER, "[ZOOM-AKIMBO] CPlayer::CanZoom pattern unresolved -- akimbo zoom refusal log disabled\n");
+
+	Module_FindPattern(g_GameDll,
 		"40 57 48 83 EC 50 44 0F 29 44 24 ?? 48 8B F9 48 89 5C 24 ?? E8 ?? ?? ?? ?? "
 		"48 8B 05 ?? ?? ?? ?? 48 8B CF 0F B6 9F 61 5A 00 00")
 		.GetPtr(v_CPlayer_GetZoomFrac);
@@ -880,6 +964,10 @@ void VBridgeZoomGate::Detour(const bool bAttach) const
 
 	if (v_CPlayer_StartZooming)
 		DetourSetup(&v_CPlayer_StartZooming, &Hook_CPlayer_StartZooming, bAttach);
+	if (v_CPlayer_CanZoom)
+		DetourSetup(&v_CPlayer_CanZoom, &Hook_CPlayer_CanZoom, bAttach);
+	if (v_CPlayer_IsDualWieldingNative)
+		DetourSetup(&v_CPlayer_IsDualWieldingNative, &Hook_CPlayer_IsDualWieldingNative, bAttach);
 
 	if (v_CWeaponX_FireWeaponBolt)
 		DetourSetup(&v_CWeaponX_FireWeaponBolt, &Hook_CWeaponX_FireWeaponBolt, bAttach);

@@ -18,6 +18,7 @@
 #include "trigger_cannon.h" // TriggerPass_MovementTime
 #include "zipline_cooldown.h" // ZiplineCooldown_ShouldRefuseMount / _OnMountGranted
 #include "zipline_disconnect.h"
+#include "akimbo.h"
 #include "game/shared/edict_dirty.h"
 #include <cmath>
 #include <cfloat>
@@ -2555,6 +2556,9 @@ static bool Hook_Zipline_Use(uintptr_t player, bool forGrappleZipline)
 
 	const bool result = v_Zipline_Use(player, forGrappleZipline);
 
+	if (result && player)
+		AkimboBridge_OnZiplineMountStart(reinterpret_cast<void*>(player));
+
 	if (result && player && bridge_zip_mount_alpha_seed.GetBool())
 	{
 		const unsigned nHandle = *reinterpret_cast<const unsigned*>(
@@ -2726,6 +2730,8 @@ static void Hook_Zipline_MoveStop(void* player)
 	}
 
 	v_Zipline_MoveStop(player);
+
+	AkimboBridge_OnZiplineStop(player);
 
 	if (bArm)
 	{

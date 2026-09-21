@@ -6,6 +6,10 @@
 //=============================================================================//
 
 #include "core/stdafx.h"
+#include "game/server/cmd_recorder.h"
+#include "game/server/mapedit_paks.h"
+#include "game/server/agent_link.h"
+#include "game/server/bot_cmd.h"
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -167,6 +171,9 @@ void ServerGameDLL_RunSdkLevelReset(const char* pszReason)
 	// forensic dump guard so a new map's first entity isn't shadowed by
 	// a stale map-1 ptr in the set.
 	SnapshotDiag_LevelShutdown();
+	BotCmd_LevelShutdown();
+	CmdRecorder_LevelShutdown();
+	MapEditPaks_LevelShutdown();
 	// Clear the SkinNames inject guard; string tables are recreated per-map.
 	SkinNamesInject_LevelShutdown();
 	ScriptNetData_LevelShutdown();
@@ -275,7 +282,7 @@ static bool Chat_CommandVerbDenied(const char* const pszVerb)
 		"fs_guardLiveMapUnmount",
 		"sdk_splitpacket_recv_clamp",
 		"bridge_akimbo",
-		"bridge_akimbo_deploy_partner",
+		"akimbo_weapon_can_zoom",
 		"bridge_pose_param_ext",
 		"bridge_pose_moveyaw",
 	};
@@ -814,6 +821,7 @@ __int64 CServerGameDLL::GameFrame(void* thisptr, unsigned char simulating)
 	else
 		s_bFreezeCurLatched = false;
 
+	AgentLink_Think();
 	const __int64 nRet = CServerGameDLL__GameFrame(thisptr, simulating);
 	if (bFreeze)
 	{

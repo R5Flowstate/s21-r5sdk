@@ -19,6 +19,7 @@
 #include "engine/client/cl_rcon.h"
 #include "engine/client/cl_main.h"
 #include "engine/client/clientstate.h"
+#include "engine/client/discord_presence.h"
 #include "engine/cmd.h"
 #include "engine/net.h"
 #include "engine/gl_screen.h"
@@ -121,6 +122,7 @@ void CHostState::FrameUpdate(CHostState* pHostState, double flCurrentTime, float
 
 	g_pHostState->Think();
 	RCONClient()->RunFrame();
+	CDiscordPresence::Update();
 	
 
 	// Disable "warning C4611: interaction between '_setjmp' and C++ object destruction is non-portable"
@@ -286,6 +288,8 @@ void CHostState::Setup(void)
 
 
 	ResetLevelName();
+
+	CDiscordPresence::Initialize();
 }
 
 //-----------------------------------------------------------------------------

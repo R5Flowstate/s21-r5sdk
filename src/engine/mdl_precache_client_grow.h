@@ -32,6 +32,8 @@ struct MdlPrecacheShadowStats
 	uint32_t       shadowEnd;   // one past last idx covered
 	uint32_t       populated;   // entries with non-NULL model_t*
 };
+// 16-byte precache item slot for idx 8192..16383, nullptr outside the shadow.
+uint8_t* MdlPrecacheShadow_Slot(uint32_t idx);
 void MdlPrecacheShadow_GetStats(MdlPrecacheShadowStats* out);
 
 class VModelPrecacheClientGrowS21 : public IDetour

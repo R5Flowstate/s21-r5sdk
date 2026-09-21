@@ -16,6 +16,9 @@ class CPlayer;
 // entry -- see mantle_boost.cpp's banner above the implementation.
 bool MantleBoost_ShouldSuppressTapStrafe(const CPlayer* const player);
 
+// Per-player FSM state: 0 idle, 1 hang, 3 mantle jump, 4 boost armed/airborne.
+int MantleBoost_GetState(const CPlayer* const player);
+
 ///////////////////////////////////////////////////////////////////////////////
 class VMantleBoostBridge : public IDetour
 {

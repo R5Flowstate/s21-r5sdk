@@ -11,6 +11,7 @@
 #include "tier0/dbg.h"
 #include "tier0/memaddr.h"
 #include "tier0/module.h"
+#include "tier0/memvalidate.h"
 #include "tier1/cvar.h"
 #include "materialsystem/shader_teardown.h"
 #include "ebisusdk/EbisuSDK.h"
@@ -32,9 +33,17 @@ static bool IsPlausibleComObject(const unsigned __int64 p)
 		return false;
 	if (p & 7)
 		return false;
-	// Unrelocated PagePtrs live in the low 44 bits ((offset<<32)|page).
+	// Unrelocated PagePtrs live in the low 44 bits ((offset<<32)|page), but
+	// so does the whole heap when high-entropy ASLR is off. Cold path: let
+	// VirtualQuery separate a real object (readable, readable vtable) from one.
 	if ((p >> 44) == 0)
-		return false;
+	{
+		if (!Mem_IsReadable(reinterpret_cast<const void*>(p), 8))
+			return false;
+		const unsigned __int64 vt = *reinterpret_cast<const unsigned __int64*>(p);
+		return vt >= USER_ADDR_FLOOR && vt <= USER_ADDR_LIMIT &&
+			Mem_IsReadable(reinterpret_cast<const void*>(vt), 8);
+	}
 	return true;
 }
 

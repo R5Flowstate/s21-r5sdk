@@ -26,8 +26,8 @@ static ConVar sdk_pak_load_sdk_paks("sdk_pak_load_sdk_paks", "1", FCVAR_RELEASE,
 static ConVar sdk_pak_load_flowstate("sdk_pak_load_flowstate", "1", FCVAR_RELEASE,
 	"Enqueue common_flowstate.rpak after common_mp. 0 = skip (launch-arg A/B).");
 
-static ConVar sdk_pak_load_s30_efct("sdk_pak_load_s30_efct", "1", FCVAR_RELEASE,
-	"Enqueue sdk_s30_efct.rpak after common_mp. 0 = skip (launch-arg A/B).");
+static ConVar sdk_pak_load_s30("sdk_pak_load_s30", "1", FCVAR_RELEASE,
+	"Enqueue sdk_s30.rpak (S30 effects, Axle, akimbo, Ash, mantle air) after common_mp. 0 = skip (launch-arg A/B).");
 
 static ConVar sdk_pak_load_mod_paks("sdk_pak_load_mod_paks", "1", FCVAR_RELEASE,
 	"Enqueue each enabled mod's paks/Win64/preload.rson list after common_mp.");
@@ -182,7 +182,7 @@ static const char* const s_sdkPaksToLoad[] =
 static const char* const s_sdkPaksToLoadAfterCommonMp[] =
 {
 	"common_flowstate.rpak",
-	"sdk_s30_efct.rpak",
+	"sdk_s30.rpak",
 };
 static const size_t s_sdkPaksToLoadAfterCommonMpCount =
 	V_ARRAYSIZE(s_sdkPaksToLoadAfterCommonMp);
@@ -335,11 +335,11 @@ static void Pak_EnqueueNamedList_S21(const char* const* names, size_t count, con
 		 "[%s] skip '%s' (sdk_pak_load_flowstate 0)\n", tag, name);
 	 continue;
  }
- if (name && !_stricmp(name, "sdk_s30_efct.rpak") &&
-	 !sdk_pak_load_s30_efct.GetBool())
+ if (name && !_stricmp(name, "sdk_s30.rpak") &&
+	 !sdk_pak_load_s30.GetBool())
  {
 	 Warning(eDLL_T::RTECH,
-		 "[%s] skip '%s' (sdk_pak_load_s30_efct 0)\n", tag, name);
+		 "[%s] skip '%s' (sdk_pak_load_s30 0)\n", tag, name);
 	 continue;
  }
  char diskPath[MAX_PATH];
@@ -916,12 +916,14 @@ static char __fastcall Hook_Pak_InitAsyncLoad_S21(__int64 pakHnd)
 	const int slot = static_cast<int>(pakHnd) & 0x1FF;
 	const char* name = GetPakNameForSlot(slot);
 
-	// Missing ODL pak: fake status=10 LOADED so the poller does not TerminateProcess.
+	// Missing ODL pak: report status=10 LOADED so the pool worker does not
+	// TerminateProcess on ERROR, but return 0 so the pump skips the header
+	// parse (it dereferences the parsed-pak block this slot never allocated)
+	// and finalizes the slot on its next pass.
 	if (name && *name && !VerifyPakOnDisk(name))
 	{
 		if (IsOdlSkinPak(name))
 		{
-			// Pool worker polls status; report LOADED.
 			const uintptr_t slotTable = Pak_GetSlotBase_S21();
 			if (slotTable && EnsurePakSlotTableOk())
 			{
@@ -939,7 +941,7 @@ static char __fastcall Hook_Pak_InitAsyncLoad_S21(__int64 pakHnd)
 					"model will render as error.rmdl on use)\n",
 					slot, name);
 			}
-			return 1;
+			return 0;
 		}
 
 		// Map/engine miss: do not fake; original returns 0 and the pump skips the slot.
@@ -1181,6 +1183,87 @@ static bool ConsistencyObs_GuidResolves(uintptr_t hashBase, unsigned __int64 gui
 	return false;
 }
 
+// Installed asset header of a guid (NULL when absent). The head is what a rig's
+// sequence array and a model's rig array point at.
+void* Pak_FindInstalledHead_S21(unsigned __int64 guid)
+{
+	const uintptr_t hashBase = S21Pak_AssetGuidHashBase();
+	if (!hashBase)
+		return nullptr;
+	for (unsigned int probe = 0; probe < 512; ++probe)
+	{
+		const unsigned __int16 bucketIdx = (unsigned __int16)(guid + (unsigned __int64)probe * probe);
+		const unsigned __int64* const bucket = reinterpret_cast<const unsigned __int64*>(hashBase + 64ull * bucketIdx);
+		for (int sl = 0; sl < 8; ++sl)
+		{
+			if (bucket[sl] == 0)
+				return nullptr;
+			if (bucket[sl] != guid)
+				continue;
+			const unsigned int h = (static_cast<unsigned int>(bucketIdx) << 3) | (sl & 7);
+			return *reinterpret_cast<void* const*>(hashBase + 0x400000ull + 16ull * h);
+		}
+	}
+	return nullptr;
+}
+
+// Owner chain of one guid: the hash entry (installed header, head tracked index)
+// and every tracked copy with its pak slot and slot priority. [PAK-CHAIN]
+void Pak_DumpGuidChain_S21(unsigned __int64 guid, const char* tag)
+{
+	const uintptr_t hashBase = S21Pak_AssetGuidHashBase();
+	const uintptr_t slotBase = Pak_GetSlotBase_S21();
+	if (!hashBase || !slotBase)
+		return;
+	for (unsigned int probe = 0; probe < 512; ++probe)
+	{
+		const unsigned __int16 bucketIdx = (unsigned __int16)(guid + (unsigned __int64)probe * probe);
+		const unsigned __int64* const bucket = reinterpret_cast<const unsigned __int64*>(hashBase + 64ull * bucketIdx);
+		for (int sl = 0; sl < 8; ++sl)
+		{
+			if (bucket[sl] == 0)
+			{
+				Msg(eDLL_T::RTECH, "[PAK-CHAIN] %s 0x%016llX: not in hash\n", tag, guid);
+				return;
+			}
+			if (bucket[sl] != guid)
+				continue;
+			const unsigned int h = (static_cast<unsigned int>(bucketIdx) << 3) | (sl & 7);
+			const uintptr_t entry = hashBase + 0x400000ull + 16ull * h;
+			const uintptr_t installed = *reinterpret_cast<const uintptr_t*>(entry);
+			unsigned int idx = *reinterpret_cast<const unsigned int*>(entry + 8);
+			const unsigned int flags = *reinterpret_cast<const unsigned int*>(entry + 12);
+			Msg(eDLL_T::RTECH, "[PAK-CHAIN] %s 0x%016llX: h=%u installed=%p flags=0x%X head=%u\n",
+				tag, guid, h, reinterpret_cast<void*>(installed), flags, idx);
+			for (int n = 0; n < 8 && idx != 0xFFFFFFFFu; ++n)
+			{
+				const uintptr_t tracked = hashBase + 0x1482800ull + 16ull * idx;
+				const uintptr_t pakHdr = *reinterpret_cast<const uintptr_t*>(tracked);
+				const unsigned int next = *reinterpret_cast<const unsigned int*>(tracked + 8);
+				const unsigned int pakSlot = *reinterpret_cast<const unsigned __int16*>(tracked + 12) & 0x1FF;
+				const uintptr_t slot = slotBase + static_cast<size_t>(pakSlot) * kS21_PakSlotStride;
+				const char* const name = *reinterpret_cast<const char* const*>(slot + kS21_PakSlot_Name);
+				Msg(eDLL_T::RTECH, "[PAK-CHAIN]   tracked=%u pakHdr=%p slot=%u '%s' status=%d priority=%llu\n",
+					idx, reinterpret_cast<void*>(pakHdr), pakSlot, name ? name : "?",
+					*reinterpret_cast<const int*>(slot + kS21_PakSlot_Status),
+					*reinterpret_cast<const unsigned __int64*>(slot + kS21_PakSlot_Priority));
+				idx = next;
+			}
+			return;
+		}
+	}
+}
+
+static void PakGuidChain_f(const CCommand& args)
+{
+	if (args.ArgC() < 2)
+		return;
+	Pak_DumpGuidChain_S21(_strtoui64(args.Arg(1), nullptr, 16), "cmd");
+}
+
+static ConCommand sdk_pak_guid_chain("sdk_pak_guid_chain", PakGuidChain_f,
+	"Dump the owner chain of a pak asset guid (hex). [PAK-CHAIN]", FCVAR_DEVELOPMENTONLY);
+
 // Hash hit is not enough: live data pointer at hashBase+0x400000+16*slot can still be NULL.
 static bool ConsistencyObs_GuidLive(uintptr_t hashBase, unsigned __int64 guid)
 {
@@ -1228,13 +1311,20 @@ static __int64 __fastcall Hook_PakConsistencyCheck_S21(__int64 a1, __int64 a2)
 			const uint32_t guidDescCount = Pak_S21GetGuidDescCount(reinterpret_cast<const void*>(a1));
 			const uintptr_t pageArray = *reinterpret_cast<const uintptr_t*>(a1 + kS21Pak_MemPageBuffersOffset);
 
+			// Keyed on the pak slot, not the struct pointer: slots are reused, so a
+			// pointer key silences every later pak in the same slot.
+			const int pakSlot = *reinterpret_cast<const int*>(a1 + 0x582C) & 0x1FF;
+			const char* const pakName = GetPakNameForSlot(pakSlot);
 			auto logSkip = [&](const char* reason)
 			{
-				static uintptr_t s_lastPak = 0;
-				if (static_cast<uintptr_t>(a1) == s_lastPak)
+				static int s_lastSlot = -1;
+				static unsigned __int64 s_lastAsset = 0;
+				if (pakSlot == s_lastSlot && assetGuid == s_lastAsset)
 					return;
-				s_lastPak = static_cast<uintptr_t>(a1);
-				Warning(eDLL_T::RTECH, "[CONSISTENCY-OBS] skipped walk: %s\n", reason);
+				s_lastSlot = pakSlot;
+				s_lastAsset = assetGuid;
+				Warning(eDLL_T::RTECH, "[CONSISTENCY-OBS] pak '%s' asset 0x%016llX: skipped walk: %s (refs %u start %u descs %u pages %u)\n",
+					pakName ? pakName : "?", assetGuid, reason, (unsigned)refCount, startIdx, guidDescCount, pageCount);
 			};
 
 			unsigned int walkCount = refCount;
@@ -1262,6 +1352,13 @@ static __int64 __fastcall Hook_PakConsistencyCheck_S21(__int64 a1, __int64 a2)
 				}
 				else
 				{
+					static int s_walkedSlot = -1;
+					if (pakSlot != s_walkedSlot)
+					{
+						s_walkedSlot = pakSlot;
+						Warning(eDLL_T::RTECH, "[CONSISTENCY-OBS] walking refs for pak '%s' (first asset 0x%016llX, %u refs)\n",
+							pakName ? pakName : "?", assetGuid, (unsigned)refCount);
+					}
 					const uintptr_t gdArray = gdBase + 8ull * startIdx;
 					for (unsigned int i = 0; i < walkCount; ++i)
 					{
@@ -1283,14 +1380,17 @@ static __int64 __fastcall Hook_PakConsistencyCheck_S21(__int64 a1, __int64 a2)
 						if (!pagePtr) continue;
 						const unsigned __int64 refGuid =
 							*reinterpret_cast<const unsigned __int64*>(pagePtr + pageOff);
-						if (!ConsistencyObs_GuidResolves(hashBase, refGuid))
+						// The engine also needs the tracked asset's live pointer: an on-demand
+						// model sits in the hash with NULL data until its root pak loads.
+						const bool inHash = ConsistencyObs_GuidResolves(hashBase, refGuid);
+						if (!inHash || !ConsistencyObs_GuidLive(hashBase, refGuid))
 						{
 							Warning(eDLL_T::RTECH,
-								"[CONSISTENCY-OBS] asset 0x%016llX references MISSING guid 0x%016llX (ref %u/%u)\n",
-								assetGuid, refGuid, i, (unsigned)refCount);
+								"[CONSISTENCY-OBS] asset 0x%016llX references %s guid 0x%016llX (ref %u/%u)\n",
+								assetGuid, inHash ? "NOT-LIVE" : "MISSING", refGuid, i, (unsigned)refCount);
 							BridgeTrace_Log(
-								"[CONSISTENCY-OBS] asset 0x%016llX references MISSING guid 0x%016llX (ref %u/%u)\n",
-								assetGuid, refGuid, i, (unsigned)refCount);
+								"[CONSISTENCY-OBS] asset 0x%016llX references %s guid 0x%016llX (ref %u/%u)\n",
+								assetGuid, inHash ? "NOT-LIVE" : "MISSING", refGuid, i, (unsigned)refCount);
 							BridgeTrace_Flush();
 						}
 					}

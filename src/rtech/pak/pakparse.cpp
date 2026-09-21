@@ -1899,37 +1899,38 @@ static void Pak_ResolveAssetRelations(PakFile_s* const pak, const PakAsset_s* co
             // are we some special asset with the guid 2?
             if (!Pak_ResolveAssetDependency(pak, currentGuid, targetGuid, currentIndex, true))
             {
-                PakAsset_s* assetEntries = pak->memoryData.assetEntries;
-                uint64_t a = 0;
+                const PakAsset_s* const assetEntries = pak->memoryData.assetEntries;
+                const uint32_t assetCount = pak->memoryData.pakHeader.assetCount;
+                uint32_t a = 0;
 
-                for (; assetEntries->guid != targetGuid; a++, assetEntries++)
+                for (; a < assetCount; a++)
                 {
-                    if (a >= pak->memoryData.pakHeader.assetCount)
-                    {
-                        if (!Pak_ResolveAssetDependency(pak, currentGuid, targetGuid, currentIndex, false))
-                        {
-                            // Unresolved settings-rPak model ref: write NULL.
-                            static std::atomic<uint64_t> s_unresolved{0};
-                            const uint64_t n = s_unresolved.fetch_add(1) + 1;
-                            if (n <= 20 || (n % 200) == 0)
-                            {
-                                Warning(eDLL_T::RTECH,
-                                    "[pak-fixup] unresolved dep %u/%u in '%s': "
-                                    "asset=0x%llX target=0x%llX (#%llu)\n",
-                                    i, asset->usesCount,
-                                    pak->memoryData.fileName,
-                                    asset->guid, targetGuid,
-                                    (unsigned long long)n);
-                            }
-                            *pCurrentGuid = nullptr;
-                            continue;
-                        }
-
+                    if (assetEntries[a].guid == targetGuid)
                         break;
-                    }
                 }
 
-                currentIndex = pak->memoryData.loadedAssetIndices[a];
+                if (a < assetCount)
+                {
+                    currentIndex = pak->memoryData.loadedAssetIndices[a];
+                }
+                else if (!Pak_ResolveAssetDependency(pak, currentGuid, targetGuid, currentIndex, false))
+                {
+                    // Dependency lives in a pak that is not loaded: leave the slot NULL.
+                    static std::atomic<uint64_t> s_unresolved{0};
+                    const uint64_t n = s_unresolved.fetch_add(1) + 1;
+                    if (n <= 20 || (n % 200) == 0)
+                    {
+                        Warning(eDLL_T::RTECH,
+                            "[pak-fixup] unresolved dep %u/%u in '%s': "
+                            "asset=0x%llX target=0x%llX (#%llu)\n",
+                            i, asset->usesCount,
+                            pak->memoryData.fileName,
+                            asset->guid, targetGuid,
+                            (unsigned long long)n);
+                    }
+                    *pCurrentGuid = nullptr;
+                    continue;
+                }
             }
         }
 

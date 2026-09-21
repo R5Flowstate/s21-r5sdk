@@ -14,6 +14,7 @@
 #include "game/server/util_server.h"
 #include "game/server/hitbox_debug.h"
 #include "game/server/headglitch_detect.h"
+#include "game/server/bot_cmd.h"
 
 static ConVar sv_simulateBots("sv_simulateBots", "1", FCVAR_RELEASE, "Simulate user commands for bots on the server.");
 
@@ -37,6 +38,9 @@ void Physics_RunBotSimulation(bool bSimulating)
 
 			const edict_t nEdict = pPlayer->GetEdict();
 			if (nEdict < 1 || nEdict == FL_EDICT_INVALID)
+				continue;
+
+			if (BotCmd_RunFrame(pPlayer))
 				continue;
 
 			pPlayer->RunNullCommand();

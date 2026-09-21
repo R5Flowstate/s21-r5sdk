@@ -115,37 +115,35 @@ static char* __fastcall Hook_CL_StringChanged(__int64 a1, __int64 table,
 	void** const modelInfoPP =
 		reinterpret_cast<void**>(NetObs_Sym(NetObsSym_t::ModelInfoClient));
 	if (!modelInfoPP) return nullptr;
-	// ModelInfoClient is an ADDRESS-TAKEN global (the singleton itself lives
-	// at that address as a vtable-like layout); index [4] holds the resolver
-	// function pointer.
-	void* const resolveFnPtr = modelInfoPP[4];
+	// The singleton's first qword is its vtable; the resolver is slot 4.
+	void** const modelInfoVtbl = reinterpret_cast<void**>(modelInfoPP[0]);
+	if (!modelInfoVtbl) return nullptr;
+	void* const resolveFnPtr = modelInfoVtbl[4];
 	if (!resolveFnPtr) return nullptr;
 
-	// Build the 32-byte resolver blob: copy the engine-provided userdata in
-	// when present (carries the SKIN/BODY/RENDER-BIN variant fields), then
-	// overlay the name pointer at +8 per the original blob layout.
+	// Resolver blob, same layout the retail writer builds: name, then the
+	// two variant strings and the variant index out of a 0xB0BA userdata.
 	uint8_t blob[32] = {};
-	if (userdata && userdataLen >= 32)
+	*reinterpret_cast<const char**>(blob) = name;
+	if (userdata && userdataLen > 9
+		&& *reinterpret_cast<const uint32_t*>(userdata) == 0xB0BAu
+		&& *reinterpret_cast<const int*>(userdata + 4) < 3)
 	{
-		memcpy(blob, reinterpret_cast<const void*>(userdata), 32);
-	}
-	else
-	{
-		// Fallback: legacy zero-init + name. Warn once so missing-variant
-		// cases are visible in warning.log instead of silently regressing.
-		static std::atomic<uint32_t> s_fallbackHits{0};
-		if (s_fallbackHits.fetch_add(1, std::memory_order_relaxed) == 0)
+		const char* const s0 = reinterpret_cast<const char*>(userdata + 8);
+		const size_t room = static_cast<size_t>(userdataLen - 8);
+		const size_t l0 = strnlen(s0, room);
+		if (l0 < room)
 		{
-			Warning(eDLL_T::CLIENT,
-				"[CLG-S21] WRITER fallback: idx=%d name='%s' userdata=%p "
-				"len=%lld -- variant fields zeroed (legendary skin will "
-				"resolve to base; further fallbacks suppressed)\n",
-				idx, name ? name : "(null)", (void*)userdata,
-				static_cast<long long>(userdataLen));
+			const char* const s1 = s0 + l0 + 1;
+			const size_t room1 = room - l0 - 1;
+			if (strnlen(s1, room1) < room1)
+			{
+				*reinterpret_cast<const char**>(blob + 8) = s0;
+				*reinterpret_cast<const char**>(blob + 16) = s1;
+				*reinterpret_cast<int*>(blob + 24) = *reinterpret_cast<const int*>(userdata + 4);
+			}
 		}
 	}
-	// Always overlay name at +8 (defensive: matches original blob layout).
-	*reinterpret_cast<uintptr_t*>(blob + 8) = reinterpret_cast<uintptr_t>(name);
 
 	typedef __int64 (__fastcall* ResolveFn)(void* singleton, void* blob);
 	const ResolveFn resolveFn = reinterpret_cast<ResolveFn>(resolveFnPtr);
@@ -250,14 +248,16 @@ static __int64 __fastcall Hook_CL_SetModelByIndex(unsigned int idx)
 
 	void** const modelInfoPP =
 		reinterpret_cast<void**>(NetObs_Sym(NetObsSym_t::ModelInfoClient));
-	if (!modelInfoPP || !modelInfoPP[4])
+	if (!modelInfoPP)
 		return 0;
 
 	uint8_t blob[32] = {};
 	*reinterpret_cast<uintptr_t*>(blob) = reinterpret_cast<uintptr_t>(name);
 
+	void** const modelInfoVtbl = reinterpret_cast<void**>(modelInfoPP[0]);
+	if (!modelInfoVtbl || !modelInfoVtbl[4]) return 0;
 	typedef __int64 (__fastcall* ResolveFn)(void* singleton, void* blob);
-	const ResolveFn resolveFn = reinterpret_cast<ResolveFn>(modelInfoPP[4]);
+	const ResolveFn resolveFn = reinterpret_cast<ResolveFn>(modelInfoVtbl[4]);
 	const __int64 modelPtr = resolveFn(modelInfoPP, blob);
 	Shadow_StoreModel(idx, static_cast<uintptr_t>(modelPtr));
 
@@ -405,6 +405,13 @@ static __int64 __fastcall Hook_CL_ClientStateClear(void* clstate)
 //-----------------------------------------------------------------------------
 // Stats accessor for the dump probe (sdk_dump_modelprecache_full).
 //-----------------------------------------------------------------------------
+uint8_t* MdlPrecacheShadow_Slot(const uint32_t idx)
+{
+	if (!g_pShadowItems || idx < kShadowBase || idx >= kShadowEnd)
+		return nullptr;
+	return g_pShadowItems + (idx - kShadowBase) * kEntrySize;
+}
+
 void MdlPrecacheShadow_GetStats(MdlPrecacheShadowStats* out)
 {
 	out->pBase      = g_pShadowItems;

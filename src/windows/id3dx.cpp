@@ -6,6 +6,7 @@
 #include "tier0/commandline.h"
 #include "tier1/cvar.h"
 #include "windows/id3dx.h"
+#include "engine/client/discord_presence.h"
 #include "windows/framegen.h"
 #include "windows/dlssnr.h"
 #include "windows/dlss_sr.h"
@@ -940,6 +941,8 @@ static __int64 __fastcall EnginePresent_Hook(void* pThis, void* pFrameCtx)
 	if (n == 1 || (n % 18000) == 0)
 		SDK_Log("[IMGUI-DX12] EnginePresent n=%lld sc=%p drive=%lld\n",
 			n, (void*)swapChain, (long long)s_presentCount);
+
+	CDiscordPresence::Update();
 
 	if (swapChain)
 	{

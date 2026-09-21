@@ -52,6 +52,9 @@
 #include "game/server/jetdrive.h"
 #include "game/server/trigger_updraft.h"
 #include "game/server/skydive.h"
+#include "game/server/cmd_recorder.h"
+#include "game/server/mapedit_paks.h"
+#include "game/server/bot_cmd.h"
 #include "game/server/player_overheat.h"
 #include "game/server/context_action.h"
 #include "game/server/translocation.h"
@@ -98,6 +101,69 @@ static void SQVM_ServerScript_f(const CCommand& args)
     ScriptRemoteC2S_DropFnCache();
 }
 static ConCommand script("script", SQVM_ServerScript_f, "Run input code as SERVER script on the VM", FCVAR_GAMEDLL | FCVAR_CHEAT | FCVAR_DEVELOPMENTONLY | FCVAR_SERVER_FRAME_THREAD);
+
+// Runs every 'script ...' line of cfg/<name>.cfg straight on the server VM.
+// The console command buffer drops most of a long cfg, so map builds
+// exported as script lines go through here instead of 'exec'.
+static void SQVM_RemapBuild_f(const CCommand& args)
+{
+    if (args.ArgC() < 2)
+    {
+        Warning(eDLL_T::SERVER, "remap_build: missing name (cfg/<name>.cfg)\n");
+        return;
+    }
+    const char* const pszName = args.Arg(1);
+    for (const char* c = pszName; *c; ++c)
+    {
+        if (!V_isalnum(*c) && *c != '_' && *c != '-')
+        {
+            Warning(eDLL_T::SERVER, "remap_build: refused name '%s'\n", pszName);
+            return;
+        }
+    }
+    char szPath[MAX_OSPATH];
+    V_snprintf(szPath, sizeof(szPath), "cfg/%s.cfg", pszName);
+    FileHandle_t hFile = FileSystem()->Open(szPath, "rb", "PLATFORM");
+    if (hFile == FILESYSTEM_INVALID_HANDLE)
+    {
+        Warning(eDLL_T::SERVER, "remap_build: cannot open %s\n", szPath);
+        return;
+    }
+    const ssize_t nLen = FileSystem()->Size(hFile);
+    if (nLen <= 0 || nLen > (4 << 20))
+    {
+        Warning(eDLL_T::SERVER, "remap_build: %s has bad size %zd\n", szPath, nLen);
+        FileSystem()->Close(hFile);
+        return;
+    }
+    std::unique_ptr<char[]> pBuf(new char[nLen + 1]);
+    FileSystem()->Read(pBuf.get(), nLen, hFile);
+    FileSystem()->Close(hFile);
+    pBuf[nLen] = '\0';
+
+    int nRun = 0, nSkipped = 0;
+    char* pLine = pBuf.get();
+    while (pLine && *pLine)
+    {
+        char* pNext = strchr(pLine, '\n');
+        if (pNext)
+            *pNext++ = '\0';
+        size_t nLine = strlen(pLine);
+        while (nLine && (pLine[nLine - 1] == '\r' || pLine[nLine - 1] == ' '))
+            pLine[--nLine] = '\0';
+        if (strncmp(pLine, "script ", 7) == 0 && pLine[7])
+        {
+            Script_Execute(pLine + 7, SQCONTEXT::SERVER);
+            nRun++;
+        }
+        else if (nLine)
+            nSkipped++;
+        pLine = pNext;
+    }
+    ScriptRemoteC2S_DropFnCache();
+    Msg(eDLL_T::SERVER, "remap_build: %s ran %d script line(s), skipped %d\n", szPath, nRun, nSkipped);
+}
+static ConCommand remap_build("remap_build", SQVM_RemapBuild_f, "Run every 'script' line of cfg/<name>.cfg on the SERVER VM, bypassing the command buffer", FCVAR_GAMEDLL | FCVAR_CHEAT | FCVAR_DEVELOPMENTONLY | FCVAR_SERVER_FRAME_THREAD);
 
 static void SQVM_SpawnBots_f(const CCommand& args)
 {
@@ -1866,6 +1932,10 @@ void Script_RegisterCoreServerFunctions(CSquirrelVM* s)
 
     s->RegisterConstant("SNDC_GLOBAL_NON_REWIND", 5);
 
+    s->RegisterConstant("AKIMBO_STATE_NONE", 0);
+    s->RegisterConstant("AKIMBO_STATE_SINGLE", 1);
+    s->RegisterConstant("AKIMBO_STATE_OFFHAND", 2);
+    s->RegisterConstant("AKIMBO_STATE_ACTIVE", 3);
     s->RegisterConstant("GRX_CURRENCY_PREMIUM", 0);
     s->RegisterConstant("GRX_CURRENCY_CREDITS", 1);
     s->RegisterConstant("GRX_CURRENCY_CRAFTING", 2);
@@ -1966,6 +2036,8 @@ void Script_RegisterAdminServerFunctions(CSquirrelVM* s)
 {
     DEFINE_SERVER_SCRIPTFUNC_NAMED(s, GetNumHumanPlayers, "Gets the number of human players on the server", "int", "", false);
     DEFINE_SERVER_SCRIPTFUNC_NAMED(s, GetNumFakeClients, "Gets the number of bot players on the server", "int", "", false);
+    CmdRecorder_RegisterGlobalFuncs(s);
+    MapEditPaks_RegisterServerFunctions(s);
 
     DEFINE_SERVER_SCRIPTFUNC_NAMED(s, CreateFakePlayer, "Creates a fake player and returns the edict index (-1 on failure). Use GetPlayerArray() to get entity.", "int", "string name, int team", false);
 
@@ -2056,6 +2128,8 @@ static void Script_RegisterServerPlayerClassFuncs()
     JetDrive_RegisterScriptFunctions(g_serverScriptPlayerStruct);
     UpdraftBridge_RegisterScriptFunctions(g_serverScriptPlayerStruct);
     SkydiveBridge_RegisterScriptFunctions(g_serverScriptPlayerStruct);
+    CmdRecorder_RegisterPlayerFuncs(g_serverScriptPlayerStruct);
+    BotCmd_RegisterPlayerFuncs(g_serverScriptPlayerStruct);
     Translocation_RegisterPlayerFuncs(g_serverScriptPlayerStruct);
 
     // Register SERVER-ONLY player setters (NonRewind setters must not be on CLIENT)

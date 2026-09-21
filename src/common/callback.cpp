@@ -212,6 +212,11 @@ void LanguageChanged_f(IConVar* pConVar, const char* pOldString, float flOldValu
 
 void setClassVarClient_f(const CCommand& args)
 {
+	if (!v__setClassVarClient_f)
+	{
+		Warning(eDLL_T::CLIENT, "[CLASSVAR] _setClassVarClient: native handler unresolved on this client\n");
+		return;
+	}
 	v__setClassVarClient_f(args);
 }
 
@@ -226,6 +231,11 @@ Set_f
 */
 void Set_f(const CCommand& args)
 {
+	if (!v__setClassVarClient_f)
+	{
+		Warning(eDLL_T::CLIENT, "[CLASSVAR] set: native handler unresolved on this client\n");
+		return;
+	}
 	v__setClassVarClient_f(args);
 
 	const char* key = args.Arg(1);

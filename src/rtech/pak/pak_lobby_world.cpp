@@ -13,6 +13,7 @@
 #include "tier1/cvar.h"
 #include "pak_lobby_world.h"
 #include "pak_census.h"
+#include "mapedit_paks_cl.h"
 #include "rpak_observe.h"
 
 ConVar bridge_direct_map_load("bridge_direct_map_load", "1", FCVAR_RELEASE,
@@ -148,6 +149,7 @@ static const char* DestMapFallback(void)
 
 static void Hook_SetupMapPaks(int mode, const char* pszMap)
 {
+	MapEditPaks_UnloadAll("SetupMapPaks");
 	if (mode != 1)
 	{
 		char szReason[96];

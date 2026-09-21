@@ -1185,6 +1185,47 @@ static ConCommand sdk_settings_disk_status(
 
 #if defined(CLIENT_DLL)
 //-----------------------------------------------------------------------------
+// Purpose: run the engine's own guid lookup over a "type asset ref own|ext" list
+// (platform/<file>) and name every ref the engine cannot find. [PAK-REF-PROBE]
+//-----------------------------------------------------------------------------
+static void PakRefProbe_f(const CCommand& args)
+{
+	const char* const file = args.ArgC() > 1 ? args.Arg(1) : "akimbo_refs.txt";
+	char path[MAX_PATH];
+	V_snprintf(path, sizeof(path), "platform/%s", file);
+	FILE* const f = fopen(path, "r");
+	if (!f)
+	{
+		Warning(eDLL_T::RTECH, "[PAK-REF-PROBE] cannot open %s\n", path);
+		return;
+	}
+
+	char line[256];
+	int total = 0, missing = 0;
+	while (fgets(line, sizeof(line), f))
+	{
+		char type[16];
+		unsigned long long asset = 0, ref = 0;
+		char kind[8] = {};
+		if (sscanf(line, "%15s %llx %llx %7s", type, &asset, &ref, kind) < 3)
+			continue;
+		++total;
+		if (!v_Pak_FindAssetVoid_S21(ref, nullptr))
+		{
+			++missing;
+			Warning(eDLL_T::RTECH, "[PAK-REF-PROBE] %s 0x%016llX -> MISSING 0x%016llX (%s)\n",
+				type, asset, ref, kind);
+		}
+	}
+	fclose(f);
+	Msg(eDLL_T::RTECH, "[PAK-REF-PROBE] %d refs, %d missing\n", total, missing);
+}
+
+static ConCommand sdk_pak_ref_probe("sdk_pak_ref_probe", PakRefProbe_f,
+	"Run the engine guid lookup over platform/<file> (default akimbo_refs.txt) and list unresolvable refs.",
+	FCVAR_DEVELOPMENTONLY);
+
+//-----------------------------------------------------------------------------
 // Fast path: native then lock-free index miss. Slow path: s_buildMutex, then retry native.
 //-----------------------------------------------------------------------------
 static void* __fastcall Hook_Pak_FindAssetVoid_S21(uint64_t guid, uint32_t* handleOut)

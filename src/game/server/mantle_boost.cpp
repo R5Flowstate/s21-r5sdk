@@ -59,6 +59,9 @@ static constexpr ptrdiff_t MB_PLAYER_OFF_TRAVERSAL_STATE  = 26280;  // m_travers
 static constexpr ptrdiff_t MB_PLAYER_OFF_MOVE_SCALE       = 24884;  // m_cachedMoveScale -- GetPoseSpeed_Sprint multiplier
 static constexpr ptrdiff_t MB_PLAYER_OFF_MOVE_SPEED_SCALE = 24880;  // m_playerMoveSpeedScale
 static constexpr ptrdiff_t MB_PLAYER_OFF_TIMELASTLANDED   = 25116;  // last-landing timestamp (same field as SKIP_TIMESTAMP)
+static constexpr ptrdiff_t MB_PLAYER_OFF_GRAPPLE_ACTIVE    = 26552;  // bool m_grappleActive
+static constexpr ptrdiff_t MB_PLAYER_OFF_GRAPPLE_POINTS    = 26492;  // int m_grapple.m_grapplePointCount
+static constexpr ptrdiff_t MB_PLAYER_OFF_GRAPPLE_ATTACHED  = 26496;  // bool m_grapple.m_grappleAttached
 
 //-----------------------------------------------------------------------------
 // Engine function pointers.
@@ -186,6 +189,7 @@ struct MantleBoostSlot_t
 	float           m_flDecisionDelta;
 	float           m_flDecisionAnim;
 	int             m_nPublishedState;          // last ENCODED value written to the replicated prop (change gate)
+	bool            m_bGrappledSinceBoost;      // grapple attached while state 4; detaching ends the boost like landing
 };
 static MantleBoostSlot_t s_mantleBoost[MAX_PLAYERS];
 
@@ -440,6 +444,16 @@ static void MantleBoost_EvaluateTrigger(CPlayer* const player, const uint8_t* co
 		s.m_flPrevDelta = flLiveDelta;
 }
 
+int MantleBoost_GetState(const CPlayer* const player)
+{
+	if (!player)
+		return 0;
+	const int slot = static_cast<int>(player->GetEdict()) - 1;
+	if (slot < 0 || slot >= MAX_PLAYERS)
+		return 0;
+	return s_mantleBoost[slot].m_nState;
+}
+
 //-----------------------------------------------------------------------------
 // Finish apply: overwrite exit velocity, then one native Jump or Duck, never both.
 //-----------------------------------------------------------------------------
@@ -515,6 +529,7 @@ static void MantleBoost_ApplyBoost(void* const ctx, CPlayer* const player,
 		MantleBoost_FireCallback(player);
 
 		s.m_flBoostAppliedTime = gpGlobals ? gpGlobals->curTime : 0.0f;
+		s.m_bGrappledSinceBoost = false;
 	}
 
 	const int  nSetting    = MantleBoost_GetInputSetting(player);
@@ -693,14 +708,21 @@ bool MantleBoost_ShouldSuppressTapStrafe(const CPlayer* const player)
 
 	MantleBoostSlot_t& s = s_mantleBoost[slot];
 
-	// Clear state 4 when last-landing time advances past the boost-apply stamp (`>` so finish-tick equal stays restricted).
+	// Clear state 4 when last-landing time advances past the boost-apply stamp (`>` so finish-tick equal stays restricted),
+	// or when a grapple taken during the boost lets go (grapple detach clears the state the same way landing does).
 	if (s.m_nState == 4)
 	{
-		const float flLanded = *reinterpret_cast<const float*>(
-			reinterpret_cast<uintptr_t>(player) + MB_PLAYER_OFF_TIMELASTLANDED);
-		if (flLanded > s.m_flBoostAppliedTime)
+		const uintptr_t p = reinterpret_cast<uintptr_t>(player);
+		const float flLanded = *reinterpret_cast<const float*>(p + MB_PLAYER_OFF_TIMELASTLANDED);
+		const bool bGrappled = *reinterpret_cast<const bool*>(p + MB_PLAYER_OFF_GRAPPLE_ACTIVE)
+			&& *reinterpret_cast<const int*>(p + MB_PLAYER_OFF_GRAPPLE_POINTS) != 0
+			&& *reinterpret_cast<const bool*>(p + MB_PLAYER_OFF_GRAPPLE_ATTACHED);
+		if (bGrappled)
+			s.m_bGrappledSinceBoost = true;
+		if (flLanded > s.m_flBoostAppliedTime || (s.m_bGrappledSinceBoost && !bGrappled))
 		{
-			s.m_nState = 0;   // S21 TouchGround clear
+			s.m_nState = 0;
+			s.m_bGrappledSinceBoost = false;
 			MantleBoost_PublishState(const_cast<CPlayer*>(player), s);
 		}
 	}

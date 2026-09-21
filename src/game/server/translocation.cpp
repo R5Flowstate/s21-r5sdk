@@ -6,6 +6,7 @@
 
 #include "core/stdafx.h"
 #include "translocation.h"
+#include "game/server/cmd_recorder.h"
 #include "baseentity.h"
 #include "player.h"
 #include "game/server/util_server.h"
@@ -13,6 +14,7 @@
 #include "game/shared/vscript_gamedll_defs.h"
 #include "game/shared/weapon_script_vars.h"
 #include "game/server/jetdrive.h"
+#include "game/server/akimbo.h"
 #include "game/server/player_launch.h"
 #include "game/server/trigger_cannon.h"
 #include "game/server/melee_activity_trace.h"
@@ -1395,6 +1397,7 @@ static void Hook_PlayerRunCommand(CPlayer* pPlayer, CUserCmd* pUserCmd, IMoveHel
 		pUserCmd->buttons &= ~kDropClickBits;
 	}
 	CPlayer__PlayerRunCommand(pPlayer, pUserCmd, pMover);
+	CmdRecorder_OnRunCommand(pPlayer, pUserCmd);
 	if (pPlayer)
 	{
 		if (Translocation_ShouldEatAttack(pPlayer))
@@ -1479,6 +1482,11 @@ static char Hook_HolsterInternal(void* pWeapon, bool bDoFastHolster)
 
 	const char result = v_WeaponX_HolsterInternal(pWeapon, bDoFastHolster);
 	Translocation_ClearOneHand(pWeapon);
+	// Partner cascade only when this holster actually ran: the switch think
+	// re-calls HolsterInternal every tick while it waits, and those repeats
+	// are no-ops for the main.
+	if (result && pWeapon && Translocation_WeaponState(pWeapon) != weapState)
+		AkimboBridge_PostHolster(pWeapon, bDoFastHolster, _ReturnAddress());
 	return result;
 }
 

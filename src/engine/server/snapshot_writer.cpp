@@ -315,7 +315,7 @@ static void* SGE_AllocSnapshotBucketBacking()
 
 static bool SGE_LooksLikeUserPointer(uintptr_t addr)
 {
-	return addr >= 0x0000010000000000ULL &&
+	return addr >= 0x10000ULL &&
 		addr < 0x0000080000000000ULL &&
 		(addr & 7) == 0;
 }
@@ -719,7 +719,7 @@ static bool S21Bridge_InstallCollectBucketNullPatch(uint8_t* site)
 		emitJccToSkip(0x85); // jnz skipTarget
 
 		cave[pos++] = 0x48; cave[pos++] = 0xB8; // mov rax, minUserPtr
-		uint64_t minUserPtr = 0x0000010000000000ULL;
+		uint64_t minUserPtr = 0x10000ULL;
 		memcpy(cave + pos, &minUserPtr, sizeof(minUserPtr)); pos += 8;
 		cave[pos++] = 0x49; cave[pos++] = 0x39; cave[pos++] = 0xC2; // cmp r10, rax
 		emitJccToSkip(0x82); // jb skipTarget

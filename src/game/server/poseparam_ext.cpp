@@ -50,11 +50,22 @@ static float    s_poseExt[MAX_EDICTS][kExtPoseSlots];
 static void*    s_poseExtOwner[MAX_EDICTS];
 static uint32_t s_poseExtOwnerHandle[MAX_EDICTS];
 
+// Filtered locomotion state per player, what the engine keeps on its animstate.
+struct MoveYawState_s
+{
+	void* m_pOwner;
+	float m_flVelYaw;
+	float m_flYaw;
+	float m_flYawBack;
+};
+static MoveYawState_s s_moveYaw[MAX_EDICTS];
+
 void PoseParamExt_LevelShutdown(void)
 {
 	memset(s_poseExt, 0, sizeof(s_poseExt));
 	memset(s_poseExtOwner, 0, sizeof(s_poseExtOwner));
 	memset(s_poseExtOwnerHandle, 0, sizeof(s_poseExtOwnerHandle));
+	memset(s_moveYaw, 0, sizeof(s_moveYaw));
 }
 
 //-----------------------------------------------------------------------------
@@ -97,6 +108,12 @@ static ConVar bridge_pose_moveyaw(
 	"bridge_pose_moveyaw", "1", FCVAR_RELEASE | FCVAR_GAMEDLL | FCVAR_CHEAT,
 	"After server animstate Update, write move_yaw / move_yaw_backward from "
 	"abs-velocity vs EyeAngles so remotes receive the strafe lean. 0 = stock.");
+
+static ConVar bridge_pose_moveyaw_rate(
+	"bridge_pose_moveyaw_rate", "5", FCVAR_RELEASE | FCVAR_GAMEDLL | FCVAR_CHEAT,
+	"Exponential approach rate (1/s) of the authored move_yaw toward the "
+	"velocity lean, the engine's own locomotion filter. 0 = write the raw "
+	"value every update.", true, 0.f, true, 60.f);
 
 static constexpr LONG kTallyInterval = 64;
 static constexpr LONG kVerboseMax    = 64;
@@ -584,7 +601,7 @@ static float __fastcall Hook_NativeSetPoseParameter(void* self, void* studio, in
 // Indices, not names -- Update's name walk bails the whole pose block when
 // aim_pitch misses.
 //-----------------------------------------------------------------------------
-static void PoseExt_AuthorMoveYaw(void* animstate)
+static void PoseExt_AuthorMoveYaw(void* animstate, const float flDt)
 {
 	if (!bridge_pose_moveyaw.GetBool() || !animstate || !v_CPlayer_EyeAngles)
 		return;
@@ -593,7 +610,8 @@ static void PoseExt_AuthorMoveYaw(void* animstate)
 		reinterpret_cast<const uint8_t*>(animstate) + ANIMSTATE_OFF_PLAYER);
 	if (!player)
 		return;
-	if (PoseExt_ReadEdictIdx(player) < 0)
+	const int edictIdx = PoseExt_ReadEdictIdx(player);
+	if (edictIdx < 0)
 		return;
 
 	QAngle eye;
@@ -610,33 +628,58 @@ static void PoseExt_AuthorMoveYaw(void* animstate)
 		reinterpret_cast<const uint8_t*>(player) + ENT_OFF_ABSVELOCITY);
 	const float speed2d = sqrtf((vel[0] * vel[0]) + (vel[1] * vel[1]));
 
-	float moveYaw = 0.0f;
-	float moveYawBack = 0.0f;
-	if (speed2d > 0.5f)
+	MoveYawState_s& st = s_moveYaw[edictIdx];
+	const float dt = Max(flDt, 0.0f);
+	const float rate = bridge_pose_moveyaw_rate.GetFloat();
+	const bool bFresh = st.m_pOwner != player || rate <= 0.0f;
+	if (bFresh)
 	{
-		const float velYaw = RAD2DEG(atan2f(vel[1], vel[0]));
-		float delta = AngleNormalize(velYaw - eye.y);
-		if (delta < -90.0f || delta > 90.0f)
-		{
-			moveYawBack = AngleNormalize(delta + 180.0f);
-			moveYaw = -moveYawBack;
-		}
-		else
-		{
-			moveYaw = delta;
-			moveYawBack = -delta;
-		}
+		st.m_pOwner = player;
+		st.m_flVelYaw = eye.y;
 	}
 
-	const float ctlYaw = PoseExt_PlusMinus90ToControl(moveYaw);
-	const float ctlBack = PoseExt_PlusMinus90ToControl(moveYawBack);
+	// A stopped body eases its heading back onto the eyes instead of
+	// dropping the lean in one update.
+	if (speed2d > 0.5f)
+		st.m_flVelYaw = RAD2DEG(atan2f(vel[1], vel[0]));
+	else if (!bFresh)
+		st.m_flVelYaw += AngleNormalize(eye.y - st.m_flVelYaw) * Min(dt * 4.0f, 1.0f);
+
+	float moveYaw;
+	float moveYawBack;
+	const float delta = AngleNormalize(st.m_flVelYaw - eye.y);
+	if (delta < -90.0f || delta > 90.0f)
+	{
+		moveYawBack = AngleNormalize(delta + 180.0f);
+		moveYaw = -moveYawBack;
+	}
+	else
+	{
+		moveYaw = delta;
+		moveYawBack = -delta;
+	}
+
+	if (bFresh)
+	{
+		st.m_flYaw = moveYaw;
+		st.m_flYawBack = moveYawBack;
+	}
+	else if (dt > 0.0f)
+	{
+		const float keep = expf(-rate * dt);
+		st.m_flYaw = (1.0f - keep) * moveYaw + keep * st.m_flYaw;
+		st.m_flYawBack = (1.0f - keep) * moveYawBack + keep * st.m_flYawBack;
+	}
+
+	const float ctlYaw = PoseExt_PlusMinus90ToControl(st.m_flYaw);
+	const float ctlBack = PoseExt_PlusMinus90ToControl(st.m_flYawBack);
 	PoseExt_WriteControl(player, kPoseIdxMoveYaw, ctlYaw);
 	PoseExt_WriteControl(player, kPoseIdxMoveYawBackward, ctlBack);
 
 	if (InterlockedCompareExchange(&s_bMoveYawAnnounced, 1, 0) == 0)
 		Msg(eDLL_T::SERVER,
-			"[POSE-MOVEYAW] first author deg=%.1f ctl=%.4f speed=%.1f eye=%.1f edict=%d\n",
-			moveYaw, ctlYaw, speed2d, eye.y, PoseExt_ReadEdictIdx(player));
+			"[POSE-MOVEYAW] first author deg=%.1f ctl=%.4f speed=%.1f eye=%.1f dt=%.4f edict=%d\n",
+			st.m_flYaw, ctlYaw, speed2d, eye.y, dt, edictIdx);
 }
 
 static __int64 __fastcall Hook_ServerAnimStateUpdate(void* animstate, float flDt, float a3, float a4)
@@ -644,7 +687,7 @@ static __int64 __fastcall Hook_ServerAnimStateUpdate(void* animstate, float flDt
 	const __int64 result = v_ServerAnimStateUpdate
 		? v_ServerAnimStateUpdate(animstate, flDt, a3, a4)
 		: 0;
-	PoseExt_AuthorMoveYaw(animstate);
+	PoseExt_AuthorMoveYaw(animstate, flDt);
 	return result;
 }
 

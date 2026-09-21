@@ -1192,7 +1192,6 @@ static __int64 __fastcall Hook_RecvTableDecode(__int64 recvTable, __int64 a2, __
 bool IsBadRecvPropPtr(uintptr_t p)
 {
 	return p < 0x10000ULL ||
-	       p < 0x0000010000000000ULL ||
 	       (p & 0xFFFF800000000000ULL) != 0 ||
 	       (p & 7ULL) != 0;
 }

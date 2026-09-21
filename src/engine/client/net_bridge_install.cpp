@@ -6,6 +6,7 @@
 #include "common/callback.h"
 #include "windows/pso_cache.h"
 #include "core/stdafx.h"
+#include "engine/client/discord_presence.h"
 #include <thread>
 
 #include "engine/client/net_observer.h"
@@ -15,6 +16,7 @@
 #include "engine/client/bridge_connect_password.h"
 #include "engine/sys_integrity.h"
 #include "rtech/pak/pak_lobby_world.h"
+#include "rtech/pak/mapedit_paks_cl.h"
 #include "engine/mdl_precache_client_grow.h"
 #include "tier0/memvalidate.h"
 #include "tier0/commandline.h"
@@ -2870,9 +2872,10 @@ static char __fastcall Hook_EngineFrame(void* a1)
 
 static void __fastcall Hook_HostStateFrame(__int64 a1, double a2, float a3)
 {
-	// CHostState::FrameUpdate is skipped; pump RCON here instead.
+	// CHostState::FrameUpdate is skipped; pump RCON and presence here instead.
 	RCON_LauncherClient_Think();
 	RCONClient()->RunFrame();
+	CDiscordPresence::Update();
 
 	if (s_origHostStateFrame)
 		s_origHostStateFrame(a1, a2, a3);
@@ -2890,6 +2893,7 @@ static void __fastcall Hook_HostStateFrameEarly(__int64 a1, double a2, float a3)
 
 	RCON_LauncherClient_Think();
 	RCONClient()->RunFrame();
+	CDiscordPresence::Update();
 
 	if (s_origHostStateFrameEarly)
 		s_origHostStateFrameEarly(a1, a2, a3);
@@ -5923,12 +5927,15 @@ static int Bridge_RefreshStubPrecacheChunk(int startIdx, int win)
 		__try { s_mpErrAsset = findAsset(Pak_StringToGuid("mdl/error.rmdl"), nullptr); }
 		__except (EXCEPTION_EXECUTE_HANDLER) { s_mpErrAsset = nullptr; }
 
-	for (int idx = startIdx; idx < startIdx + win && idx < 8192; ++idx)
+	for (int idx = startIdx; idx < startIdx + win && idx < 16384; ++idx)
 	{
 		__try {
 			const char* name = Bridge_StringTableGet(reinterpret_cast<void*>(table), idx);
 			if (!name || name[0] == '*') continue;
-			__int64* entry = *reinterpret_cast<__int64**>(items + (uintptr_t)idx * 16 + 8);
+			uintptr_t slot = idx < 8192 ? items + (uintptr_t)idx * 16
+				: reinterpret_cast<uintptr_t>(MdlPrecacheShadow_Slot(static_cast<uint32_t>(idx)));
+			if (!slot) continue;
+			__int64* entry = *reinterpret_cast<__int64**>(slot + 8);
 			if (!Bridge_IsCanonPtr(reinterpret_cast<uint64_t>(entry))) continue;
 			void* studio = reinterpret_cast<void*>(entry[6]);                          // entry+0x30
 			if (Bridge_IsCanonPtr(reinterpret_cast<uint64_t>(studio)) && studio != s_mpErrAsset)
@@ -5959,7 +5966,7 @@ static __int64 __fastcall Hook_PropApplyLoop(
 		const int kWin = 512;
 		s_mpFixedThisSweep += Bridge_RefreshStubPrecacheChunk(s_mpScanCursor, kWin);
 		s_mpScanCursor += kWin;
-		if (s_mpScanCursor >= 8192)   // wrapped a full sweep
+		if (s_mpScanCursor >= 16384)   // wrapped a full sweep
 		{
 			if (s_mpFixedThisSweep == 0)
 				++s_mpStableSweeps;
@@ -5990,6 +5997,74 @@ static __int64 __fastcall Hook_PropApplyLoop(
 
 	Bridge_AfterEntityApply(a4, a5);
 	return result;
+}
+
+static void CC_ModelPrecacheSlot(const CCommand& args)
+{
+	if (args.ArgC() < 2)
+	{
+		Msg(eDLL_T::CLIENT, "usage: sdk_modelprecache_slot <idx|name>\n");
+		return;
+	}
+	uintptr_t table = 0, items = 0;
+	__try {
+		table = *reinterpret_cast<uintptr_t*>(NetObs_ModelPrecacheTablePtrAddr());
+		items = NetObs_ModelPrecacheItemsAddr();
+	} __except (EXCEPTION_EXECUTE_HANDLER) { return; }
+	if (!Bridge_IsCanonPtr(table) || !items)
+	{
+		Msg(eDLL_T::CLIENT, "[MP-SLOT] no modelprecache table\n");
+		return;
+	}
+	const int n = Bridge_StringTableNumEntries(reinterpret_cast<void*>(table));
+	int idx = atoi(args.Arg(1));
+	if (idx <= 0)
+	{
+		for (int i = 1; i < n; ++i)
+		{
+			const char* nm = Bridge_StringTableGet(reinterpret_cast<void*>(table), i);
+			if (nm && !V_stricmp(nm, args.Arg(1))) { idx = i; break; }
+		}
+	}
+	if (idx <= 0 || idx >= n)
+	{
+		Msg(eDLL_T::CLIENT, "[MP-SLOT] '%s' not in table (entries=%d)\n", args.Arg(1), n);
+		return;
+	}
+	const char* name = Bridge_StringTableGet(reinterpret_cast<void*>(table), idx);
+	const uintptr_t slot = idx < 8192 ? items + (uintptr_t)idx * 16
+		: reinterpret_cast<uintptr_t>(MdlPrecacheShadow_Slot(static_cast<uint32_t>(idx)));
+	const uint32_t flags = *reinterpret_cast<uint32_t*>(slot);
+	__int64* entry = *reinterpret_cast<__int64**>(slot + 8);
+	using FindAssetFn = void* (__fastcall*)(unsigned __int64, unsigned int*);
+	FindAssetFn findAsset = reinterpret_cast<FindAssetFn>(NetObs_Sym(NetObsSym_t::PakFindAsset));
+	void* asset = nullptr;
+	__try { asset = name && findAsset ? findAsset(Pak_StringToGuid(name), nullptr) : nullptr; }
+	__except (EXCEPTION_EXECUTE_HANDLER) { asset = nullptr; }
+	Msg(eDLL_T::CLIENT, "[MP-SLOT] idx=%d name='%s' flags=0x%X model_t=%p asset=%p err=%p entries=%d\n",
+		idx, name ? name : "(null)", flags, reinterpret_cast<void*>(entry), asset, s_mpErrAsset, n);
+	if (!Bridge_IsCanonPtr(reinterpret_cast<uint64_t>(entry)))
+		return;
+	__try
+	{
+		for (int q = 0; q < 16; q += 4)
+			Msg(eDLL_T::CLIENT, "[MP-SLOT]   +0x%02X %016llX %016llX %016llX %016llX\n", q * 8,
+				(unsigned long long)entry[q], (unsigned long long)entry[q + 1],
+				(unsigned long long)entry[q + 2], (unsigned long long)entry[q + 3]);
+		const char* mname = reinterpret_cast<const char*>(entry[0]);
+		if (Bridge_NamePtrLive(mname))
+			Msg(eDLL_T::CLIENT, "[MP-SLOT]   model name '%s'\n", mname);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+static ConCommand sdk_modelprecache_slot("sdk_modelprecache_slot", CC_ModelPrecacheSlot,
+	"Print the client modelprecache slot for an index or model path.", FCVAR_DEVELOPMENTONLY);
+
+void Bridge_ModelPrecacheFix_Rearm(void)
+{
+	s_mpStableSweeps = 0;
+	s_mpScanCursor = 1;
+	Msg(eDLL_T::CLIENT, "[MPRECACHE-FIX] sweep re-armed for extra map pak\n");
 }
 
 // Dump instancebaseline userdata per classID. Empty baseline => default origin/name.
@@ -8348,6 +8423,8 @@ static void S21Bridge_OnSessionEnded(const char* reason)
 	Bridge_NotifyConnectSessionEnded();
 	s_connAcceptDone = false;
 	PakLobby_OnSessionReset();
+	MapEditPaks_UnloadAll("session ended");
+	S21Bridge_ResetS3TableNames();
 	MantleBoostClient_OnSessionReset();
 	if (!s_bridgeActive && s_hsStage == BridgeHsStage::Idle
 		&& s_bridgeSocket == INVALID_SOCKET)
@@ -10397,9 +10474,9 @@ int NetObserver_Install()
 						// jne use_dummy
 						c[pos++] = 0x75;
 						int jneAlignOff = pos++;
-						// movabs rcx, 0x0000010000000000 (below normal Win64 heap/module ranges)
+						// movabs rcx, 0x10000 (only the null page is never a pointer; low heaps exist)
 						c[pos++] = 0x48; c[pos++] = 0xB9;
-						uintptr_t minUserPtr = 0x0000010000000000ULL;
+						uintptr_t minUserPtr = 0x10000ULL;
 						memcpy(c + pos, &minUserPtr, 8);
 						pos += 8;
 						// cmp rdx, rcx
@@ -11063,13 +11140,39 @@ int NetObserver_Install()
 					int32_t backRel = (int32_t)(afterPatch - ((uintptr_t)c + pos + 4));
 					memcpy(c + pos, &backRel, 4); pos += 4;
 
-					// skip_class: jmp loop increment
+					// skip_class: reload rdi, then jmp loop increment. The increment
+					// sits after the engine's own `lea rdi, staging`, so a skipped
+					// class would otherwise leave rdi holding the previous prop count.
 					int skipPos = pos;
 					// Fix both jz offsets
 					int32_t jzRel1 = (int32_t)((uintptr_t)c + skipPos - ((uintptr_t)c + jzClassOff + 4));
 					memcpy(c + jzClassOff, &jzRel1, 4);
 					int32_t jzRel2 = (int32_t)((uintptr_t)c + skipPos - ((uintptr_t)c + jzDecoderOff + 4));
 					memcpy(c + jzDecoderOff, &jzRel2, 4);
+
+					{
+						// `lea rdi, [rip+disp32]` is the 7 bytes right before the increment.
+						const uint8_t* leaSite = reinterpret_cast<const uint8_t*>(loopIncr - 7);
+						uint64_t staging = 0;
+						if (leaSite[0] == 0x48 && leaSite[1] == 0x8D && leaSite[2] == 0x3D)
+						{
+							int32_t disp = 0;
+							memcpy(&disp, leaSite + 3, 4);
+							staging = static_cast<uint64_t>(loopIncr) + disp;
+						}
+						if (staging)
+						{
+							c[pos++] = 0x48; c[pos++] = 0xBF; // mov rdi, imm64
+							memcpy(c + pos, &staging, 8); pos += 8;
+						}
+						else
+						{
+							Warning(eDLL_T::ENGINE,
+								"[NET-OBS] entity init cave: staging lea not at loopIncr-7 "
+								"(%02X %02X %02X); rdi reload omitted\n",
+								leaSite[0], leaSite[1], leaSite[2]);
+						}
+					}
 
 					c[pos++] = 0xE9;
 					int32_t skipRel = (int32_t)(loopIncr - ((uintptr_t)c + pos + 4));
@@ -11187,9 +11290,9 @@ int NetObserver_Install()
 					c[pos++] = 0x75;
 					int jneAlignOff = pos;
 					c[pos++] = 0x00; // placeholder
-					// movabs rdx, 0x0000010000000000 (reject low aligned garbage)
+					// movabs rdx, 0x10000 (only the null page is never a pointer; low heaps exist)
 					c[pos++] = 0x48; c[pos++] = 0xBA;
-					uintptr_t minUserPtr = 0x0000010000000000ULL;
+					uintptr_t minUserPtr = 0x10000ULL;
 					memcpy(c + pos, &minUserPtr, 8);
 					pos += 8;
 					// cmp rcx, rdx
@@ -11284,7 +11387,7 @@ int NetObserver_Install()
 
 					const uintptr_t afterPatch = NetObs_Sym(NetObsSym_t::PatchSite_ApplyBoundsResume);
 					const uintptr_t loopIncr = NetObs_Sym(NetObsSym_t::PatchSite_ApplyLoopIncr);
-					const uintptr_t minUserPtr = 0x0000010000000000ULL;
+					const uintptr_t minUserPtr = 0x10000ULL;
 
 					// mov rax, [rbx+18h]
 					c[pos++] = 0x48; c[pos++] = 0x8B; c[pos++] = 0x43; c[pos++] = 0x18;

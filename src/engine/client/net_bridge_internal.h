@@ -460,6 +460,10 @@ extern uintptr_t NetObs_ModelPrecacheItemsAddr();
 extern uintptr_t S21_GetExeBase();
 // Map bare base name from CClientState+0x1BC (m_szLevelBaseName); "" if not connected.
 extern const char* Bridge_GetLevelBaseName();
+// Re-arm the stale stub modelprecache sweep after an extra map pak lands.
+extern void Bridge_ModelPrecacheFix_Rearm(void);
+// Forget the S3 CreateStringTable order used to route UpdateStringTable by name.
+extern void S21Bridge_ResetS3TableNames(void);
 // S21 CClientState*; 0 before the first signon.
 extern uintptr_t Bridge_ClientStatePtr(void);
 // Fire a client-VM callback taking one entity arg. Caller must gate on IsFirstTimePredicted.

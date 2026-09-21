@@ -416,12 +416,10 @@ const DTExtendProp s_extendProps[] = {
 	// Value-proxied from the SDK sidecar (weapon_script_vars.cpp) -- NO entity-memory slot; see the value proxy below.
 	EI("DT_WeaponX_LocalWeaponData", "m_infiniteAmmoState"),
 
-	// --- DT_WeaponPlayerData (1) ---
-	// Flat on DT_WeaponX, not nested under DT_WeaponPlayerData: the nested
-	// subtree's flattened indices diverge between the dedi's delta/baseline
-	// paths and the client's decode, so the bit never lands. The client
-	// binds by leaf name either way.
-	EI("DT_WeaponX", "m_akimboDisabled"),
+	// --- DT_WeaponPlayerData (1) --- the S21 Recv leaf lives only on this
+	// nested table (dest +0xE0); a flat DT_WeaponX leaf of the same name never
+	// pairs because CreateDecoders matches names per table.
+	EI("DT_WeaponPlayerData", "m_akimboDisabled"),
 
 	// --- DT_Zipline (3) ---
 	EF("DT_Zipline", "m_ziplineMountReverseDistance"),
@@ -1746,7 +1744,6 @@ bool DTExtend_ShouldZeroProxyAppendedProp(const char* tableName, const char* pro
 		       strcmp(propName, "m_curReactiveSkinKillCount") == 0 ||
 		       strcmp(propName, "m_curReactiveSkinKnockdownCount") == 0 ||
 		       strcmp(propName, "m_lastTossedGrenade") == 0 ||
-		       strcmp(propName, "m_modBitfieldDisabled") == 0 ||
 		       strcmp(propName, "m_offhandSwitchSlot") == 0 ||
 		       strcmp(propName, "m_parentTurret") == 0;
 	}
@@ -1988,15 +1985,26 @@ static void __fastcall ScriptFloat0_ValueProxy(void* /*pProp*/, void* pStruct,
 }
 
 #ifndef CLIENT_DLL
-// Flat DT_WeaponX leaf, so pStruct is the weapon entity base. Reads the
-// akimbo sidecar directly; nothing is derived from entity memory.
+// DT_WeaponPlayerData leaf: pStruct is weapon+0x1258 (m_playerData), not the
+// entity base. Reads the akimbo sidecar; nothing is derived from entity memory.
 static void __fastcall AkimboDisabled_ValueProxy(void* /*pProp*/, void* pStruct,
 	void* /*pData*/, void* pOut, int /*iElement*/, int /*objectID*/)
 {
 	if (!pOut) return;
 	*(uint64_t*)pOut = 0; *((uint64_t*)pOut + 1) = 0; *((uint64_t*)pOut + 2) = 0;
 	if (!pStruct) return;
-	*(int*)pOut = AkimboBridge_IsDisabled(pStruct) ? 1 : 0;
+	*(int*)pOut = AkimboBridge_GetDisabledFromPlayerData(pStruct);
+}
+
+// S21-only DT_WeaponX prop; S3 has no disabled-mod bitfield. The akimbo state
+// machine owns it (optic mods off while OFFHAND/ACTIVE).
+static void __fastcall ModBitfieldDisabled_ValueProxy(void* /*pProp*/, void* pStruct,
+	void* /*pData*/, void* pOut, int /*iElement*/, int /*objectID*/)
+{
+	if (!pOut) return;
+	*(uint64_t*)pOut = 0; *((uint64_t*)pOut + 1) = 0; *((uint64_t*)pOut + 2) = 0;
+	if (!pStruct) return;
+	*(int*)pOut = static_cast<int>(AkimboBridge_GetModBitfieldDisabled(pStruct));
 }
 #endif // !CLIENT_DLL
 
@@ -3207,8 +3215,11 @@ DTExtendProxyFn DTExtend_ValueProxyForAppendedProp(const char* tableName, const 
 		return &ScriptFloat0_ValueProxy;
 #ifndef CLIENT_DLL
 	if (tableName && propName &&
-		strcmp(tableName, "DT_WeaponX") == 0 && strcmp(propName, "m_akimboDisabled") == 0)
+		strcmp(tableName, "DT_WeaponPlayerData") == 0 && strcmp(propName, "m_akimboDisabled") == 0)
 		return &AkimboDisabled_ValueProxy;
+	if (tableName && propName &&
+		strcmp(tableName, "DT_WeaponX") == 0 && strcmp(propName, "m_modBitfieldDisabled") == 0)
+		return &ModBitfieldDisabled_ValueProxy;
 #endif // !CLIENT_DLL
 	if (tableName && propName && strcmp(tableName, "DT_WeaponX") == 0)
 	{

@@ -41,6 +41,7 @@
 #include "game/shared/weapon_script_vars.h"
 #include "game/server/jetdrive.h"
 #include "game/server/track_entity.h"
+#include "game/server/player_fov.h"
 #include "game/server/trigger_updraft.h"
 #include "game/server/skydive.h"
 #include "game/server/player_overheat.h"
@@ -2935,6 +2936,7 @@ void Script_RegisterDedicatedPlayerNatives(ScriptClassDescriptor_t* playerStruct
         Script_IsSlipping);
 
     TrackEntity_RegisterScriptFunctions(playerStruct);
+    PlayerFov_RegisterScriptFunctions(playerStruct);
 }
 
 void Script_DedicatedTraceDetour(const bool bAttach)

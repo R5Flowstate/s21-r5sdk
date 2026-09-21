@@ -2424,7 +2424,8 @@ struct S21Bridge_SRFuncCacheEntry
 	HSQUIRRELVM    hVM;
 	unsigned int   nGeneration;
 };
-static S21Bridge_SRFuncCacheEntry s_srFnCache[32];
+static constexpr size_t kSRFnCacheSize = 1024;  // above the registered S->C name count, so no server can fill it
+static S21Bridge_SRFuncCacheEntry s_srFnCache[kSRFnCacheSize];
 static size_t s_srFnCacheCount = 0;
 
 static void S21Bridge_SRFuncCache_DropDeadVM(CSquirrelVM* vm, HSQUIRRELVM hNow)
@@ -2591,7 +2592,7 @@ static void S21Bridge_InjectScriptRemote(const char* name, uint32_t nameLen, uin
 		// FindFunction Allocs a 24-byte engine object we do not Free on the
 		// client (no engine IMemAlloc singleton). A full cache + miss would
 		// leak 24 B per remote; refuse the lookup instead of evicting.
-		if (s_srFnCacheCount >= 32)
+		if (s_srFnCacheCount >= kSRFnCacheSize)
 		{
 			static int s_srCacheFull = 0;
 			if (++s_srCacheFull <= 8)
@@ -3317,6 +3318,37 @@ static void S21Bridge_LogSkipTransfer(int s3cmd, int64_t bitsLeft,
 static bool S21Bridge_SignonOpen(void)
 {
 	return s_lastSentSignonState < 8;
+}
+
+static char s_s3TableNames[32][64];
+static int  s_s3TableCount = 0;
+
+static void S21Bridge_RecordS3TableName(const char* pszName)
+{
+	if (s_s3TableCount >= 32)
+		return;
+	V_strncpy(s_s3TableNames[s_s3TableCount], pszName ? pszName : "", sizeof(s_s3TableNames[0]));
+	++s_s3TableCount;
+}
+
+static const char* S21Bridge_S3TableName(uint32_t id)
+{
+	return id < (uint32_t)s_s3TableCount ? s_s3TableNames[id] : nullptr;
+}
+
+void S21Bridge_ResetS3TableNames(void)
+{
+	s_s3TableCount = 0;
+}
+
+static void S21Bridge_CaptureProcessFault(EXCEPTION_POINTERS* ep, uintptr_t* pAddr, uintptr_t* pAccess)
+{
+	if (!ep || !ep->ExceptionRecord)
+		return;
+	const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr));
+	const uintptr_t addr = reinterpret_cast<uintptr_t>(ep->ExceptionRecord->ExceptionAddress);
+	*pAddr = (base && addr >= base) ? addr - base : addr;
+	*pAccess = ep->ExceptionRecord->NumberParameters >= 2 ? static_cast<uintptr_t>(ep->ExceptionRecord->ExceptionInformation[1]) : 0;
 }
 
 bool S21Bridge_ProcessMessages(CNetChan* pChan, bf_read* s3buf)
@@ -5154,6 +5186,84 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			S21BR_SkipBits(s21buf, (int64_t)nBits);
 			continue;
 		}
+		else if (s3cmd == 13) // svc_UpdateStringTable -- resolve the table by name
+		{
+			// Header matches S21 (5b id, 1b many, [16b count], 20b len) but the S3
+			// table id is not the S21 container index once the bridge has skipped
+			// or reordered a CreateStringTable; GetTable(id) then returns garbage.
+			const uint32_t ustTableId = S21BR_ReadUBits(s21buf, 5);
+			const uint32_t ustMany = S21BR_ReadUBits(s21buf, 1);
+			const uint32_t ustChanged = ustMany ? S21BR_ReadUBits(s21buf, 16) : 1u;
+			const uint32_t ustDataBits = S21BR_ReadUBits(s21buf, 20);
+			if (S21BR_IsOverflowed(s21buf)
+				|| ustDataBits > (uint32_t)S21BR_GetBitsLeft(s21buf))
+			{
+				S21Bridge_LogSkipTransfer(s3cmd, S21BR_GetBitsLeft(s21buf),
+					lastCmd, lastStartBit, lastEndBit, lastOrdinal,
+					"UpdateStringTable dataLen exceeds leftover");
+				s3buf->Seek((int)S21BR_GetBitsRead(s21buf));
+				break;
+			}
+
+			const char* ustName = S21Bridge_S3TableName(ustTableId);
+			void* ustTable = nullptr;
+			const uintptr_t ustCont = *(uintptr_t*)NetObs_StringTableContainerAddr();
+			if (ustName && ustCont)
+			{
+				void** cv = *(void***)ustCont;
+				__try { ustTable = reinterpret_cast<void*(*)(void*, const char*)>(cv[3])((void*)ustCont, ustName); }
+				__except(EXCEPTION_EXECUTE_HANDLER) { ustTable = nullptr; }
+			}
+
+			static int s_ustLog = 0;
+			if (!ustTable)
+			{
+				if (++s_ustLog <= 16)
+					Warning(eDLL_T::ENGINE,
+						"[BRIDGE-PM] UpdateStringTable s3id=%u '%s' has no S21 table -- dropped (%u entries, %u bits)\n",
+						ustTableId, ustName ? ustName : "?", ustChanged, ustDataBits);
+				S21BR_SkipBits(s21buf, ustDataBits);
+				continue;
+			}
+
+			const uint32_t ustDataBytes = (ustDataBits + 7) / 8;
+			uint8_t* ustRaw = (uint8_t*)malloc(ustDataBytes + 16);
+			if (!ustRaw)
+			{
+				S21BR_SkipBits(s21buf, ustDataBits);
+				continue;
+			}
+			memset(ustRaw, 0, ustDataBytes + 16);
+			for (uint32_t i = 0; i < ustDataBits; i++)
+			{
+				if (S21BR_ReadUBits(s21buf, 1))
+					ustRaw[i / 8] |= (1 << (i % 8));
+			}
+
+			alignas(16) uint8_t ustS21Buf[S21BR_SIZE];
+			s_S21BfReadInit(ustS21Buf, ustRaw, (uint64_t)ustDataBytes);
+			bool ustOk = false;
+			uintptr_t ustFaultAddr = 0;
+			uintptr_t ustFaultAccess = 0;
+			__try
+			{
+				void** tv = *(void***)ustTable;
+				reinterpret_cast<void(*)(void*, void*, unsigned int)>(tv[19])(ustTable, ustS21Buf, ustChanged);
+				ustOk = true;
+			}
+			__except (S21Bridge_CaptureProcessFault(GetExceptionInformation(), &ustFaultAddr, &ustFaultAccess),
+				EXCEPTION_EXECUTE_HANDLER)
+			{
+				Warning(eDLL_T::ENGINE, "[BRIDGE-PM] UpdateStringTable '%s' ParseUpdate crashed at exe+0x%llX access=0x%llX (%u entries, %u bits)\n",
+					ustName, static_cast<unsigned long long>(ustFaultAddr), static_cast<unsigned long long>(ustFaultAccess),
+					ustChanged, ustDataBits);
+			}
+			free(ustRaw);
+			if (++s_ustLog <= 16)
+				SDK_Log("[BRIDGE-PM] UpdateStringTable '%s' s3id=%u entries=%u bits=%u ok=%d\n",
+					ustName, ustTableId, ustChanged, ustDataBits, ustOk ? 1 : 0);
+			continue;
+		}
 		else if (s3cmd == 12) // svc_CreateStringTable -- FORMAT BRIDGE
 		{
 			// CreateStringTable: S3 dataLen is 22 bits, S21 is 24. Other fields match.
@@ -5164,6 +5274,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 				cstName[ci] = (char)ch;
 				if (ch == 0) break;
 			}
+			S21Bridge_RecordS3TableName(cstName);
 
 			const uint32_t cstMaxEntries = S21BR_ReadUBits(s21buf, 16);
 
@@ -6393,16 +6504,20 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 
 			// S21: vtable[3] = Process
 			bool processOk = false;
+			uintptr_t processFaultAddr = 0;
+			uintptr_t processFaultAccess = 0;
 			__try
 			{
 				processOk = reinterpret_cast<bool(*)(void*)>(msgVtbl[3])(netMsg);
 			}
-			__except (s3cmd == 9
+			__except (S21Bridge_CaptureProcessFault(GetExceptionInformation(), &processFaultAddr, &processFaultAccess),
+				s3cmd == 9
 				? (S21Bridge_CIDiag_WriteEmergencyDump("ClassInfo_Process", GetExceptionInformation()),
 					EXCEPTION_EXECUTE_HANDLER)
 				: EXCEPTION_EXECUTE_HANDLER)
 			{
-				Warning(eDLL_T::ENGINE, "S21Bridge_ProcessMessages: crash in Process for S21 msg %d\n", s21cmd);
+				Warning(eDLL_T::ENGINE, "S21Bridge_ProcessMessages: crash in Process for S21 msg %d at exe+0x%llX access=0x%llX\n",
+					s21cmd, static_cast<unsigned long long>(processFaultAddr), static_cast<unsigned long long>(processFaultAccess));
 				if (s3cmd == 9)
 				{
 					SDK_Log("[CI-GATE] ClassInfo_Process_SEH processOk=0 (exception)\n");

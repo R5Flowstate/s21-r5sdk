@@ -73,8 +73,13 @@ static constexpr size_t    kS21_PakSlotCount     = 512;
 static constexpr size_t    kS21_PakSlot_Handle   = 0x00;
 static constexpr size_t    kS21_PakSlot_Status   = 0x04;
 static constexpr size_t    kS21_PakSlot_Name     = 0x18;
+// Same-guid tiebreak: Pak_TrackAsset keeps the current owner unless the new pak's
+// slot priority is strictly greater. Never written for a plain rpak (stays 0).
+static constexpr size_t    kS21_PakSlot_Priority = 0xD8;
 
 const char* Pak_StatusToString_S21(int status);
+void Pak_DumpGuidChain_S21(unsigned __int64 guid, const char* tag);
+void* Pak_FindInstalledHead_S21(unsigned __int64 guid);
 uintptr_t Pak_GetSlotBase_S21();
 // True while any slot holds this pak name with a non-zero status (loading, loaded or unloading).
 bool Pak_IsSlotNameLive_S21(const char* pszName);

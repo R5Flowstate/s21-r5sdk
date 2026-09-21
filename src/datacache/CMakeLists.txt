@@ -8,6 +8,8 @@ macro( add_datacache_lib LIB_NAME )
 	add_sources( SOURCE_GROUP "Private"
 		"mdlcache.cpp"
 		"mdlcache.h"
+		"rig_extend.cpp"
+		"rig_extend.h"
 	)
 
 	add_sources( SOURCE_GROUP "Public"

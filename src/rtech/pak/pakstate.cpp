@@ -13,6 +13,7 @@
 #include "pakdecode.h"
 #include "paktools.h"
 #include "pakstate.h"
+#include "ui_image_skip.h"
 
 // Default paks\Win64\; S3 left these NULL and Asserted on first use.
 static const char* s_pakReadPath  = "paks\\Win64\\";
@@ -193,31 +194,37 @@ static void Pak_RequestUnload_f(const CCommand& args)
 Pak_RequestLoad_f
 =====================
 */
-static void Pak_RequestLoad_f(const CCommand& args)
+static bool Pak_RequestLoadConsole(const char* const pakFile, const bool bNoUi)
 {
-	if (args.ArgC() < 2)
-		return;
-
 	// Full 5-arg Pak_RequestLoadByName. The script wrapper's callback chain is null here.
 	if (!Pak_RequestLoadByName_S21Resolve())
 	{
 		Warning(eDLL_T::RTECH, "pak_requestload: Pak_RequestLoadByName_S21 not resolved\n");
-		return;
+		return false;
 	}
 
 	const uintptr_t allocSlot = Pak_GetGlobalAllocatorSlot_S21();
 	if (!allocSlot)
 	{
 		Warning(eDLL_T::RTECH, "pak_requestload: failed to resolve global allocator slot\n");
-		return;
+		return false;
 	}
 
-	const char* const pakFile = args.ArgS();
 	if (!Pak_IsAllowedLoadName_S21(pakFile))
 	{
 		Warning(eDLL_T::RTECH, "pak_requestload: rejected '%s'\n", pakFile);
-		return;
+		return false;
 	}
+	if (bNoUi)
+	{
+		if (!UIImageSkip_MarkPak(pakFile))
+		{
+			Warning(eDLL_T::RTECH, "pak_requestload_noui: cannot mark '%s' (name too long or list full)\n", pakFile);
+			return false;
+		}
+	}
+	else
+		UIImageSkip_UnmarkPak(pakFile);
 	auto pfnFull = reinterpret_cast<PFN_Pak_RequestLoadByName_Full_S21>(
 		v_Pak_RequestLoadByName_S21);
 	const int handle = pfnFull(pakFile,
@@ -228,9 +235,86 @@ static void Pak_RequestLoad_f(const CCommand& args)
 	if (handle == -1)
 	{
 		Warning(eDLL_T::RTECH, "pak_requestload: '%s' failed (engine returned -1)\n", pakFile);
-		return;
+		return false;
 	}
-	Msg(eDLL_T::RTECH, "loading '%s' (handle 0x%X)\n", pakFile, handle & 0xFFFFFF);
+	Msg(eDLL_T::RTECH, "loading '%s' (handle 0x%X)%s\n", pakFile, handle & 0xFFFFFF,
+		bNoUi ? " with UI images stubbed" : "");
+	return true;
+}
+
+bool Pak_RequestLoadNoUi(const char* const pakFile)
+{
+	if (!pakFile || !pakFile[0])
+	{
+		Warning(eDLL_T::RTECH, "pak_requestload_noui: rejected empty name\n");
+		return false;
+	}
+	return Pak_RequestLoadConsole(pakFile, true);
+}
+
+int Pak_GetStatusByHandle_S21(int handle)
+{
+	const uintptr_t base = Pak_GetSlotBase_S21();
+	if (!base)
+		return -1;
+
+	int status = -1;
+	__try
+	{
+		const int slotIdx = handle & (int)(kS21_PakSlotCount - 1);
+		const uintptr_t slot = Pak_GetSlotPtr_S21(slotIdx);
+		if (slot && Pak_GetSlotHandle_S21(slot) == handle)
+			status = Pak_GetSlotStatus_S21(slot);
+		else
+		{
+			for (int i = 0; i < (int)kS21_PakSlotCount; ++i)
+			{
+				const uintptr_t s = Pak_GetSlotPtr_S21(i);
+				if (!s)
+					break;
+				if (Pak_GetSlotHandle_S21(s) == handle)
+				{
+					status = Pak_GetSlotStatus_S21(s);
+					break;
+				}
+			}
+		}
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) { status = -1; }
+	return status;
+}
+
+int Pak_FindHandleByName_S21(const char* const pakName)
+{
+	const int slotIdx = Pak_FindSlotByName_S21(pakName);
+	if (slotIdx < 0)
+		return -1;
+	return Pak_GetSlotHandle_S21(Pak_GetSlotPtr_S21(slotIdx));
+}
+
+bool Pak_UnloadByHandle_S21(int handle)
+{
+	if (!Pak_UnloadAsyncByHandle_S21Resolve())
+	{
+		Warning(eDLL_T::RTECH, "pak unload: Pak_UnloadAsyncByHandle_S21 not resolved\n");
+		return false;
+	}
+	v_Pak_UnloadAsyncByHandle_S21((unsigned int)handle, 1);
+	return true;
+}
+
+static void Pak_RequestLoad_f(const CCommand& args)
+{
+	if (args.ArgC() < 2)
+		return;
+	Pak_RequestLoadConsole(args.ArgS(), false);
+}
+
+static void Pak_RequestLoadNoUi_f(const CCommand& args)
+{
+	if (args.ArgC() < 2)
+		return;
+	Pak_RequestLoadNoUi(args.ArgS());
 }
 
 /*
@@ -440,6 +524,7 @@ static ConCommand pak_oodle_compress("pak_oodle_compress", Pak_OodleCompress_f, 
 static ConCommand pak_decompress("pak_decompress", Pak_Decompress_f, "Decompresses specified RPAK file", FCVAR_RELEASE, RTech_PakDecompress_f_CompletionFunc);
 
 static ConCommand pak_requestload("pak_requestload", Pak_RequestLoad_f, "Requests asynchronous load for specified RPAK file", FCVAR_RELEASE, RTech_PakLoad_f_CompletionFunc);
+static ConCommand pak_requestload_noui("pak_requestload_noui", Pak_RequestLoadNoUi_f, "Requests asynchronous load for specified RPAK file with its UI images loaded as 1x1 stubs (no atlas cost)", FCVAR_RELEASE, RTech_PakLoad_f_CompletionFunc);
 static ConCommand pak_requestunload("pak_requestunload", Pak_RequestUnload_f, "Requests asynchronous unload for specified RPAK file or ID", FCVAR_RELEASE, RTech_PakUnload_f_CompletionFunc);
 
 static ConCommand pak_requestswap("pak_requestswap", Pak_RequestSwap_f, "Requests swap for specified RPAK file or ID", FCVAR_RELEASE, RTech_PakSwap_f_CompletionFunc);

@@ -12,6 +12,8 @@
 
 #include "thirdparty/detours/include/idetour.h"
 
+bool ZoomGate_AkimboCanZoom(void);
+
 ///////////////////////////////////////////////////////////////////////////////
 class VBridgeZoomGate : public IDetour
 {

@@ -8,6 +8,7 @@
 #include "tier1/cvar.h"
 #include "engine/client/net_bridge_internal.h"
 #include "game/client/mantle_boost.h"
+#include "game/client/mantle_boost_anim.h"
 #include "game/client/zipline_disconnect.h"
 #include "game/client/mantle_boost_rui.h"   // MantleBoostCurveDump_Think
 #include "game/client/trigger_cannon.h"
@@ -353,6 +354,9 @@ void MantleBoostClient_OnAuthoritativeState(int nEntIndex, int nWireValue)
 	const int nSeq   = (nWireValue >> 3) & 15;
 	const int nEdict = (nWireValue >> 7) & 0x7F;
 
+	if (nWireValue >= 0 && nState <= 4)
+		MantleBoostAnim_OnWireState(nEdict, nState);
+
 	uintptr_t pEnt  = 0;
 	uintptr_t pList = 0;
 
@@ -512,9 +516,15 @@ static void MantleBoost_PostBoostTrace(void)
 		s_offLastSlideBoost > 0 ? *reinterpret_cast<const float*>(p + s_offLastSlideBoost) : -1.0f);
 }
 
+static void MantleBoost_ClearIfLanded(uintptr_t pPlayer);
+
 void MantleBoostClient_FrameUpdate(void)
 {
 	MantleBoost_PostBoostTrace();
+
+	// The grapple mover bypasses AirMove, so the flight-state clear is sampled here too.
+	if (s_nState == 4 && s_pPredictedPlayer)
+		MantleBoost_ClearIfLanded(s_pPredictedPlayer);
 
 	if (!s_bAuthFxPending)
 		return;
@@ -572,7 +582,13 @@ void MantleBoostClient_OnSessionReset(void)
 	s_pPredictedPlayer = 0;
 	s_predictedPlayerHandle = 0;
 	MantleBoost_ResetState();
+	MantleBoostAnim_OnSessionReset();
 	s_flLastTraceTime = -1.0f;
+}
+
+uintptr_t MantleBoostClient_GetPredictedPlayer(void)
+{
+	return s_pPredictedPlayer;
 }
 
 //-----------------------------------------------------------------------------
@@ -818,6 +834,10 @@ float MantleBoostClient_GetSweetSpotAngle(void)
 }
 
 static constexpr ptrdiff_t MB_PLAYER_OFF_TIME_LAST_LANDED = 13952; // m_flTimeLastLanded
+static constexpr ptrdiff_t MB_PLAYER_OFF_GRAPPLE_ACTIVE   = 11616; // bool m_grappleActive
+static constexpr ptrdiff_t MB_PLAYER_OFF_GRAPPLE_POINTS   = 11540; // int m_grapple.m_grapplePointCount
+static constexpr ptrdiff_t MB_PLAYER_OFF_GRAPPLE_ATTACHED = 11544; // bool m_grapple.m_grappleAttached
+static bool s_bGrappledSinceBoost = false;
 static constexpr ptrdiff_t MB_PLAYER_OFF_MOVE_SCALE       = 12920; // m_cachedMoveScale (GetPoseSpeed_Sprint multiplier)
 // m_cachedMoveScale = recentLanding * (weapon * m_playerMoveSpeedScale) * (1-moveSlow) * (1+2*statusSev).
 // Splitting the script-settable factor out separates a mode/class buff from a weapon or status effect.
@@ -830,10 +850,19 @@ static bool MantleBoost_LandedAfterBoost(uintptr_t pPlayer)
 	return *reinterpret_cast<const float*>(pPlayer + MB_PLAYER_OFF_TIME_LAST_LANDED) > s_flBoostAppliedTime;
 }
 
+// Landing and grapple detach both end the boost's flight state.
 static void MantleBoost_ClearIfLanded(uintptr_t pPlayer)
 {
-	if (s_nState != 4 || !MantleBoost_LandedAfterBoost(pPlayer))
+	if (s_nState != 4 || !pPlayer)
 		return;
+	const bool bGrappled = *reinterpret_cast<const bool*>(pPlayer + MB_PLAYER_OFF_GRAPPLE_ACTIVE)
+		&& *reinterpret_cast<const int*>(pPlayer + MB_PLAYER_OFF_GRAPPLE_POINTS) != 0
+		&& *reinterpret_cast<const bool*>(pPlayer + MB_PLAYER_OFF_GRAPPLE_ATTACHED);
+	if (bGrappled)
+		s_bGrappledSinceBoost = true;
+	if (!MantleBoost_LandedAfterBoost(pPlayer) && !(s_bGrappledSinceBoost && !bGrappled))
+		return;
+	s_bGrappledSinceBoost = false;
 	s_nState = 0;
 	s_nAuthState = -1;
 	s_nAuthClimb = -1;   // climb is over and grounded; a verdict still in flight for it changes nothing
@@ -1028,6 +1057,7 @@ static void MantleBoost_ApplyBoost(uintptr_t ctx, uintptr_t pPlayer, uintptr_t p
 
 	if (nApply == 4)
 		s_flBoostAppliedTime = flCurTime;
+		s_bGrappledSinceBoost = false;
 
 	if (bFirstTime && bridge_mantle_boost_trig_log.GetBool())
 		Msg(eDLL_T::CLIENT, "[MB-CLIMB] side=cl climb=%d pred=%d auth=%d apply=%d "

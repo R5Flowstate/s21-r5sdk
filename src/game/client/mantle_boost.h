@@ -37,6 +37,10 @@ void MantleBoostClient_OnAuthoritativeState(int nEntIndex, int nState);
 // already applied: 0 idle, 1 hang, 3 mantle jump, 4 sweet spot.
 int MantleBoostClient_GetState(void);
 
+// The C_Player the TraversalMove detour last predicted for; 0 before the first
+// traversal of a session.
+uintptr_t MantleBoostClient_GetPredictedPlayer(void);
+
 // The sweet-spot angle gate in degrees. The traversal-aware form is the one the
 // gate itself calls; the argument-free form returns whatever it last derived,
 // for callers that hold no traversal inputs.

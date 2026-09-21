@@ -445,7 +445,20 @@ SQBool Script_WarningFunc(HSQUIRRELVM v, SQInteger nformatstringidx)
 		break;
 	}
 
-	CoreMsg(LogType_t::SQ_WARNING, static_cast<LogLevel_t>(script_show_warning.GetInt()),
+	LogLevel_t level = static_cast<LogLevel_t>(script_show_warning.GetInt());
+
+#ifdef DEDICATED
+	// Load-time warnings are the only record of a refused registration when
+	// file logs are off. Keep them on the console until the match is running.
+	if (level == LogLevel_t::LEVEL_DISK_ONLY)
+	{
+		const bool bInGame = g_pHostState && g_pHostState->IsRunning();
+		if (!bInGame)
+			level = LogLevel_t::LEVEL_CONSOLE;
+	}
+#endif
+
+	CoreMsg(LogType_t::SQ_WARNING, level,
 		remoteContext, NO_ERROR, "squirrel_re(warning)", "%s", str);
 
 	return SQ_SUCCEEDED(result);

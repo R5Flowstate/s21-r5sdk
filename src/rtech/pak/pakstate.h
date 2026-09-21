@@ -13,6 +13,13 @@ extern const char* Pak_GetReadPath();
 extern void Pak_SetWritePath(const char* const basePath);
 extern const char* Pak_GetWritePath();
 
+#if defined(CLIENT_DLL)
+extern bool Pak_RequestLoadNoUi(const char* const pakFile);
+extern int Pak_GetStatusByHandle_S21(int handle);
+extern int Pak_FindHandleByName_S21(const char* const pakName);
+extern bool Pak_UnloadByHandle_S21(int handle);
+#endif // CLIENT_DLL
+
 struct PakLoadFuncs_s
 {
 	// initializes the global states for RPak files and async reads.

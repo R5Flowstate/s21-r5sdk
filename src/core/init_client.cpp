@@ -37,6 +37,7 @@
 #include "filesystem/basefilesystem.h"
 #include "filesystem/filesystem.h"
 #include "datacache/mdlcache.h"
+#include "datacache/rig_extend.h"
 #include "ebisusdk/EbisuSDK.h"
 
 // Engine
@@ -47,6 +48,7 @@
 #include "engine/cmd.h"
 #include "engine/net.h"
 #include "engine/net_chan.h"
+#include "engine/client/discord_presence.h"
 #include "engine/client/net_observer.h"
 #include "engine/client/host_frame_probe.h"
 #include "engine/splitpacket_recv_clamp.h"
@@ -54,6 +56,7 @@
 #include "engine/cmodel_surfdata.h"
 #include "game/client/body_skin.h"
 #include "game/client/weapon_mod_visual.h"
+#include "game/client/weapon_akimbo_activity.h"
 #include "game/client/classvar_natives.h"
 #include "game/client/fs_1v1_convars.h"
 #include "game/client/fov_limit.h"
@@ -68,6 +71,7 @@
 #include "engine/sys_integrity.h"
 #include "codecs/miles/miles_banklist.h"
 #include "rtech/pak/pak_lobby_world.h"
+#include "rtech/pak/ui_image_skip.h"
 #include "engine/sys_dll.h"
 #include "engine/sys_dll2.h"
 #include "engine/sys_engine.h"
@@ -110,6 +114,7 @@
 #include "game/client/pred_diag.h"
 #include "game/client/grapple_rope_diag.h"
 #include "game/client/mantle_boost.h"
+#include "game/client/mantle_boost_anim.h"
 #include "game/client/dodge_bind.h"
 #include "game/client/aimassist.h"
 #include "game/client/trigger_cannon.h"
@@ -447,6 +452,8 @@ void Systems_Init_S21()
 
 void Systems_Shutdown()
 {
+	CDiscordPresence::Shutdown();
+
 	BridgeStats_PrintAndReset("shutdown");
 
 	CFastTimer shutdownTimer;
@@ -536,16 +543,20 @@ void DetourRegister()
 	// RTech - lobby world
 	//-------------------------------------------------------------------------
 	REGISTER(VPakLobbyWorldS21);
+	REGISTER(VUIImageSkipS21);
 	REGISTER(VVfxAliasNullGuardS21);
 	REGISTER(VSurfDataFallbackGuardS21);
 	REGISTER(VBodySkinGuardS21);
 	REGISTER(VWeaponModVisual);         // [WEAP-MOD-VIS] RecalcMods -> RequestBodygroupUpdate so held-weapon optics apply without holster
+	REGISTER(VWeaponAkimboActivity);    // [AKIMBO-ACT] one-handed reload -> akimbo reload set while dual wielding
 	REGISTER(VPoseParamGuardS21);
 	REGISTER(VAnimDescGuardS21);
 	REGISTER(VShaderTeardownGuardS21);
 	REGISTER(VTextureStreamAbortFree);
 	REGISTER(VEffectChildLinkGuardS21);
 	REGISTER(VStudioSeqdescGuardS21);
+	REGISTER(VRigExtend);
+	REGISTER(VActivityList);
 	REGISTER(VClassVarNativesCl);
 	REGISTER(VFOVLimit);
 	REGISTER(VVisualClutter);
@@ -606,6 +617,7 @@ void DetourRegister()
 	REGISTER(VJumpPadViewPunchDiag);
 	REGISTER(VTriggerClientPredictForce);
 	REGISTER(VMantleBoostClient);
+	REGISTER(VMantleBoostAnimClient);
 	REGISTER(VDodgeBind);
 	REGISTER(VAimAssist);
 	REGISTER(VMantleBoostRuiCl);

@@ -14,6 +14,7 @@
 #include "game/client/scriptnetdata_client.h"
 #include "game/client/vscript_client.h"
 #include "game/client/classvar_natives.h"
+#include "rtech/pak/mapedit_paks_cl.h"
 #include "game/client/mantle_boost_rui.h"
 #include "vscript/languages/squirrel_re/vsquirrel.h"
 #include "vscript/ivscript.h"
@@ -71,6 +72,7 @@ static void EnsureLateNativeRegistration(uint8_t vmType, CSquirrelVM* s)
 				Script_RegisterChatMuteClient(vm);
 				ClassVar_RegisterClientFunctions(vm);
 				MantleBoostRui_RegisterClientFunctions(vm);
+				MapEditPaks_RegisterClientFunctions(vm);
 			}
 		}
 		break;
@@ -1164,7 +1166,10 @@ static bool FSRes_HasLooseOverride_S21(const char* path)
 	const bool isMenu = len > 5 && _stricmp(path + len - 5, ".menu") == 0;
 	const bool isLst  = len > 4 && _stricmp(path + len - 4, ".lst")  == 0;
 	const bool isVguiScreens = _stricmp(path, "scripts/vgui_screens.txt") == 0;
-	if (!isRes && !isMenu && !isLst && !isVguiScreens)
+	// The status-effect enum is parsed from this list at boot; the disk copy
+	// carries the SDK additions the dedi enum already has.
+	const bool isStatusEffects = _stricmp(path, "scripts/status_effect_types.txt") == 0;
+	if (!isRes && !isMenu && !isLst && !isVguiScreens && !isStatusEffects)
 		return false;
 
 	char disk[1024];

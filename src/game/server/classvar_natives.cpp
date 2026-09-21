@@ -8,6 +8,10 @@
 #include "core/stdafx.h"
 #include "tier0/memaddr.h"
 #include "tier1/cvar.h"
+#include "tier1/convar.h"
+#include <cstdlib>
+#include <cstring>
+#include <cmath>
 // SCRIPT_REGISTER_FUNC is a macro the vsquirrel.h register template expands, so
 // this header has to come first.
 #include "game/shared/vscript_gamedll_defs.h"
@@ -17,6 +21,11 @@
 #include "vscript_server.h"
 #include "vscript_server_natives.h"
 #include "classvar_natives.h"
+#include "common/callback.h"
+#include "common/netmessages.h"
+#include "engine/server/server.h"
+#include "game/server/gameinterface.h"
+#include "game/server/util_server.h"
 
 //-----------------------------------------------------------------------------
 // CPlayer fields, read off the _setClassVarServer dispatch.
@@ -43,6 +52,8 @@ static int32_t* g_pClassVarSecondaryStride = nullptr;
 
 static bool s_bClassVarResolved = false;
 static bool s_bClassVarUsable = false;
+
+static FnCommandCallback_t s_fnSetClassVarServerOrig = nullptr;
 
 static ConVar bridge_classvar_log("bridge_classvar_log", "0", FCVAR_DEVELOPMENTONLY,
 	"Log every Player_SetClassVar key/value applied on the dedi.");
@@ -272,4 +283,260 @@ void Script_RegisterClassVarNatives(CSquirrelVM* s)
 		"entity player, string key, string value",
 		false,
 		ServerScript_SetClassVar);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: validate exactly nCount whitespace-separated finite floats in range
+//-----------------------------------------------------------------------------
+static bool ServerScript_ClassVarValidateFloats(const char* pszValue, const int nCount)
+{
+	if (nCount < 1 || nCount > 3)
+		return false;
+
+	const char* p = pszValue;
+	for (int i = 0; i < nCount; i++)
+	{
+		while (*p == ' ' || *p == '\t')
+			p++;
+		if (!*p)
+			return false;
+
+		char* pszEnd = nullptr;
+		const float flVal = strtof(p, &pszEnd);
+		if (pszEnd == p || !isfinite(flVal) || fabsf(flVal) > 100000.f)
+			return false;
+
+		p = pszEnd;
+	}
+
+	while (*p == ' ' || *p == '\t')
+		p++;
+
+	return *p == '\0';
+}
+
+static bool ClassVar_ValidateSetArgs(const char* const pszTag, const char* pszKey, const char* pszValue);
+
+//-----------------------------------------------------------------------------
+// Purpose: cheat-gated _setClassVarServer; console-unsafe types never reach retail
+//-----------------------------------------------------------------------------
+static void ClassVar_SetClassVarServer_f(const CCommand& args)
+{
+	if (!s_fnSetClassVarServerOrig)
+		return;
+
+	if (args.ArgC() < 3)
+	{
+		s_fnSetClassVarServerOrig(args);
+		return;
+	}
+
+	const char* pszKey = args.Arg(1);
+	const char* pszValue = args.Arg(2);
+	if (!pszKey || !pszValue)
+	{
+		s_fnSetClassVarServerOrig(args);
+		return;
+	}
+
+	ServerScript_ResolveClassVar();
+
+	if (!s_bClassVarUsable)
+	{
+		s_fnSetClassVarServerOrig(args);
+		return;
+	}
+
+	if (!ClassVar_ValidateSetArgs("set", pszKey, pszValue))
+		return;
+
+	s_fnSetClassVarServerOrig(args);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: reliable string command to one client (the engine writes the type)
+//-----------------------------------------------------------------------------
+class CClassVarClientCmd : public CNetMessage
+{
+public:
+	explicit CClassVarClientCmd(const char* pszCmd)
+	{
+		V_strncpy(m_szCmd, pszCmd, sizeof(m_szCmd));
+		m_nGroup = 2;
+	}
+
+	virtual bool ReadFromBuffer(bf_read* buffer) { NOTE_UNUSED(buffer); return false; }
+	virtual bool WriteToBuffer(bf_write* buffer) { return buffer->WriteString(m_szCmd); }
+	virtual bool Process(void) { return true; }
+	virtual int GetType(void) const { return net_StringCmd; }
+	virtual const char* GetName(void) const { return "net_StringCmd"; }
+	virtual const char* ToString(void) const { return m_szCmd; }
+	virtual size_t GetSize(void) const { return sizeof(CClassVarClientCmd); }
+
+private:
+	char m_szCmd[256];
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: the lowest connected human slot -- the seat script calls GetPlayerArray()[0]
+//-----------------------------------------------------------------------------
+static CClient* ClassVar_HostClient(void)
+{
+	if (!g_pServer)
+		return nullptr;
+
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		CClient* const pClient = g_pServer->GetClient(i);
+		if (pClient && pClient->IsHumanPlayer())
+			return pClient;
+	}
+	return nullptr;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: run the engine class-var write for one client and mirror it to that client
+//-----------------------------------------------------------------------------
+static void ClassVar_ApplyToClient(CClient* const pClient, const char* pszKey, const char* pszValue)
+{
+	if (!pClient || !v__setClassVarServer_f || !g_nCommandClientIndex)
+		return;
+
+	const char* pArgs[3] = { "_setClassVarServer", pszKey, pszValue };
+	const CCommand cmd(3, pArgs, cmd_source_t::kCommandSrcCode);
+	if (cmd.ArgC() < 3)
+		return;
+
+	const int nOldIdx = *g_nCommandClientIndex;
+	*g_nCommandClientIndex = pClient->GetUserID();
+	v__setClassVarServer_f(cmd);
+	*g_nCommandClientIndex = nOldIdx;
+
+	char szLine[256];
+	V_snprintf(szLine, sizeof(szLine), "_setClassVarClient %s \"%s\"", pszKey, pszValue);
+	CClassVarClientCmd msg(szLine);
+	pClient->SendNetMsgEx(&msg, false, true, false);
+}
+
+static bool ClassVar_ValidateSetArgs(const char* const pszTag, const char* pszKey, const char* pszValue)
+{
+	if (!pszKey || !pszValue || strlen(pszKey) > 63 || strlen(pszValue) > 127)
+	{
+		Warning(eDLL_T::SERVER, "[CLASSVAR] %s refused: key/value too long\n", pszTag);
+		return false;
+	}
+
+	uint16_t nType = 0;
+	uint16_t nOffset = 0;
+	uint64_t nNamePtr = 0;
+	if (!v_ClassVar_Find(*g_ppClassVarTablePrimary, pszKey, &nType, &nOffset, &nNamePtr)
+		&& !v_ClassVar_Find(*g_ppClassVarTableSecondary, pszKey, &nType, &nOffset, &nNamePtr))
+	{
+		Warning(eDLL_T::SERVER, "[CLASSVAR] %s refused '%s': unknown class var\n", pszTag, pszKey);
+		return false;
+	}
+	if (nType >= 5)
+	{
+		Warning(eDLL_T::SERVER, "[CLASSVAR] %s refused '%s': type %u is not settable from the console\n", pszTag, pszKey, nType);
+		return false;
+	}
+	if (nType == 0)
+	{
+		if (strcmp(pszValue, "0") != 0 && strcmp(pszValue, "1") != 0
+			&& strcmp(pszValue, "true") != 0 && strcmp(pszValue, "false") != 0)
+		{
+			Warning(eDLL_T::SERVER, "[CLASSVAR] %s refused '%s': expected 0|1|true|false\n", pszTag, pszKey);
+			return false;
+		}
+		return true;
+	}
+	if (nType == 1)
+	{
+		char* pszEnd = nullptr;
+		strtol(pszValue, &pszEnd, 10);
+		if (pszEnd == pszValue || *pszEnd != '\0')
+		{
+			Warning(eDLL_T::SERVER, "[CLASSVAR] %s refused '%s': '%s' is not an int\n", pszTag, pszKey, pszValue);
+			return false;
+		}
+		return true;
+	}
+	if (!ServerScript_ClassVarValidateFloats(pszValue, static_cast<int>(nType) - 1))
+	{
+		Warning(eDLL_T::SERVER, "[CLASSVAR] %s refused '%s': '%s' is not finite float(s) in range\n", pszTag, pszKey, pszValue);
+		return false;
+	}
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: setall <key> <value> -- host seat or dedi console applies to every player
+//-----------------------------------------------------------------------------
+static void ClassVar_SetAll_f(const CCommand& args)
+{
+	if (args.ArgC() < 3)
+	{
+		Msg(eDLL_T::SERVER, "[CLASSVAR] usage: setall <key> <value>\n");
+		return;
+	}
+
+	CPlayer* const pIssuer = UTIL_GetCommandClient();
+	if (pIssuer)
+	{
+		CClient* const pHost = ClassVar_HostClient();
+		const int nIssuerSlot = pIssuer->GetEdict() - 1;
+		if (!pHost || !g_pServer || nIssuerSlot < 0 || nIssuerSlot >= MAX_PLAYERS
+			|| g_pServer->GetClient(nIssuerSlot) != pHost)
+		{
+			Warning(eDLL_T::SERVER, "[CLASSVAR] setall refused: slot %d is not the host seat\n", nIssuerSlot);
+			return;
+		}
+	}
+
+	ServerScript_ResolveClassVar();
+	if (!s_bClassVarUsable)
+	{
+		Warning(eDLL_T::SERVER, "[CLASSVAR] setall refused: surface unresolved\n");
+		return;
+	}
+
+	const char* const pszKey = args.Arg(1);
+	const char* const pszValue = args.Arg(2);
+	if (!ClassVar_ValidateSetArgs("setall", pszKey, pszValue))
+		return;
+
+	int nApplied = 0;
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		CClient* const pClient = g_pServer->GetClient(i);
+		if (!pClient || !pClient->IsActive() || pClient->IsFakeClient())
+			continue;
+		ClassVar_ApplyToClient(pClient, pszKey, pszValue);
+		nApplied++;
+	}
+
+	Msg(eDLL_T::SERVER, "[CLASSVAR] setall %s = %s -> %d player(s)\n", pszKey, pszValue, nApplied);
+}
+
+static ConCommand setall("setall", ClassVar_SetAll_f,
+	"Set a class var on every connected player (host seat or dedi console). Usage: setall <key> <value>",
+	FCVAR_GAMEDLL | FCVAR_CHEAT);
+
+void ClassVar_BindShipped(void)
+{
+	if (!g_pCVar)
+		return;
+
+	ConCommand* pCmd = g_pCVar->FindCommand("_setClassVarServer");
+	if (!pCmd)
+	{
+		Warning(eDLL_T::SERVER, "[CLASSVAR] _setClassVarServer not found, leaving stock\n");
+		return;
+	}
+
+	pCmd->RemoveFlags(FCVAR_DEVELOPMENTONLY);
+	s_fnSetClassVarServerOrig = pCmd->m_fnCommandCallback;
+	pCmd->m_fnCommandCallback = ClassVar_SetClassVarServer_f;
+
+	Msg(eDLL_T::SERVER, "[CLASSVAR] _setClassVarServer: cheat-gated, wrapped\n");
 }

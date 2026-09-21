@@ -9,6 +9,7 @@
 #include "windows/id3dx.h"
 #include "imgui/misc/imgui_utility.h"
 #include "gameui/IDevMenu.h"
+#include "gameui/IClassVarLab.h"
 
 // DevMenu visibility convar (not bound to top bar anymore)
 static ConVar ui_devmenu_enable("ui_devmenu_enable", "0", FCVAR_CLIENTDLL | FCVAR_RELEASE, "Show/hide the developer menu.");
@@ -35,6 +36,8 @@ void CDevMenu::Shutdown()
 
 void CDevMenu::RunFrame()
 {
+	g_ClassVarLab.RunFrame();
+
 	const bool enabled = ui_devmenu_enable.GetBool();
 
 	if (!enabled)
@@ -91,6 +94,12 @@ bool CDevMenu::DrawSurface()
 
 	if (ImGui::BeginTabBar("##DevMenuTabs"))
 	{
+		if (ImGui::BeginTabItem("Movement Lab"))
+		{
+			g_ClassVarLab.Draw();
+			ImGui::EndTabItem();
+		}
+
 		if (ImGui::BeginTabItem("Commands"))
 		{
 			ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, 18.0f); stylePushed++;

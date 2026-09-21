@@ -13,26 +13,35 @@
 //-----------------------------------------------------------------------------
 static ConVar bridge_aimassist("bridge_aimassist", "1", FCVAR_RELEASE,
 	"Master enable for client aim-assist hooks.");
-static ConVar bridge_aimassist_magnet("bridge_aimassist_magnet", "1", FCVAR_RELEASE,
+static ConVar bridge_aimassist_magnet("bridge_aimassist_magnet", "1", FCVAR_RELEASE | FCVAR_CHEAT,
 	"Playlist-miss magnet 0.40 -> 0.30.");
-static ConVar bridge_aimassist_l2("bridge_aimassist_l2", "0", FCVAR_RELEASE,
+static ConVar bridge_aimassist_l2("bridge_aimassist_l2", "0", FCVAR_RELEASE | FCVAR_CHEAT,
 	"Inflate small look/move so AND treats L2 as alive. Off=native AND.");
-static ConVar bridge_aimassist_plv("bridge_aimassist_plv", "1", FCVAR_RELEASE,
+static ConVar bridge_aimassist_plv("bridge_aimassist_plv", "1", FCVAR_RELEASE | FCVAR_CHEAT,
 	"Look-only PLV filter from playlist aimassist_filter_plv_*. Move stick "
 	"untouched. When on, look_idle is skipped.");
-static ConVar bridge_aimassist_look_idle("bridge_aimassist_look_idle", "1", FCVAR_RELEASE,
+static ConVar bridge_aimassist_look_idle("bridge_aimassist_look_idle", "1", FCVAR_RELEASE | FCVAR_CHEAT,
 	"Grounded + look below deadzone zeros magnet even if move is alive. "
 	"Skipped while bridge_aimassist_plv is on.");
-static ConVar bridge_aimassist_look_deadzone("bridge_aimassist_look_deadzone", "0.06", FCVAR_RELEASE,
+static ConVar bridge_aimassist_look_deadzone("bridge_aimassist_look_deadzone", "0.06", FCVAR_RELEASE | FCVAR_CHEAT,
 	"Look L2 deadzone for look_idle. Native AND is 0.03.");
-static ConVar bridge_aimassist_yaw("bridge_aimassist_yaw", "1", FCVAR_RELEASE,
+static ConVar bridge_aimassist_yaw("bridge_aimassist_yaw", "1", FCVAR_RELEASE | FCVAR_CHEAT,
 	"Do not pull yaw away from the current target at 1000-1500 u.");
-static ConVar bridge_aimassist_adsdist("bridge_aimassist_adsdist", "1", FCVAR_RELEASE,
+static ConVar bridge_aimassist_adsdist("bridge_aimassist_adsdist", "1", FCVAR_RELEASE | FCVAR_CHEAT,
 	"ADS magnet scale by distance (200-2500 u, 0.5-1.5).");
-static ConVar bridge_aimassist_highspeed("bridge_aimassist_highspeed", "1", FCVAR_RELEASE,
+static ConVar bridge_aimassist_highspeed("bridge_aimassist_highspeed", "1", FCVAR_RELEASE | FCVAR_CHEAT,
 	"Highspeed magnet scale 0.9 ADS / 0.65 hip.");
-static ConVar bridge_aimassist_sniper("bridge_aimassist_sniper", "1", FCVAR_RELEASE,
+static ConVar bridge_aimassist_sniper("bridge_aimassist_sniper", "1", FCVAR_RELEASE | FCVAR_CHEAT,
 	"Playlist miss keeps sniper scopes off (zoomClass>=3). Non-sniper stay on.");
+
+static ConVar gamepad_custom_assist_strength("gamepad_custom_assist_strength", "1.0",
+	FCVAR_RELEASE | FCVAR_ARCHIVE,
+	"Hip-fire aim assist strength multiplier. Applied only where the playlist "
+	"sets aimassist_player_tune_allowed 1, clamped to its min/max.", true, 0.0f, true, 2.0f);
+static ConVar gamepad_custom_assist_strength_ads("gamepad_custom_assist_strength_ads", "1.0",
+	FCVAR_RELEASE | FCVAR_ARCHIVE,
+	"ADS aim assist strength multiplier. Same playlist gate as the hip value.",
+	true, 0.0f, true, 2.0f);
 
 static ConVar sdk_aimassist_diag("sdk_aimassist_diag", "0", FCVAR_DEVELOPMENTONLY,
 	"[AA] log miss/l2/plv/lookIdle/yaw/ads/hs/sniper. 0=off.");
@@ -105,6 +114,12 @@ static float s_flPlvThresh = 0.05f;
 static unsigned int s_nPlvCache = 0;
 static bool s_bPlvAnnounced = false;
 
+static bool s_bTuneAllowed = false;
+static float s_flTuneMin = 0.5f;
+static float s_flTuneMax = 1.0f;
+static unsigned int s_nTuneCache = 0;
+static bool s_bTuneLogged = false;
+
 //-----------------------------------------------------------------------------
 static bool AimAssistOn(void)
 {
@@ -164,6 +179,45 @@ static void AimAssistPlv_Refresh(void)
 		Msg(eDLL_T::CLIENT, "[AA] plv coeff=%.3f thresh=%.3f threshOn=%d\n",
 			s_flPlvCoeff, s_flPlvThresh, s_bPlvThresh ? 1 : 0);
 	}
+}
+
+static void AimAssistTune_Refresh(void)
+{
+	if ((s_nTuneCache++ & 31) != 0)
+		return;
+
+	const bool bWas = s_bTuneAllowed;
+	s_bTuneAllowed = PlaylistVarBool("aimassist_player_tune_allowed");
+	s_flTuneMin = PlaylistVarFloat("aimassist_player_tune_min", 0.5f);
+	s_flTuneMax = PlaylistVarFloat("aimassist_player_tune_max", 1.0f);
+	if (s_flTuneMin < 0.0f)
+		s_flTuneMin = 0.0f;
+	if (s_flTuneMax > 2.0f)
+		s_flTuneMax = 2.0f;
+	if (s_flTuneMax < s_flTuneMin)
+		s_flTuneMax = s_flTuneMin;
+
+	if (sdk_aimassist_diag.GetBool() && (!s_bTuneLogged || bWas != s_bTuneAllowed))
+	{
+		s_bTuneLogged = true;
+		Warning(eDLL_T::CLIENT, "[AA] tune allowed=%d min=%.2f max=%.2f user=%.2f/%.2f\n",
+			s_bTuneAllowed ? 1 : 0, s_flTuneMin, s_flTuneMax,
+			gamepad_custom_assist_strength.GetFloat(),
+			gamepad_custom_assist_strength_ads.GetFloat());
+	}
+}
+
+static float AimAssistTune_Scale(const bool bAds)
+{
+	if (!s_bTuneAllowed)
+		return 1.0f;
+	float f = bAds ? gamepad_custom_assist_strength_ads.GetFloat()
+		: gamepad_custom_assist_strength.GetFloat();
+	if (f < s_flTuneMin)
+		f = s_flTuneMin;
+	if (f > s_flTuneMax)
+		f = s_flTuneMax;
+	return f;
 }
 
 static bool AimAssistPlv_Active(void)
@@ -414,6 +468,7 @@ static float Hook_GetRawMagnetScale(void* pPlayer, float k)
 	if (s_bInApply && pPlayer)
 	{
 		const bool bAds = PlayerAds(pPlayer);
+		out *= AimAssistTune_Scale(bAds);
 		if (bridge_aimassist_adsdist.GetBool() && bAds && s_pApplyTarget)
 		{
 			float eye[3];
@@ -443,6 +498,7 @@ static float* Hook_Apply(void* pAA, void* pPlayer, float* pTarget, float* a3,
 	if (AimAssistOn() && pAA)
 	{
 		AimAssistPlv_Refresh();
+		AimAssistTune_Refresh();
 		if (bridge_aimassist_plv.GetBool() && AimAssistPlv_Active())
 		{
 			const float flMag = AimAssistPlv_FilterLook(pAA, &lookX, &lookY);

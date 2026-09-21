@@ -15,6 +15,7 @@
 #include "skydive.h"
 #include "game/server/energize.h"
 #include "game/server/akimbo.h"
+#include "game/server/dodge_gate.h"
 #include "game/shared/weapon_heat.h"
 #include "game/shared/weapon_script_vars.h"
 #include "mantle_boost.h"
@@ -138,6 +139,8 @@ void CPlayerMove::StaticRunCommand(CPlayerMove* thisp, CPlayer* player, CUserCmd
 	// Author velocity before movement integrates it. After would be one command behind.
 	SkydiveBridge_Think(player, ucmd, playerFrameTime);
 
+	DodgeGate_PreRun(player, ucmd);
+
 	const float flFreezeScale = GameTimescale_WorldScale();
 	if (flFreezeScale < 1.0f)
 		ucmd->frametime *= flFreezeScale;
@@ -145,6 +148,8 @@ void CPlayerMove::StaticRunCommand(CPlayerMove* thisp, CPlayer* player, CUserCmd
 	CPlayerMove__RunCommand(thisp, player, ucmd, moveHelper);
 
 	CmdChain_Bump(CMDCHAIN_ENGINE_RETURNED);
+
+	DodgeGate_PostRun(player, ucmd);
 
 	// Energize FSM tick: per executed usercmd, not PlayerRunCommand (no callers).
 	EnergizeBridge_Think(player, ucmd);

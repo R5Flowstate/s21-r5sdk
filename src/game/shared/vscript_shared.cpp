@@ -345,7 +345,9 @@ static __int64 SQObject_ToString(__int64 vm, void* srcObj, void* dstObj)
         int objType = *reinterpret_cast<int*>(srcObj);
         uintptr_t objVal = *reinterpret_cast<uintptr_t*>(reinterpret_cast<uintptr_t>(srcObj) + 8);
 
-        if ((objType & 0x08000000) != 0 && objVal > 0 && objVal < 0x100000000ULL)
+        // Only the first 64 KB is never mapped. Without high-entropy ASLR the
+        // whole heap sits below 4 GB, so any wider bound nulls every string.
+        if ((objType & 0x08000000) != 0 && objVal > 0 && objVal < 0x10000ULL)
         {
             static __declspec(align(16)) char s_NullObj[16] = {};
             *reinterpret_cast<int*>(s_NullObj) = 0x01000001; // OT_NULL

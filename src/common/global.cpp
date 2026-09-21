@@ -11,6 +11,7 @@
 #include "callback.h"
 #include "global.h"
 #include "game/client/visual_clutter.h"
+#include "game/client/classvar_natives.h"
 
 ConVar curl_debug("curl_debug", "0", FCVAR_DEVELOPMENTONLY, "Determines whether or not to enable curl debug logging.", "1 = curl logs; 0 (zero) = no logs");
 ConVar curl_timeout("curl_timeout", "15", FCVAR_DEVELOPMENTONLY, "Maximum time in seconds a curl transfer operation could take.");
@@ -306,6 +307,7 @@ void Bridge_ApplyLaunchConVarOverrides(void)
 
 	ClientRenderCvars_BindShipped();
 	FpsMax_BindShipped();
+	ClassVar_BindShipped();
 }
 
 //-----------------------------------------------------------------------------
@@ -633,6 +635,7 @@ void ConCommand_PurgeShipped(void)
 #include "completion.h"
 #include "callback.h"
 #include "global.h"
+#include "game/server/classvar_natives.h"
 
 
 ConVar curl_debug("curl_debug", "0", FCVAR_DEVELOPMENTONLY, "Determines whether or not to enable curl debug logging.", "1 = curl logs; 0 (zero) = no logs");
@@ -1047,6 +1050,8 @@ void ConCommand_InitShipped(void)
 	// FCVAR_GAMEDLL so a client exec asks the dedi to reparse weapon scripts; FCVAR_CHEAT gates remote use on sv_cheats.
 	weapon_reparse->RemoveFlags(FCVAR_CLIENTDLL);
 	weapon_reparse->AddFlags(FCVAR_GAMEDLL | FCVAR_CHEAT);
+
+	ClassVar_BindShipped();
 
 
 	/// ---------------------------- [ FLAG REMOVAL ]

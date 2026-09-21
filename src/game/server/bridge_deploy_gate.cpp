@@ -5,6 +5,7 @@
 //=============================================================================//
 #include "core/stdafx.h"
 #include "bridge_deploy_gate.h"
+#include "game/server/akimbo.h"
 
 
 typedef char(__fastcall* PFN_CWeaponX_DeployWeapon)(__int64 weapon, unsigned char skipRaise);
@@ -69,6 +70,15 @@ static bool DeployGate_IsPlayer(__int64 entity)
 // Purpose: S21 tries DRAWFIRST before the sprint skip. Neutralise
 // m_fIsSprinting for a first raise so S3 takes that same branch.
 //-----------------------------------------------------------------------------
+static char DeployGate_Deploy(__int64 weapon, unsigned char skipRaise)
+{
+	void* const pWeapon = reinterpret_cast<void*>(weapon);
+	void* const pRedeploy = AkimboBridge_PreDeploy(pWeapon);
+	const char result = v_CWeaponX_DeployWeapon(weapon, skipRaise);
+	AkimboBridge_PostDeploy(pWeapon, pRedeploy);
+	return result;
+}
+
 static char __fastcall Hook_CWeaponX_DeployWeapon(__int64 weapon, unsigned char skipRaise)
 {
 	if (!bridge_first_deploy_parity.GetBool()
@@ -76,21 +86,21 @@ static char __fastcall Hook_CWeaponX_DeployWeapon(__int64 weapon, unsigned char 
 		|| skipRaise
 		|| *reinterpret_cast<unsigned char*>(weapon + WEAPON_OFF_DIDFIRSTDEPLOY))
 	{
-		return v_CWeaponX_DeployWeapon(weapon, skipRaise);
+		return DeployGate_Deploy(weapon, skipRaise);
 	}
 
 	const __int64 player = DeployGate_GetOwner(weapon);
 	if (!player || !DeployGate_IsPlayer(player))
-		return v_CWeaponX_DeployWeapon(weapon, skipRaise);
+		return DeployGate_Deploy(weapon, skipRaise);
 
 	unsigned char* const pSprint = reinterpret_cast<unsigned char*>(
 		player + PLAYER_OFF_FISSPRINTING);
 	if (*pSprint == 0)
-		return v_CWeaponX_DeployWeapon(weapon, skipRaise);
+		return DeployGate_Deploy(weapon, skipRaise);
 
 	const unsigned char nSaved = *pSprint;
 	*pSprint = 0;
-	const char result = v_CWeaponX_DeployWeapon(weapon, skipRaise);
+	const char result = DeployGate_Deploy(weapon, skipRaise);
 	*pSprint = nSaved;
 	return result;
 }

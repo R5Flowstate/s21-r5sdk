@@ -7,15 +7,16 @@
 #include "core/stdafx.h"
 #include "tier1/convar.h"
 #include "filesystem/filesystem.h"
+#include "tier0/memaddr.h"
+#include "tier0/module.h"
+#include "thirdparty/detours/include/detours.h"
 #include "activity.h"
 #include <vector>
 #include <string>
 
 static std::vector<std::pair<std::string, int>> s_customActivities;
 static bool s_initialized = false;
-static bool s_serverInitialized = false;
 static int s_predefinedMaxId = -1;
-static int s_predefinedMaxId_Server = -1;
 
 int RegisterCustomActivity(const char* activityName)
 {
@@ -31,40 +32,29 @@ int RegisterCustomActivity(const char* activityName)
 		return -1;
 	}
 
-	if (!v_ActivityList_RegisterActivity || !g_pMaxActivityId)
-	{
-		Warning(eDLL_T::ENGINE, "[ACTIVITY] ActivityList_RegisterActivity not found\n");
-		return -1;
-	}
+	const int existing = v_ActivityList_LookupByName(activityName);
+	if (existing >= 0 && existing != 0xFFFF)
+		return existing;
 
 	if (s_predefinedMaxId < 0)
 		s_predefinedMaxId = *g_pMaxActivityId;
 
-	int activityId = *g_pMaxActivityId + 1;
-
-	v_ActivityList_RegisterActivity(activityName, activityId, 0);
-
-	if (v_ActivityList_RegisterActivity_Server && g_pMaxActivityId_Server)
+	const int activityId = *g_pMaxActivityId + 1;
+	if (activityId > 0x7FFF)
 	{
-		if (s_predefinedMaxId_Server < 0)
-			s_predefinedMaxId_Server = *g_pMaxActivityId_Server;
-
-		v_ActivityList_RegisterActivity_Server(activityName, activityId, 0);
+		Warning(eDLL_T::ENGINE, "[ACTIVITY] activity table full, cannot register '%s'\n", activityName);
+		return -1;
 	}
 
+	v_ActivityList_RegisterActivity(activityName, static_cast<__int16>(activityId));
 	s_customActivities.push_back({ activityName, activityId });
 	return activityId;
 }
 
 bool IsActivitySystemInitialized()
 {
-	if (!s_initialized || !g_pActivityList || !g_pMaxActivityId)
-		return false;
-
-	if (*g_pMaxActivityId < 100)
-		return false;
-
-	return true;
+	return s_initialized && g_pMaxActivityId && v_ActivityList_RegisterActivity
+		&& v_ActivityList_LookupByName && *g_pMaxActivityId >= 100;
 }
 
 int GetActivityCount()
@@ -101,17 +91,12 @@ int FindActivityByName(const char* name)
 			return act.second;
 	}
 
-	if (v_ActivityList_GetActivityName && g_pMaxActivityId)
+	if (v_ActivityList_LookupByName)
 	{
-		int maxId = *g_pMaxActivityId;
-		for (int i = 0; i <= maxId; i++)
-		{
-			const char* actName = v_ActivityList_GetActivityName(i);
-			if (actName && actName[0] != '\0' && strcmp(actName, name) == 0)
-				return i;
-		}
+		const int id = v_ActivityList_LookupByName(name);
+		if (id >= 0 && id != 0xFFFF)
+			return id;
 	}
-
 	return -1;
 }
 
@@ -142,30 +127,21 @@ void ClearCustomActivities()
 
 int LoadCustomActivitiesFromFile()
 {
-	const char* filePath = "scripts/activity_types.txt";
-
-	if (!FileSystem())
-	{
-		Warning(eDLL_T::ENGINE, "[ACTIVITY] FileSystem not available\n");
-		return 0;
-	}
-
-	FileHandle_t pFile = FileSystem()->Open(filePath, "r", "GAME");
+	// CRT, not IFileSystem: list init runs before the filesystem interface is up.
+	const char* filePath = "platform/scripts/activity_types.txt";
+	FILE* const pFile = fopen(filePath, "r");
 	if (!pFile)
 	{
 		Msg(eDLL_T::ENGINE, "[ACTIVITY] No custom activity file found at %s\n", filePath);
 		return 0;
 	}
 
-	// Snapshot pre-load max ID so later registrations are not treated as engine dupes.
-	const int engineMaxIdSnapshot = (g_pMaxActivityId) ? *g_pMaxActivityId : -1;
-
 	char line[256];
 	int count = 0;
 	int lineNum = 0;
 	int engineDupes = 0;
 
-	while (FileSystem()->ReadLine(line, sizeof(line), pFile))
+	while (fgets(line, sizeof(line), pFile))
 	{
 		lineNum++;
 
@@ -204,19 +180,13 @@ int LoadCustomActivitiesFromFile()
 			}
 		}
 
-		if (!duplicate && engineMaxIdSnapshot >= 0 && v_ActivityList_GetActivityName)
+		if (!duplicate)
 		{
-			for (int i = 0; i <= engineMaxIdSnapshot; i++)
+			const int engineId = v_ActivityList_LookupByName(trimmed);
+			if (engineId >= 0 && engineId != 0xFFFF)
 			{
-				const char* engineName = v_ActivityList_GetActivityName(i);
-				if (engineName && engineName[0] != '\0' && strcmp(engineName, trimmed) == 0)
-				{
-					Warning(eDLL_T::ENGINE, "[ACTIVITY] %s:%d: '%s' already engine-registered at ID %d - skipping\n",
-						filePath, lineNum, trimmed, i);
-					duplicate = true;
-					engineDupes++;
-					break;
-				}
+				duplicate = true;
+				engineDupes++;
 			}
 		}
 
@@ -228,11 +198,72 @@ int LoadCustomActivitiesFromFile()
 			count++;
 	}
 
-	FileSystem()->Close(pFile);
+	fclose(pFile);
 	Msg(eDLL_T::ENGINE, "[ACTIVITY] Loaded %d custom activities from %s (skipped %d engine-duplicates)\n",
 		count, filePath, engineDupes);
 
 	return count;
+}
+
+// The engine rebuilds the activity table here on every list init, before any
+// model resolves its sequence activities. Customs go in right after.
+static bool s_customsAtListInit = false;
+
+bool ActivityList_CustomsRegisteredAtListInit()
+{
+	return s_customsAtListInit;
+}
+
+static int s_nListGeneration = 0;
+int ActivityList_Generation()
+{
+	return s_nListGeneration;
+}
+
+static void Hook_ActivityList_RegisterSharedActivities(void)
+{
+	v_ActivityList_RegisterSharedActivities();
+	ClearCustomActivities();
+	++s_nListGeneration;
+	s_initialized = true;
+
+	const int count = LoadCustomActivitiesFromFile();
+	s_customsAtListInit = count > 0;
+	Msg(eDLL_T::ENGINE, "[ACTIVITY] registered %d custom activities at list init (max id %d)\n",
+		count, g_pMaxActivityId ? *g_pMaxActivityId : -1);
+}
+
+void VActivityList::GetFun(void) const
+{
+	// RegisterSharedActivities: the ACT_RESET / ACT_IDLE_CASUAL / ACT_IDLE run.
+	const CMemory shared = Module_FindPattern(g_GameDll,
+		"48 83 EC 28 33 D2 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? BA 01 00 00 00 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? BA 02 00 00 00");
+	if (shared.IsValid())
+	{
+		shared.GetPtr(v_ActivityList_RegisterSharedActivities);
+		shared.Offset(0xD).FollowNearCallSelf().GetPtr(v_ActivityList_RegisterActivity);
+	}
+
+	// Inside RegisterActivity: the max-id update (movzx eax, [max]; cmp; cmovg; mov [max], ax).
+	const CMemory maxId = Module_FindPattern(g_GameDll,
+		"66 89 46 02 33 C0 66 89 46 04 0F B7 05 ?? ?? ?? ?? 66 44 3B F0 66 41 0F 4F C6 66 89 05");
+	if (maxId.IsValid())
+		g_pMaxActivityId = maxId.Offset(0xA).ResolveRelativeAddress(3, 7).RCast<__int16*>();
+
+	// LookupByName: symbol-table find, then the {id, symbol} table walk.
+	Module_FindPattern(g_GameDll,
+		"40 53 48 83 EC 20 48 8B D1 48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? 0F B7 D8 66 3B 59 10 73 48 66 3B 59 26 77 42")
+		.GetPtr(v_ActivityList_LookupByName);
+
+	if (!v_ActivityList_RegisterSharedActivities || !v_ActivityList_RegisterActivity || !g_pMaxActivityId || !v_ActivityList_LookupByName)
+		Warning(eDLL_T::ENGINE, "[ACTIVITY] client activity list unresolved (shared=%p register=%p max=%p lookup=%p) -- custom activities disabled\n",
+			v_ActivityList_RegisterSharedActivities, v_ActivityList_RegisterActivity, g_pMaxActivityId, v_ActivityList_LookupByName);
+}
+
+void VActivityList::Detour(const bool bAttach) const
+{
+	if (v_ActivityList_RegisterSharedActivities && v_ActivityList_RegisterActivity && g_pMaxActivityId && v_ActivityList_LookupByName)
+		DetourSetup(&v_ActivityList_RegisterSharedActivities, &Hook_ActivityList_RegisterSharedActivities, bAttach);
 }
 
 static void CC_ActivityList_Dump(const CCommand& args)
@@ -242,45 +273,15 @@ static void CC_ActivityList_Dump(const CCommand& args)
 		Warning(eDLL_T::ENGINE, "[ACTIVITY] System not initialized\n");
 		return;
 	}
-
 	const char* filter = (args.ArgC() > 1) ? args.Arg(1) : nullptr;
-
-	if (!v_ActivityList_GetActivityName || !g_pMaxActivityId)
+	if (filter)
 	{
-		Warning(eDLL_T::ENGINE, "[ACTIVITY] GetActivityName not found\n");
+		Msg(eDLL_T::ENGINE, "[ACTIVITY] '%s' = %d\n", filter, v_ActivityList_LookupByName(filter));
 		return;
 	}
-
-	int maxId = *g_pMaxActivityId;
-	int totalCount = 0;
-	int shownCount = 0;
-	int customCount = 0;
-
-	Msg(eDLL_T::ENGINE, "[ACTIVITY] Listing activities%s%s%s:\n",
-		filter ? " matching '" : "", filter ? filter : "", filter ? "'" : "");
-	Msg(eDLL_T::ENGINE, "--------------------------------------------\n");
-
-	for (int i = 0; i <= maxId; i++)
-	{
-		const char* name = v_ActivityList_GetActivityName(i);
-		if (name && name[0] != '\0' && strcmp(name, "(invalid activity index)") != 0)
-		{
-			totalCount++;
-
-			bool isCustom = (s_predefinedMaxId >= 0 && i > s_predefinedMaxId);
-			if (isCustom) customCount++;
-
-			if (!filter || strstr(name, filter) != nullptr)
-			{
-				Msg(eDLL_T::ENGINE, "  [%3d] %s%s\n", i, name, isCustom ? " (custom)" : "");
-				shownCount++;
-			}
-		}
-	}
-
-	Msg(eDLL_T::ENGINE, "--------------------------------------------\n");
-	Msg(eDLL_T::ENGINE, "[ACTIVITY] Shown %d / %d (predefined: %d, custom: %d)\n",
-		shownCount, totalCount, totalCount - customCount, customCount);
+	Msg(eDLL_T::ENGINE, "[ACTIVITY] max id %d, %zu custom:\n", *g_pMaxActivityId, s_customActivities.size());
+	for (const auto& act : s_customActivities)
+		Msg(eDLL_T::ENGINE, "  ID %4d: %s\n", act.second, act.first.c_str());
 }
 
 static ConCommand activity_dump("activity_dump", CC_ActivityList_Dump, "List registered activities. Usage: activity_dump [filter]", FCVAR_RELEASE);
@@ -605,9 +606,16 @@ bool ActivityList_CustomsRegisteredAtListInit()
 	return s_customsAtListInit;
 }
 
+static int s_nListGeneration = 0;
+int ActivityList_Generation()
+{
+	return s_nListGeneration;
+}
+
 static void Hook_ActivityList_RegisterSharedActivities()
 {
 	v_ActivityList_RegisterSharedActivities_Server();
+	++s_nListGeneration;
 
 	// The engine just rebuilt the table, so our bookkeeping of what is already
 	// registered is stale -- without the clear, the duplicate check would skip

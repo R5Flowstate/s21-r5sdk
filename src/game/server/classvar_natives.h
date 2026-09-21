@@ -9,5 +9,6 @@
 class CSquirrelVM;
 
 void Script_RegisterClassVarNatives(CSquirrelVM* s);
+void ClassVar_BindShipped(void);
 
 #endif // GAME_SERVER_CLASSVAR_NATIVES_H

@@ -731,9 +731,12 @@ void DTExtend_Apply(void** tables, int count)
 
 	// [TMPL-PICK] One line per leaf type -- which donor prop won the pre-scan and what +0x60 ProxyFn rides along.
 	// Pack calls the proxy for every type; non-proxied appends inherit the donor's proxy verbatim (a translating EHANDLE donor would transform every appended value of that type).
-	const char* s_nestedExtendTables[4];
+	const char* s_nestedExtendTables[5];
 	int kNumNestedExtendTables = 0;
 	s_nestedExtendTables[kNumNestedExtendTables++] = "DT_WeaponX_LocalWeaponData";
+	// m_akimboDisabled (value-proxied). The S21 Recv leaf exists only on
+	// this nested table.
+	s_nestedExtendTables[kNumNestedExtendTables++] = "DT_WeaponPlayerData";
 	// m_shotIndexForSpread (value-proxied).
 	// Nested under DT_WeaponX like LocalWeaponData; without this row its registered extend prop was silently dropped and the client's viewkick pattern row froze at the start-of-burst clamp (m_shotIndexForSpread stuck at wire-0).
 	s_nestedExtendTables[kNumNestedExtendTables++] = "DT_WeaponX_PredictingClientOnly";

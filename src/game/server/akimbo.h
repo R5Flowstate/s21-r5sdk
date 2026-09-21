@@ -19,10 +19,19 @@ bool AkimboBridge_IsAkimboWeapon(void* pWeapon);
 void* AkimboBridge_GetOtherWeapon(void* pWeapon);
 bool AkimboBridge_IsAlthand(void* pWeapon);
 bool AkimboBridge_IsDisabled(void* pWeapon);
+bool AkimboBridge_IsDualWielding(void* pPlayer);
 void AkimboBridge_UpdateState(void* pPlayer);
+
+int AkimboBridge_GetDisabledFromPlayerData(const void* pPlayerData);
+uint32_t AkimboBridge_GetModBitfieldDisabled(const void* pWeapon);
 
 bool AkimboBridge_CanActivateAlthand(void* pPlayer, void* pWeapon);
 void AkimboBridge_OnSetActiveWeapon(void* pPlayer, unsigned int hand, void* pWeapon);
+void AkimboBridge_OnZiplineMountStart(void* pPlayer);
+void AkimboBridge_OnZiplineStop(void* pPlayer);
+void AkimboBridge_PostHolster(void* pWeapon, bool fastHolster, void* pCaller);
+void* AkimboBridge_PreDeploy(void* pWeapon);
+void AkimboBridge_PostDeploy(void* pWeapon, void* pRedeploy);
 
 void AkimboBridge_Think(void* pPlayer, void* pUserCmd);
 void AkimboBridge_RegisterWeaponFuncs(ScriptClassDescriptor_t* weaponStruct);

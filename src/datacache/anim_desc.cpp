@@ -43,11 +43,9 @@ static bool IsPlausibleAddress(const unsigned __int64 addr)
 	if (addr < USER_ADDR_FLOOR || addr > USER_ADDR_LIMIT)
 		return false;
 
-	// Unset sentinel (-1) or a zero-extended 32-bit value; neither is a
-	// user-mode heap/module pointer.
+	// Unset sentinel (-1). Do not reject a zero upper half: without
+	// high-entropy ASLR the whole heap sits below 4 GB.
 	if (static_cast<unsigned __int32>(addr) == 0xFFFFFFFFu)
-		return false;
-	if ((addr >> 32) == 0)
 		return false;
 
 	return true;
