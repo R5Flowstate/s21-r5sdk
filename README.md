@@ -9,7 +9,7 @@ This tree builds two products from one source:
 | `server` | the Season 3 dedicated server executable | `game/server.dll` |
 
 `loader.dll` selects the matching product from the host executable name.
-Agent and contributor notes live in `CLAUDE.md`.
+Agent and contributor notes live in `AGENTS.md`.
 
 The shipping branch of the public tree is `s21-unify`. `main` and
 `S16-S21-MERGE` are upstream credit.
