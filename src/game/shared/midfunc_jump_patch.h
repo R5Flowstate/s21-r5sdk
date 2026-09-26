@@ -3,7 +3,8 @@
 // Purpose: five-byte mid-function jump patch with a near trampoline.
 //
 // The site must be a `test r8, r8` (3 bytes) followed by a `jnz rel8` (2 bytes)
-// with no live volatile register and RSP 16-byte aligned; the callee gets
+// with RSP 16-byte aligned and no live RAX, flags or XMM0-5 (RCX, RDX and
+// R8-R11 are preserved across the call); the callee gets
 // `this` from RDI and returns an int, where a negative value replays the
 // displaced test/jnz and anything else is returned through the function's
 // shared epilogue in EAX.
@@ -36,18 +37,12 @@ public:
 		uint8_t* const pJnzTarget = pSite + 5 + static_cast<int8_t>(pSite[4]);
 		uint8_t* const pResume    = pSite + 5;
 
-		m_pTramp = AllocNear(pSite, 64);
+		m_pTramp = AllocNear(pSite, 128);
 		if (!m_pTramp)
 			return false;
 
 		uint8_t* p = m_pTramp;
-		p = Emit(p, "\x48\x83\xEC\x20", 4);           // sub rsp, 20h
-		p = Emit(p, "\x48\x8B\xCF", 3);               // mov rcx, rdi
-		p = Emit(p, "\x48\xB8", 2);                   // mov rax, imm64
-		const uint64_t fn = reinterpret_cast<uint64_t>(pfnSelect);
-		p = Emit(p, &fn, 8);
-		p = Emit(p, "\xFF\xD0", 2);                   // call rax
-		p = Emit(p, "\x48\x83\xC4\x20", 4);           // add rsp, 20h
+		p = EmitCall(p, pfnSelect);
 		p = Emit(p, "\x85\xC0", 2);                   // test eax, eax
 		p = Emit(p, "\x78\x05", 2);                   // js +5 (over the jmp below)
 		p = EmitJmp(p, pEpilogue);                    // jmp epilogue (E9 rel32)
@@ -82,18 +77,12 @@ public:
 		if (m_bInstalled || !pSite || !pEpilogue || !pfnSelect || replayLen < 5 || replayLen > 16 || tailLen > 16)
 			return m_bInstalled;
 
-		m_pTramp = AllocNear(pSite, 96);
+		m_pTramp = AllocNear(pSite, 128);
 		if (!m_pTramp)
 			return false;
 
 		uint8_t* p = m_pTramp;
-		p = Emit(p, "\x48\x83\xEC\x20", 4);           // sub rsp, 20h
-		p = Emit(p, "\x48\x8B\xCF", 3);               // mov rcx, rdi
-		p = Emit(p, "\x48\xB8", 2);                   // mov rax, imm64
-		const uint64_t fn = reinterpret_cast<uint64_t>(pfnSelect);
-		p = Emit(p, &fn, 8);
-		p = Emit(p, "\xFF\xD0", 2);                   // call rax
-		p = Emit(p, "\x48\x83\xC4\x20", 4);           // add rsp, 20h
+		p = EmitCall(p, pfnSelect);
 		p = Emit(p, "\x85\xC0", 2);                   // test eax, eax
 		p = Emit(p, "\x78\x05", 2);                   // js +5 (over the jmp below)
 		p = EmitJmp(p, pEpilogue);
@@ -137,6 +126,23 @@ private:
 	{
 		memcpy(p, src, len);
 		return p + len;
+	}
+	// Six pushes plus 30h keep RSP 16-aligned for the callee.
+	static uint8_t* EmitCall(uint8_t* p, const MidFuncSelectFn_t pfnSelect)
+	{
+		p = Emit(p, "\x51\x52", 2);                   // push rcx ; push rdx
+		p = Emit(p, "\x41\x50\x41\x51", 4);           // push r8 ; push r9
+		p = Emit(p, "\x41\x52\x41\x53", 4);           // push r10 ; push r11
+		p = Emit(p, "\x48\x83\xEC\x30", 4);           // sub rsp, 30h
+		p = Emit(p, "\x48\x8B\xCF", 3);               // mov rcx, rdi
+		p = Emit(p, "\x48\xB8", 2);                   // mov rax, imm64
+		const uint64_t fn = reinterpret_cast<uint64_t>(pfnSelect);
+		p = Emit(p, &fn, 8);
+		p = Emit(p, "\xFF\xD0", 2);                   // call rax
+		p = Emit(p, "\x48\x83\xC4\x30", 4);           // add rsp, 30h
+		p = Emit(p, "\x41\x5B\x41\x5A", 4);           // pop r11 ; pop r10
+		p = Emit(p, "\x41\x59\x41\x58", 4);           // pop r9 ; pop r8
+		return Emit(p, "\x5A\x59", 2);                // pop rdx ; pop rcx
 	}
 	static uint8_t* EmitRel32(uint8_t* p, const uint8_t* target)
 	{

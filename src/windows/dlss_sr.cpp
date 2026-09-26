@@ -629,7 +629,7 @@ static ID3D12Resource* DlssSr_FromSlot(const NetObsSym_t sym)
 }
 
 
-static const char* const kResourceStatePattern =
+static constexpr char kResourceStatePattern[] =
 	"48 8B F1 0F B6 FA 48 8D 0D ?? ?? ?? ?? FF 15 ?? ?? ?? ?? 48 8D 15 ?? ?? ?? ?? "
 	"33 DB 4C 8B C2 66 90 4D 8B 08 49 8B C1 48 F7 D0 48 0F BC C8";
 

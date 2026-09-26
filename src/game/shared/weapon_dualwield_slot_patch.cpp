@@ -12,7 +12,7 @@
 #include <Windows.h>
 
 // Post-deploy pairing: S3 `lea eax, [rcx+5]` -> +7. rdi = WeaponInventory.
-static const char* const DUALWIELD_PARTNER_PATTERN =
+static constexpr char DUALWIELD_PARTNER_PATTERN[] =
 	"80 F9 04 73 ?? 8D 41 05 83 F8 09 73 ?? 48 63 C1 8B 54 87 1C";
 
 // Offsets into the matched pattern of the two bytes that encode the pairing.
@@ -30,7 +30,7 @@ static uint8_t   g_dualWieldLoadDspSaved  = 0;
 static bool      g_dualWieldPatched       = false;
 
 // Weapon_Give auto-activate: S3 `sub bpl, 5` / slot-5 immediates -> +7 / slot-7.
-static const char* const DUALWIELD_GIVE_ACTIVATE_PATTERN =
+static constexpr char DUALWIELD_GIVE_ACTIVATE_PATTERN[] =
 	"40 80 ED 05 4C 8D 25 ?? ?? ?? ?? 40 80 FD 03 0F 87 ?? ?? ?? ?? 41 8D 45 FB 33 D2 83 F8 09 73 ?? 43 8B 4C AE F4";
 
 // Offsets into the matched pattern of the three bytes that encode slot-5.
