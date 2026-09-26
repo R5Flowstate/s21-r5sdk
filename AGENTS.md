@@ -284,6 +284,81 @@ a full client restart, not a reconnect.
 
 ---
 
+## Debugging
+
+Tools: Windows SDK Debugging Tools (`cdb`), IDA Pro + ida-pro-mcp
+(https://github.com/mrexodia/ida-pro-mcp) with one database per binary,
+Python for everything else.
+
+### Triage
+
+1. Which process: client (`r5apex`) or dedi (`r5apex_ds`)? Separate
+   engines, separate logs.
+2. Newest `platform/logs/<role>/<GUID>/` folder. Crash files are always
+   written; the `.log` set only with `-devsdk` / `-logfiles`.
+3. Match the symptom:
+
+| symptom | evidence | tool |
+|---------|----------|------|
+| crash | `minidump.dmp` in the GUID folder | `cdb -z` |
+| kick / "problem processing game logic" | `.nut #line [SERVER]` line before `Shutdown host game` | dedi log |
+| freeze / hang | nothing; process alive | `cdb -pv` stack walk |
+| silent close, no dump | `abort()`, engine fatal, `bad_alloc` | last log lines + wire sizes (Containment) |
+| invisible / wrong visual | none | networked-prop check, then assets |
+
+### Crash
+
+The `apex_crash.txt` callstack is shallow. Open the dump with the PDBs of
+the build that crashed:
+
+    cdb -z minidump.dmp -y <install>;<build>/game -c ".ecxr; k 40; ~*k 8; q"
+
+Symbolize loose RVAs without a dump by loading the DLL as an image:
+
+    cdb -z client.dll -y . -c "ln client+0x2AFB75; q"
+
+Engine frames (`r5apex+0x...`) go to IDA: rebase to 0x140000000 and
+decompile. Zero SDK frames does not clear the SDK -- the bridge often
+supplied the bad input.
+
+### Heap corruption
+
+AV inside the allocator = victim. Clean-rebuild first (stale layouts).
+Then look for a WRITE through the wrong twin's offset, a stock size after
+a grow, or an index past a fixed DT array. One faulting module + RVA is
+one crash; do not merge crashes on address proximity.
+
+### Freeze
+
+A hang throws nothing: no dump, the log just stops. Walk it live and
+non-invasively (`qd` detaches and leaves it running):
+
+    cdb -pv -p <pid> -y <install>;<build>/game -c ".symopt+0x40; ~*kn 30; qd"
+
+Run it twice a few seconds apart. Stack moves = spin; identical =
+deadlock or blocking wait (look for a lock taken twice on one thread).
+A slow message pump reads as a freeze too -- check snapshot cadence.
+
+An invasive debugger attach tends to hang or kill the process. Use `-pv`,
+or take a full dump (Task Manager > Create dump file) and walk it with
+`cdb -z`.
+
+### Live state
+
+Read the running process with Python `ctypes` `ReadProcessMemory`, or
+`cdb -pv -p <pid> -c "dq <addr> L8; qd"`. A value-shape scan (known field
+pattern) finds a struct without knowing its offset. Do this before
+writing a probe.
+
+### Rules
+
+- `__try` does not save a wild read: the engine VEH fires first.
+- No `VirtualQuery` probes on per-entity / per-prop paths.
+- A fix's own counters prove it ran, not that the symptom is gone.
+- Same failure after a real fix = wrong layer. Re-derive the mechanism.
+
+---
+
 ## Git
 
 Stage **explicit paths**. Never `git add -A` / `git add .`.
