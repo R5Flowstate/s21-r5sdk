@@ -11,16 +11,23 @@
 // whatever mask it spawned with (0 with no owner yet) while its owner moves
 // into a fight realm.
 //
+// CWeaponX's constructor also narrows the mask the base entity constructor
+// installed (all realms) down to DEFAULT alone, so a weapon is born in
+// realm 0 whatever realm its future owner sits in.
+//
 // The S21 client gates remote-bullet FX on realms twice: the whole
 // OnRemoteBulletFired block needs DoesShareRealms(owner, view player), and
 // the tracer particle itself is created with the WEAPON's mask. A
 // disjoint weapon mask discards the opponent's tracers while models, sounds
 // and impacts (owner-gated only) keep working -- the 1v1 symptom.
 //
-// Fix at both ends on the dedi: adopting the owner mask at activation time
-// (weapons given or picked up after the last realm change) and pushing the
-// full inventory on every realm change (weapons held across a realm move).
-// Both go through the real SetRealmsBitMask so edict dirty-marking and the
+// The dedi pushes the owner's whole inventory both on every realm
+// change (weapons held across a realm move) and on every activation
+// (weapons born into a realm their owner has already left). The activation
+// pass walks the whole inventory rather than the weapon being raised: a
+// stowed primary, an akimbo althand and an offhand each fire their own
+// tracer and never appear as the argument of a select. Everything goes
+// through the real SetRealmsBitMask, so edict dirty-marking and the
 // transmit-cache invalidation come for free.
 //
 //=============================================================================//
@@ -38,12 +45,14 @@ static constexpr ptrdiff_t WRF_ENT_OFF_REFHANDLE     = 0x8;   // u32 m_RefEHandl
 static constexpr ptrdiff_t WRF_ENT_OFF_EDICTINDEX    = 88;    // u16 edict index word
 // Server-half CWeaponX owner handle.
 static constexpr ptrdiff_t WRF_WEAPON_OFF_OWNER      = 0x11F0; // u32 m_weaponOwner EHandle
-// Server-half CPlayer inventory (S3 dedi): 9 backpack + 8 offhand + 3 active,
-// EHandle per slot.
+// Server-half CPlayer inventory (S3 dedi), EHandle per slot: m_inventory at
+// 0x1688 plus the inventory-local weapons/offhandWeapons/activeWeapons
+// offsets 0x8/0x2C/0x44. The offhand run ends where activeWeapons begins,
+// so it holds six slots, not eight.
 static constexpr ptrdiff_t WRF_INV_WEAPONS_BASE = 0x1690;
 static constexpr int WRF_INV_WEAPONS_COUNT      = 9;
 static constexpr ptrdiff_t WRF_INV_OFFHAND_BASE = 0x16B4;
-static constexpr int WRF_INV_OFFHAND_COUNT      = 8;
+static constexpr int WRF_INV_OFFHAND_COUNT      = 6;
 static constexpr ptrdiff_t WRF_INV_ACTIVE_BASE  = 0x16CC;
 static constexpr int WRF_INV_ACTIVE_COUNT       = 3;
 
@@ -52,7 +61,12 @@ static ConVar bridge_weapon_realm_follow("bridge_weapon_realm_follow", "1", FCVA
 	"and by pushing the full inventory on every SetRealmsBitMask. Keeps "
 	"opponent bullet tracers visible across 1v1 realm moves");
 
+static ConVar bridge_weapon_realm_follow_diag("bridge_weapon_realm_follow_diag", "0", FCVAR_DEVELOPMENTONLY,
+	"Log every carried-weapon realm stamp ([REALM-FOLLOW] weapon=... old->new).");
+
 static __int64 (*v_SetRealmsBitMask)(__int64 ent, uint64_t mask) = nullptr;
+
+static volatile LONG s_nStamps = 0;
 
 //-----------------------------------------------------------------------------
 // Purpose: stamp one weapon when its mask is stale. The engine setter
@@ -65,6 +79,12 @@ static void WeaponRealmFollow_StampWeapon(const __int64 weaponEnt, const uint64_
 		return;
 
 	v_SetRealmsBitMask(weaponEnt, ownerMask);
+
+	const LONG n = InterlockedIncrement(&s_nStamps);
+	if (bridge_weapon_realm_follow_diag.GetBool() && (n <= 64 || (n % 64) == 0))
+		Msg(eDLL_T::SERVER, "[REALM-FOLLOW] #%ld weapon=%p realms 0x%llX -> 0x%llX\n",
+			n, reinterpret_cast<void*>(weaponEnt),
+			(unsigned long long)weaponMask, (unsigned long long)ownerMask);
 }
 
 //-----------------------------------------------------------------------------
@@ -126,6 +146,11 @@ static thread_local bool s_bInPushInventory = false;
 
 static __int64 __fastcall Hook_SetRealmsBitMask(const __int64 ent, const uint64_t mask)
 {
+	// A player recurses into its linked entity at +0x6340 without checking the
+	// handle; an empty one arrives here as null and the engine would dereference it.
+	if (!ent)
+		return 0;
+
 	const __int64 result = v_SetRealmsBitMask(ent, mask);
 
 	// The stamp path below re-enters this setter on each weapon (orig only,
@@ -142,25 +167,43 @@ static __int64 __fastcall Hook_SetRealmsBitMask(const __int64 ent, const uint64_
 
 //-----------------------------------------------------------------------------
 // Purpose: activation-time adoption for weapon_select_mirror's
-// SetActiveWeapon post-hook. A weapon that fires was activated; stamping
-// here guarantees every firer carries its owner's realms.
+// SetActiveWeapon post-hook. A weapon constructed after its owner's last
+// realm move carries DEFAULT alone, so the whole inventory is pushed here,
+// not just the weapon being raised -- a stowed primary, an akimbo althand
+// and an offhand all fire tracers of their own and are never the argument
+// of a select.
 //-----------------------------------------------------------------------------
 void WeaponRealmFollow_StampActiveWeapon(void* const player, const __int64 weaponEnt)
 {
 	if (!bridge_weapon_realm_follow.GetBool() || !player || !weaponEnt || !v_SetRealmsBitMask)
 		return;
 
-	// weaponEnt arrives after orig ran; the engine may have rejected or
-	// freed it. Resolve through the handle map and prove this pointer is
-	// the live occupant before writing its mask.
-	const SDKEntityHandle weaponEH = SDKEntityState_GetHandle(reinterpret_cast<const void*>(weaponEnt));
-	if (!weaponEH.IsValid()
-		|| SDKEntityState_Resolve(weaponEH, ESide::Server) != reinterpret_cast<void*>(weaponEnt))
-		return;
-
 	const uint64_t playerMask = *reinterpret_cast<const uint64_t*>(
 		reinterpret_cast<uintptr_t>(player) + WRF_ENT_OFF_REALMSBITMASK);
-	WeaponRealmFollow_StampWeapon(weaponEnt, playerMask);
+
+	// weaponEnt arrives after orig ran; the engine may have rejected or
+	// freed it. Resolve through the handle map and prove this pointer is
+	// the live occupant before writing its mask. It is stamped explicitly
+	// because a weapon being equipped is not yet in the inventory arrays.
+	const SDKEntityHandle weaponEH = SDKEntityState_GetHandle(reinterpret_cast<const void*>(weaponEnt));
+	if (weaponEH.IsValid()
+		&& SDKEntityState_Resolve(weaponEH, ESide::Server) == reinterpret_cast<void*>(weaponEnt))
+	{
+		WeaponRealmFollow_StampWeapon(weaponEnt, playerMask);
+	}
+
+	if (!s_bInPushInventory)
+	{
+		s_bInPushInventory = true;
+		WeaponRealmFollow_PushInventory(reinterpret_cast<__int64>(player));
+		s_bInPushInventory = false;
+	}
+}
+
+void WeaponRealmFollow_SetRealmsBitMask(const __int64 ent, const uint64_t mask)
+{
+	if (ent && v_SetRealmsBitMask)
+		v_SetRealmsBitMask(ent, mask);
 }
 
 //-----------------------------------------------------------------------------

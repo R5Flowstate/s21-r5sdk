@@ -297,11 +297,12 @@ bool CNetAdr::SetFromString(const char* const pch, const bool bUseDNS)
 		hints.ai_addr = nullptr;
 		hints.ai_next = nullptr;
 
-		PADDRINFOA ppResult;
+		PADDRINFOA ppResult = nullptr;
 
 		if (getaddrinfo(pszAddress, nullptr, &hints, &ppResult))
 		{
-			freeaddrinfo(ppResult);
+			if (ppResult)
+				freeaddrinfo(ppResult);
 			return false;
 		}
 
@@ -610,11 +611,12 @@ bool CNetAdr::SetFromString(const char* const pch, const bool bUseDNS)
 		hints.ai_addr = nullptr;
 		hints.ai_next = nullptr;
 
-		PADDRINFOA ppResult;
+		PADDRINFOA ppResult = nullptr;
 
 		if (getaddrinfo(pszAddress, nullptr, &hints, &ppResult))
 		{
-			freeaddrinfo(ppResult);
+			if (ppResult)
+				freeaddrinfo(ppResult);
 			return false;
 		}
 

@@ -10,6 +10,7 @@
 #include "tier0/dbg.h"
 #include "tier1/convar.h"
 #include "host_frame_probe.h"
+#include "engine/agent_link.h"
 
 typedef void (__fastcall *PFN_Host_RunFrame)(double realtime, float dt);
 typedef void (__fastcall *PFN_HostState_RunFrame)(void* hostState, double realtime, float dt);
@@ -66,7 +67,9 @@ static void __fastcall Hook_Host_RunFrame(double realtime, float dt)
 		}
 	}
 
+	AgentLink_FrameBegin();
 	v_Host_RunFrame(realtime, dt);
+	AgentLink_FrameEnd();
 }
 
 void VHostFrameProbe::GetAdr(void) const

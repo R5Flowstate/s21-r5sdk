@@ -9,6 +9,7 @@
 
 
 #include "mantle_boost.h"
+#include "mantle_boost_vm_probe.h"
 #include "player.h"
 #include "baseentity.h"
 #include "game/shared/in_buttons.h"
@@ -192,6 +193,20 @@ struct MantleBoostSlot_t
 	bool            m_bGrappledSinceBoost;      // grapple attached while state 4; detaching ends the boost like landing
 };
 static MantleBoostSlot_t s_mantleBoost[MAX_PLAYERS];
+
+// Per-class boost shape relative to the shared tuning (1 = everyone's).
+struct MantleBoostProfile_t
+{
+	float m_flHeightScale = 1.0f;
+	float m_flSprintScale = 1.0f;
+};
+static SDKEntityMap<MantleBoostProfile_t> s_mantleBoostProfile(ESide::Server, "mantleBoostProfile.srv");
+
+static MantleBoostProfile_t MantleBoost_GetProfile(const CPlayer* const player)
+{
+	const MantleBoostProfile_t* const p = s_mantleBoostProfile.Find(player);
+	return p ? *p : MantleBoostProfile_t();
+}
 
 //-----------------------------------------------------------------------------
 // Packed wire value: bits 0..2 state, 3..6 traversal seq, 7..13 edict. Change-gated.
@@ -472,6 +487,7 @@ static void MantleBoost_ApplyBoost(void* const ctx, CPlayer* const player,
 	uint8_t* const mv = *reinterpret_cast<uint8_t**>(reinterpret_cast<uintptr_t>(ctx) + MB_CTX_OFF_MOVEDATA);
 	if (!mv)
 		return;
+	MantleBoostVmProbe_OnBoostStep(player, "finish");
 
 	// Direction: mv gravity-space move dir, else traversal forward, then reflect over the ledge.
 	const float* const pMoveDirGravity = reinterpret_cast<const float*>(mv + MB_MV_OFF_MOVEDIR_GRAVITY);
@@ -503,8 +519,9 @@ static void MantleBoost_ApplyBoost(void* const ctx, CPlayer* const player,
 			flSpeed = flPose;
 		}
 	}
+	const MantleBoostProfile_t profile = MantleBoost_GetProfile(player);
 	if (s.m_nState == 4)
-		flSpeed *= bridge_mantle_boost_sprint_mult.GetFloat();
+		flSpeed *= bridge_mantle_boost_sprint_mult.GetFloat() * profile.m_flSprintScale;
 
 	if (bHaveDir)
 	{
@@ -555,12 +572,14 @@ static void MantleBoost_ApplyBoost(void* const ctx, CPlayer* const player,
 		float* const vel = reinterpret_cast<float*>(mv + MB_MV_OFF_VELOCITY);
 		const float velBefore[3] = { vel[0], vel[1], vel[2] };
 
+		MantleBoostVmProbe_OnBoostStep(player, "pre-jump");
 		v_CGameMovement__Jump(ctx);
+		MantleBoostVmProbe_OnBoostStep(player, "post-jump");
 		bJumped = true;
 
 		// Recompose vz as sqrt(2*g*h) so both engines add the same number.
 		const float flHeight = (s.m_nState == 4)
-			? bridge_mantle_boost_jump_height.GetFloat()
+			? bridge_mantle_boost_jump_height.GetFloat() * profile.m_flHeightScale
 			: 56.0f;   // player_jumpHeight authored default (state 3)
 		vel[0] = velBefore[0];
 		vel[1] = velBefore[1];
@@ -601,6 +620,7 @@ static void MantleBoost_ApplyBoost(void* const ctx, CPlayer* const player,
 
 	if (s.m_nState == 4)
 		player->MantleBoost_GrantSlide();
+	MantleBoostVmProbe_OnBoostStep(player, "slide-set");
 
 	if (bridge_mantle_boost_trig_log.GetBool())
 		Msg(eDLL_T::SERVER, "[MB-CLIMB] side=ds climb=%d pred=%d auth=%d apply=%d "
@@ -641,7 +661,10 @@ static char Hook_CGameMovement_TraversalMove(void* ctx, char justStarted)
 		player = *reinterpret_cast<CPlayer**>(
 			reinterpret_cast<uintptr_t>(ctx) + MB_CTX_OFF_PLAYER);
 		if (player && justStarted)
+		{
 			ZipDisc_OnMantle(player);
+			MantleBoostVmProbe_OnClimbStart(player);
+		}
 	}
 
 	if (!mantle_boost_enabled.GetBool() || !ctx)
@@ -773,3 +796,40 @@ void VMantleBoostBridge::Detour(const bool bAttach) const
 		DetourSetup(&v_CGameMovement__TraversalMove, &Hook_CGameMovement_TraversalMove, bAttach);
 }
 
+
+//-----------------------------------------------------------------------------
+// Purpose: player.SetMantleBoostProfile( float heightScale, float sprintScale )
+//-----------------------------------------------------------------------------
+static SQRESULT Script_SetMantleBoostProfile(HSQUIRRELVM v)
+{
+	void* pPlayer = nullptr;
+	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pPlayer)) || !pPlayer)
+		return SQ_ERROR;
+
+	SQFloat flHeight = 1.0f, flSprint = 1.0f;
+	if (SQ_FAILED(sq_getfloat(v, 2, &flHeight)) || SQ_FAILED(sq_getfloat(v, 3, &flSprint)))
+		return SQ_ERROR;
+
+	// Script input: keep it finite and inside a sane band.
+	const auto clampScale = [](const float f) { return isfinite(f) ? fminf(fmaxf(f, 0.25f), 4.0f) : 1.0f; };
+	MantleBoostProfile_t& profile = s_mantleBoostProfile[pPlayer];
+	profile.m_flHeightScale = clampScale(flHeight);
+	profile.m_flSprintScale = clampScale(flSprint);
+
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+void MantleBoost_RegisterScriptFunctions(ScriptClassDescriptor_t* playerStruct)
+{
+	if (!playerStruct)
+		return;
+
+	playerStruct->AddFunction(
+		"SetMantleBoostProfile",
+		"Script_SetMantleBoostProfile",
+		"Scales this player's full mantle boost jump height and exit sprint multiplier",
+		"void",
+		"float heightScale, float sprintScale",
+		false,
+		Script_SetMantleBoostProfile);
+}

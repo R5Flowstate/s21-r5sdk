@@ -204,6 +204,31 @@ class VCVar : public IDetour
 	virtual void Detour(const bool bAttach) const;
 };
 ///////////////////////////////////////////////////////////////////////////////
+#else // CLIENT_DLL
+// Links the engine's static ConVar list into ICvar; runs long after SDK init.
+inline __int64 (*v_ConVar_RegisterStatics)(unsigned int nFlags);
+
+///////////////////////////////////////////////////////////////////////////////
+class VCVarStaticsS21 : public IDetour
+{
+	virtual void GetAdr(void) const
+	{
+		LogFunAdr("ConVar_RegisterStatics", v_ConVar_RegisterStatics);
+	}
+	virtual void GetFun(void) const
+	{
+		// Once-guard byte cmp, then ICvar vfunc +0x40 before walking the list.
+		Module_FindPattern(g_GameDll, "48 83 EC 28 8B C1 48 8B 0D ?? ?? ?? ?? 48 85 C9 0F 84 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 "
+			"0F 85 ?? ?? ?? ?? 89 05 ?? ?? ?? ?? 48 8B 01 48 89 7C 24 20 C6 05 ?? ?? ?? ?? 01 FF 50 40").GetPtr(v_ConVar_RegisterStatics);
+
+		if (!v_ConVar_RegisterStatics)
+			Warning(eDLL_T::CLIENT, "[CVAR] ConVar_RegisterStatics pattern unresolved -- engine ConVar binds stay unapplied\n");
+	}
+	virtual void GetVar(void) const { }
+	virtual void GetCon(void) const { }
+	virtual void Detour(const bool bAttach) const;
+};
+///////////////////////////////////////////////////////////////////////////////
 #endif // !CLIENT_DLL
 
 #endif // CVAR_H

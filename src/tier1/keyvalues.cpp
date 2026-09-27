@@ -248,7 +248,10 @@ KeyValues* KeyValues::FindKey(const char* pszKeyName, bool bCreate)
 	// pull out the substring if it exists
 	if (subStr)
 	{
-		ptrdiff_t size = subStr - pszKeyName;
+		const ptrdiff_t size = subStr - pszKeyName;
+		if (size >= static_cast<ptrdiff_t>(sizeof(szBuf)))
+			return nullptr;
+
 		memcpy(szBuf, pszKeyName, size);
 		szBuf[size] = '\0';
 		searchStr = szBuf;
@@ -1536,6 +1539,11 @@ void KeyValues::RecursiveLoadFromBuffer(char const* resourceName, CKeyValuesToke
 				{
 					this->RemoveSubKey(pExistingKey);
 					pExistingKey->DeleteThis();
+
+					// The removed key was usually the cached last child; re-derive it from the live chain.
+					pLastChild = NULL;
+					for (KeyValues* pWalk = this->m_pSub; pWalk && pWalk != dat; pWalk = pWalk->m_pPeer)
+						pLastChild = pWalk;
 				}
 			}
 		}
@@ -1809,16 +1817,8 @@ bool KeyValues::LoadFromBuffer(char const* resourceName, CUtlBuffer& buf, IBaseF
 		}
 	} while (buf.IsValid());
 
+	// Included keys are linked into this key's peer chain, which now owns them.
 	AppendIncludedKeys(includedKeys);
-	{
-		// delete included keys!
-		int i;
-		for (i = includedKeys.Count() - 1; i > 0; i--)
-		{
-			KeyValues* kv = includedKeys[i];
-			delete kv;
-		}
-	}
 
 	MergeBaseKeys(baseKeys);
 	{
@@ -2000,7 +2000,7 @@ void KeyValues::ParseIncludedKeys(char const* resourceName, const char* filetoin
 	}
 
 	// Append included file
-	V_strncat(fullpath, filetoinclude, sizeof(fullpath));
+	V_strcat_sized(fullpath, filetoinclude, sizeof(fullpath));
 
 	KeyValues* newKV = new KeyValues(fullpath);
 
@@ -2473,7 +2473,10 @@ KeyValues* KeyValues::FindKey(const char* pszKeyName, bool bCreate)
 	// pull out the substring if it exists
 	if (subStr)
 	{
-		ptrdiff_t size = subStr - pszKeyName;
+		const ptrdiff_t size = subStr - pszKeyName;
+		if (size >= static_cast<ptrdiff_t>(sizeof(szBuf)))
+			return nullptr;
+
 		memcpy(szBuf, pszKeyName, size);
 		szBuf[size] = '\0';
 		searchStr = szBuf;
@@ -3761,6 +3764,11 @@ void KeyValues::RecursiveLoadFromBuffer(char const* resourceName, CKeyValuesToke
 				{
 					this->RemoveSubKey(pExistingKey);
 					pExistingKey->DeleteThis();
+
+					// The removed key was usually the cached last child; re-derive it from the live chain.
+					pLastChild = NULL;
+					for (KeyValues* pWalk = this->m_pSub; pWalk && pWalk != dat; pWalk = pWalk->m_pPeer)
+						pLastChild = pWalk;
 				}
 			}
 		}
@@ -4034,16 +4042,8 @@ bool KeyValues::LoadFromBuffer(char const* resourceName, CUtlBuffer& buf, IBaseF
 		}
 	} while (buf.IsValid());
 
+	// Included keys are linked into this key's peer chain, which now owns them.
 	AppendIncludedKeys(includedKeys);
-	{
-		// delete included keys!
-		int i;
-		for (i = includedKeys.Count() - 1; i > 0; i--)
-		{
-			KeyValues* kv = includedKeys[i];
-			delete kv;
-		}
-	}
 
 	MergeBaseKeys(baseKeys);
 	{
@@ -4222,7 +4222,7 @@ void KeyValues::ParseIncludedKeys(char const* resourceName, const char* filetoin
 	}
 
 	// Append included file
-	V_strncat(fullpath, filetoinclude, sizeof(fullpath));
+	V_strcat_sized(fullpath, filetoinclude, sizeof(fullpath));
 
 	KeyValues* newKV = new KeyValues(fullpath);
 

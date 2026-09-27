@@ -23,7 +23,8 @@ void Translocation_EndNoProjTossForPlayer(void* pPlayer);
 void Translocation_BeginNoProjTossForPlayer(void* pPlayer);
 void Translocation_LevelShutdown(void);
 // Issues the ORIGINAL CWeaponX::HolsterInternal, bypassing Hook_HolsterInternal.
-void Translocation_HolsterWeaponOriginal(void* pWeapon);
+void Translocation_SetMoveType(void* pEnt, int moveType);
+bool Translocation_SetMoveTypeResolved(void);
 
 ///////////////////////////////////////////////////////////////////////////////
 class VTranslocation : public IDetour

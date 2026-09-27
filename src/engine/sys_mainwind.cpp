@@ -16,6 +16,7 @@
 #include <gameui/ITopBar.h>
 #include <gameui/IDevMenu.h>
 #include "gameui/IDlssNrMenu.h"
+#include "engine/client/demo_play.h"
 
 // Not pulled in by every WINVER/_WIN32_WINNT configuration; guarded the same
 // way imgui_impl_win32.cpp/SDL_windowsevents.c do it in this tree.
@@ -46,7 +47,13 @@ void CGame::PlayStartupVideos(void)
 //-----------------------------------------------------------------------------
 LRESULT CGame::WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-
+	// The engine's in-match cursor state never shows the pointer for the
+	// replay controls; they answer the cursor query themselves.
+	if (uMsg == WM_SETCURSOR && LOWORD(lParam) == HTCLIENT && DemoPlay_WantsCursor())
+	{
+		SetCursor(LoadCursor(nullptr, IDC_ARROW));
+		return TRUE;
+	}
 
 	if (ImguiSystem()->IsInitialized())
 		ImguiWindowProc(hWnd, uMsg, wParam, lParam);

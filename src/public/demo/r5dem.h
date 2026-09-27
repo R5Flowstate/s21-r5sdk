@@ -1,0 +1,196 @@
+//=============================================================================//
+//
+// Purpose: .r5dem network demo container shared by the client recorder, the
+//          server recorder and the client player.
+//
+//=============================================================================//
+#ifndef PUBLIC_DEMO_R5DEM_H
+#define PUBLIC_DEMO_R5DEM_H
+
+#include <cstdint>
+#include <cstring>
+
+// Bump on any change to the S3->S21 message table, the SendTable preprocess,
+// the prop huffman codebook, the subchannel / DataBlock parsers or the
+// datagram header layout. The player refuses a mismatch.
+constexpr uint32_t R5DEM_PROTOCOL = 1;
+constexpr uint32_t R5DEM_VERSION  = 1;
+
+constexpr char R5DEM_MAGIC[8] = { 'R', '5', 'D', 'E', 'M', 'O', '\0', '\0' };
+
+constexpr uint32_t R5DEM_FLAG_SERVER    = 1u << 0;
+constexpr uint32_t R5DEM_FLAG_MULTIPOV  = 1u << 1;
+constexpr uint32_t R5DEM_FLAG_INDEX     = 1u << 2;
+constexpr uint32_t R5DEM_FLAG_USERCMDS  = 1u << 3;
+
+constexpr uint8_t R5DEM_POV_ALL = 0xFF;
+constexpr int     R5DEM_MAX_POVS = 16;
+
+enum class R5DemChunk_t : uint8_t
+{
+	SIGNON   = 0x01,
+	PACKET   = 0x02,
+	RELIABLE = 0x04,
+	META     = 0x05,
+	KEYFRAME = 0x06,
+	EVENT    = 0x07,
+	VIEW     = 0x08,
+	USERCMD  = 0x09,
+	INDEX    = 0x7F,
+};
+
+// PACKET kind bits.
+constexpr uint8_t R5DEM_KIND_FULL    = 1u << 0; // carried a NoDelta snapshot
+constexpr uint8_t R5DEM_KIND_PRELUDE = 1u << 1; // server history replayed ahead of the live stream
+
+// Ceilings, validated before any allocation or seek.
+constexpr uint32_t R5DEM_MAX_BLOCK    = 4u * 1024u * 1024u; // dedi signon buffer
+constexpr uint32_t R5DEM_MAX_PACKET   = 256u * 1024u;       // engine packet scratch
+constexpr uint32_t R5DEM_MAX_JSON     = 64u * 1024u;
+constexpr uint32_t R5DEM_MAX_USERCMD  = 64u * 1024u;
+constexpr uint32_t R5DEM_MAX_VIEW     = 64u;
+constexpr uint32_t R5DEM_MAX_INDEX    = 16u * 1024u * 1024u;
+constexpr uint64_t R5DEM_MAX_FILE     = 0x7FFFFFFFull;
+
+#pragma pack(push, 1)
+// VIEW payload: the recording client's own view angles; the server never sends
+// a player their own eye angles, so playback needs them to aim the camera.
+struct R5DemView_s
+{
+	float pitch;
+	float yaw;
+	float roll;
+};
+
+struct R5DemHeader_s
+{
+	char     magic[8];
+	uint32_t version;
+	uint32_t flags;
+	uint32_t protocol;
+	uint32_t tickIntervalUs;
+	uint32_t povCount;
+	uint32_t reserved0;
+	uint64_t startUnixMs;
+	char     map[32];
+	char     mode[32];
+	uint64_t indexOffset;  // file offset of the INDEX chunk, 0 when absent
+	uint8_t  reserved[16];
+};
+static_assert(sizeof(R5DemHeader_s) == 128, "r5dem header is 128 bytes");
+
+struct R5DemChunkHeader_s
+{
+	uint8_t  type;
+	uint8_t  pov;
+	uint8_t  signon;
+	uint8_t  kind;
+	uint32_t len;
+	uint32_t seq;
+	uint32_t tick;
+	uint32_t wallMs;
+	uint32_t crc32;
+};
+static_assert(sizeof(R5DemChunkHeader_s) == 24, "r5dem chunk header is 24 bytes");
+
+// USERCMD payload: this prefix, then count records.
+struct R5DemUserCmdPrefix_s
+{
+	uint16_t count;
+	uint16_t reserved;
+	float    origin[3];    // pov origin at the first command of the chunk
+	float    angles[3];
+};
+
+struct R5DemUserCmd_s
+{
+	uint32_t commandNumber;
+	uint32_t tickCount;
+	float    frameTime;
+	float    pitch;
+	float    yaw;
+	float    forwardmove;
+	float    sidemove;
+	float    upmove;
+	uint32_t buttons;
+	uint8_t  weaponSelectSlot;
+	uint8_t  impulse;
+	uint16_t reserved;
+};
+static_assert(sizeof(R5DemUserCmd_s) == 40, "r5dem usercmd record is 40 bytes");
+
+struct R5DemIndexEntry_s
+{
+	uint32_t tick;
+	uint32_t pov;
+	uint32_t kind;         // chunk type in the low byte, PACKET kind bits in the next
+	uint64_t fileOffset;
+};
+static_assert(sizeof(R5DemIndexEntry_s) == 20, "r5dem index entry is 20 bytes");
+#pragma pack(pop)
+
+constexpr int R5DEM_USERCMDS_PER_CHUNK = 64;
+
+inline uint32_t R5Dem_Ceiling(const uint8_t type)
+{
+	switch (static_cast<R5DemChunk_t>(type))
+	{
+	case R5DemChunk_t::SIGNON:
+	case R5DemChunk_t::RELIABLE:
+	case R5DemChunk_t::KEYFRAME: return R5DEM_MAX_BLOCK;
+	case R5DemChunk_t::PACKET:   return R5DEM_MAX_PACKET;
+	case R5DemChunk_t::META:
+	case R5DemChunk_t::EVENT:    return R5DEM_MAX_JSON;
+	case R5DemChunk_t::USERCMD:  return R5DEM_MAX_USERCMD;
+	case R5DemChunk_t::VIEW:     return R5DEM_MAX_VIEW;
+	case R5DemChunk_t::INDEX:    return R5DEM_MAX_INDEX;
+	default:                     return 0;
+	}
+}
+
+inline uint32_t R5Dem_Crc32(const void* pData, const size_t nLen)
+{
+	struct Table_s
+	{
+		uint32_t v[256];
+		Table_s()
+		{
+			for (uint32_t i = 0; i < 256; ++i)
+			{
+				uint32_t c = i;
+				for (int k = 0; k < 8; ++k)
+					c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+				v[i] = c;
+			}
+		}
+	};
+	static const Table_s s_table;
+
+	const uint8_t* p = static_cast<const uint8_t*>(pData);
+	uint32_t crc = 0xFFFFFFFFu;
+	for (size_t i = 0; i < nLen; ++i)
+		crc = s_table.v[(crc ^ p[i]) & 0xFF] ^ (crc >> 8);
+	return crc ^ 0xFFFFFFFFu;
+}
+
+// Demo names are generated by the recorders; anything a user or script passes
+// in must match [a-zA-Z0-9_-]{1,64} before it touches the filesystem.
+inline bool R5Dem_IsValidName(const char* pszName)
+{
+	if (!pszName)
+		return false;
+	const size_t n = strnlen(pszName, 65);
+	if (n == 0 || n > 64)
+		return false;
+	for (size_t i = 0; i < n; ++i)
+	{
+		const char c = pszName[i];
+		const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+			|| (c >= '0' && c <= '9') || c == '_' || c == '-';
+		if (!ok)
+			return false;
+	}
+	return true;
+}
+
+#endif // PUBLIC_DEMO_R5DEM_H

@@ -403,8 +403,8 @@ static void BridgeRcon_f(const CCommand& args)
 	for (int i = 1; i < args.ArgC(); ++i)
 	{
 		if (i > 1)
-			V_strncat(assembled, " ", sizeof(assembled));
-		V_strncat(assembled, args.Arg(i), sizeof(assembled));
+			V_strcat_sized(assembled, " ", sizeof(assembled));
+		V_strcat_sized(assembled, args.Arg(i), sizeof(assembled));
 	}
 
 	if (strpbrk(assembled, "\n\r"))

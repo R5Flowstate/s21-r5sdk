@@ -7,6 +7,8 @@
 #include "core/stdafx.h"
 #include "settings_disk.h"
 #include "rtech/pak/paktools.h"
+#include "rtech/pak/rpak_observe.h"
+#include "pluginsystem/modsystem.h"
 #include "tier0/dbg.h"
 #include "tier1/cvar.h"
 #include "tier1/strtools.h"
@@ -307,10 +309,11 @@ static uint32_t SettingsDisk_AllocUniqueId(
 			candidate = 1;
 	}
 
+	// Handing out a used uid would alias two settings assets; 0 refuses this one instead.
 	Warning(eDLL_T::RTECH,
-		"[SETTINGS-DISK] uniqueId exhausted disk-collision retries for '%s' -- using %u\n",
-		assetName, candidate);
-	return candidate;
+		"[SETTINGS-DISK] uniqueId exhausted disk-collision retries for '%s' -- skip\n",
+		assetName);
+	return 0;
 }
 
 //-----------------------------------------------------------------------------
@@ -818,7 +821,8 @@ static bool SettingsDisk_ParseJsonFile(const char* jsonPath, const char* assetNa
 	}
 
 	std::string donorName;
-	if (!JSON_GetValue(doc, "_donor", donorName) || donorName.empty())
+	// The donor is re-hashed on every asset publish until it resolves; keep it asset-name sized.
+	if (!JSON_GetValue(doc, "_donor", donorName) || donorName.empty() || donorName.size() > 256)
 	{
 		Warning(eDLL_T::RTECH,
 			"[SETTINGS-DISK] missing required '_donor' in '%s' -- skip\n", jsonPath);
@@ -893,9 +897,14 @@ static void SettingsDisk_MakeAssetName(const char* relPathNoExt, char* out, size
 //-----------------------------------------------------------------------------
 struct ScanState
 {
+	const char* root = s_settingsDiskBasePath;
+	const CModSystem::ModInstance_t* mod = nullptr; // null while scanning platform/settings
+	std::unordered_map<uint64_t, std::string> modOwner;
+	std::unordered_set<uint64_t> modConflicts;
 	std::unordered_map<uint64_t, PendingEntry> pendingByGuid;
 	std::unordered_map<uint32_t, std::string>  uidUsedByDisk;
-	int  filesFound = 0;
+	int  filesFound = 0; // this scope (platform or one mod)
+	int  filesFoundTotal = 0;
 	int  failed = 0;
 	bool fileCapWarned = false;
 	bool depthCapWarned = false;
@@ -905,7 +914,9 @@ static void SettingsDisk_ScanDir(ScanState& st, const char* relDir, int depth);
 
 static void SettingsDisk_TryLoadFile(ScanState& st, const char* relPathWithJson)
 {
-	if (static_cast<size_t>(st.filesFound) >= SETTINGS_DISK_MAX_FILES)
+	// Each scope gets its own budget so one mod cannot starve the others.
+	if (static_cast<size_t>(st.filesFound) >= SETTINGS_DISK_MAX_FILES
+		|| static_cast<size_t>(st.filesFoundTotal) >= SETTINGS_DISK_MAX_FILES * 16)
 	{
 		if (!st.fileCapWarned)
 		{
@@ -917,6 +928,7 @@ static void SettingsDisk_TryLoadFile(ScanState& st, const char* relPathWithJson)
 		return;
 	}
 	++st.filesFound;
+	++st.filesFoundTotal;
 
 	// Strip .json.
 	char relNoExt[SETTINGS_DISK_MAX_PATH_LEN];
@@ -934,17 +946,41 @@ static void SettingsDisk_TryLoadFile(ScanState& st, const char* relPathWithJson)
 	char assetName[SETTINGS_DISK_MAX_PATH_LEN * 2];
 	SettingsDisk_MakeAssetName(relNoExt, assetName, sizeof(assetName));
 
+	if (st.mod)
+	{
+		char modRel[SETTINGS_DISK_MAX_PATH_LEN * 2];
+		V_snprintf(modRel, sizeof(modRel), "settings/%s", relPathWithJson);
+		if (!st.mod->OwnsPath(modRel))
+		{
+			Warning(eDLL_T::RTECH, "[SETTINGS-DISK] mod '%s' does not own '%s' -- skip\n",
+				st.mod->id.String(), modRel);
+			++st.failed;
+			return;
+		}
+	}
+
 	const PakGuid_t guid = Pak_StringToGuid(assetName);
 	if (st.pendingByGuid.find(guid) != st.pendingByGuid.end())
 	{
-		Warning(eDLL_T::RTECH,
-			"[SETTINGS-DISK] duplicate guid for '%s' -- first wins, skip\n", assetName);
+		const auto owner = st.modOwner.find(guid);
+		if (st.mod && owner != st.modOwner.end() && owner->second != st.mod->id.String())
+		{
+			Error(eDLL_T::RTECH, NO_ERROR,
+				"[SETTINGS-DISK] mods '%s' and '%s' both define '%s'; neither is applied\n",
+				owner->second.c_str(), st.mod->id.String(), assetName);
+			st.modConflicts.insert(guid);
+		}
+		else
+		{
+			Warning(eDLL_T::RTECH,
+				"[SETTINGS-DISK] duplicate guid for '%s' -- first wins, skip\n", assetName);
+		}
 		++st.failed;
 		return;
 	}
 
 	char fullPath[SETTINGS_DISK_MAX_PATH_LEN * 2];
-	V_snprintf(fullPath, sizeof(fullPath), "%s%s", s_settingsDiskBasePath, relPathWithJson);
+	V_snprintf(fullPath, sizeof(fullPath), "%s%s", st.root, relPathWithJson);
 
 	PendingEntry entry;
 	entry.guid = guid;
@@ -956,8 +992,15 @@ static void SettingsDisk_TryLoadFile(ScanState& st, const char* relPathWithJson)
 
 	entry.uniqueId = SettingsDisk_AllocUniqueId(
 		entry.preferredUid, entry.hasPreferredUid, assetName, st.uidUsedByDisk);
+	if (entry.uniqueId == 0)
+	{
+		++st.failed;
+		return;
+	}
 	st.uidUsedByDisk.emplace(entry.uniqueId, assetName);
 
+	if (st.mod)
+		st.modOwner.emplace(guid, st.mod->id.String());
 	st.pendingByGuid.emplace(guid, std::move(entry));
 }
 
@@ -977,9 +1020,9 @@ static void SettingsDisk_ScanDir(ScanState& st, const char* relDir, int depth)
 
 	char searchPath[SETTINGS_DISK_MAX_PATH_LEN * 2];
 	if (relDir && relDir[0])
-		V_snprintf(searchPath, sizeof(searchPath), "%s%s\\*", s_settingsDiskBasePath, relDir);
+		V_snprintf(searchPath, sizeof(searchPath), "%s%s\\*", st.root, relDir);
 	else
-		V_snprintf(searchPath, sizeof(searchPath), "%s*", s_settingsDiskBasePath);
+		V_snprintf(searchPath, sizeof(searchPath), "%s*", st.root);
 
 	WIN32_FIND_DATAA fd;
 	const HANDLE hFind = FindFirstFileA(searchPath, &fd);
@@ -1028,6 +1071,36 @@ static void SettingsDisk_ParseAll(void)
 	ScanState st;
 	SettingsDisk_ScanDir(st, "", 0);
 
+	// Mod settings come after platform/settings, which wins any name both define.
+	if (ModSystem()->IsEnabled())
+	{
+		ModSystem()->LockModList();
+		FOR_EACH_VEC(ModSystem()->GetResolvedModList(), i)
+		{
+			const CModSystem::ModInstance_t* const mod = ModSystem()->GetResolvedModList()[i];
+			if (!mod || !mod->IsEnabled())
+				continue;
+
+			char root[SETTINGS_DISK_MAX_PATH_LEN];
+			if (V_snprintf(root, sizeof(root), "%ssettings\\", mod->GetBasePath().String()) <= 0)
+				continue;
+			V_FixSlashes(root, '\\');
+
+			st.root = root;
+			st.mod = mod;
+			st.filesFound = 0;
+			st.fileCapWarned = false;
+			SettingsDisk_ScanDir(st, "", 0);
+		}
+		ModSystem()->UnlockModList();
+
+		st.root = s_settingsDiskBasePath;
+		st.mod = nullptr;
+
+		for (const uint64_t guid : st.modConflicts)
+			st.pendingByGuid.erase(guid);
+	}
+
 	s_pendingByGuid = std::move(st.pendingByGuid);
 
 	s_guidIndex.clear();
@@ -1048,7 +1121,7 @@ static void SettingsDisk_ParseAll(void)
 	{
 		Warning(eDLL_T::RTECH,
 			"[SETTINGS-DISK] scan complete: %d file(s) found, %zu parsed, %d failed\n",
-			st.filesFound, s_pendingByGuid.size(), st.failed);
+			st.filesFoundTotal, s_pendingByGuid.size(), st.failed);
 	}
 }
 
@@ -1281,12 +1354,13 @@ static void* __fastcall Hook_Settings_GetSettingsHeaderForUniqueId_S21(uint32_t 
 	if (!v_Settings_GetSettingsHeaderForUniqueId_S21)
 		return nullptr;
 
+	void* native = v_Settings_GetSettingsHeaderForUniqueId_S21(uniqueId);
+
 	if (!sdk_settings_disk.GetBool() || !s_patternsReady)
-		return v_Settings_GetSettingsHeaderForUniqueId_S21(uniqueId);
+		return native;
 
 	SettingsDisk_EnsureParsed();
 
-	void* native = v_Settings_GetSettingsHeaderForUniqueId_S21(uniqueId);
 	if (native)
 		return native;
 

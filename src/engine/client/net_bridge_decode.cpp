@@ -6,6 +6,7 @@
 #include "core/stdafx.h"
 #include "engine/client/net_observer.h"
 #include "engine/client/net_bridge_internal.h"
+#include "engine/client/demo_bridge.h"
 
 #include "engine/cmd.h"
 #include "engine/net.h"
@@ -1537,6 +1538,8 @@ static char __fastcall Hook_ClParsePacketEntities(__int64 a1, __int64* a2)
 	const int state = *reinterpret_cast<const int*>(r + 16);
 	if (state < 5)
 		return result;
+	if (Demo_IsPlaying())
+		DemoPlay_OnSnapshotDropped();
 	static long s_dropN = 0;
 	const long n = InterlockedIncrement(&s_dropN);
 	if (n <= 20 || (n % 200) == 0)

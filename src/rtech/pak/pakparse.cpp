@@ -26,6 +26,9 @@
 constexpr uint32_t RPAK_ASSET_FOURCC_MATERIAL = 0x6C74616D; // 'matl'
 static constexpr const char* const kUnknownMaterialName = "<unknown>";
 
+// Allocated size of each loaded pak's slab buffers, by loadedPaks slot; bounds relation reads.
+static size_t s_pakSlabBufferSizes[PAK_MAX_LOADED_PAKS][PAK_SLAB_BUFFER_TYPES];
+
 static const char* Pak_GetMaterialName(const PakAssetShort_s& assetInfo)
 {
     if (const CMaterialGlue* const material = reinterpret_cast<const CMaterialGlue*>(assetInfo.head))
@@ -423,6 +426,16 @@ static uint32_t Pak_ProcessRemainingPagePointers(PakFile_s* const pak)
     return processedPointers;
 }
 
+// Page indices here are the loader's running count, which passes the page count once pages
+// wrap, so a stock pageEnd past it is real. Only a mod pak's is clamped: a mod-authored
+// pageEnd past its own pages would wait forever.
+static uint32_t Pak_AssetPageEnd(const PakFile_s* const pak, const PakAsset_s* const pakAsset)
+{
+    if (Pak_IsModSourcedPath(pak->GetName()))
+        return Min<uint32_t>(pakAsset->pageEnd, pak->GetPageCount());
+    return pakAsset->pageEnd;
+}
+
 static void Pak_RunAssetLoadingJobs(PakFile_s* const pak)
 {
     pak->numProcessedPointers = Pak_ProcessRemainingPagePointers(pak);
@@ -434,7 +447,7 @@ static void Pak_RunAssetLoadingJobs(PakFile_s* const pak)
 
     PakAsset_s* pakAsset = &pak->memoryData.assetEntries[numAssets];
 
-    if (pakAsset->pageEnd > pak->processedPageCount)
+    if (Pak_AssetPageEnd(pak, pakAsset) > pak->processedPageCount)
         return;
 
     for (uint32_t currentAsset = numAssets; g_pakGlobals->numAssetLoadJobs <= 0xC8u;)
@@ -472,7 +485,7 @@ static void Pak_RunAssetLoadingJobs(PakFile_s* const pak)
 
         pakAsset = &pak->memoryData.assetEntries[currentAsset];
 
-        if (pakAsset->pageEnd > pak->processedPageCount)
+        if (Pak_AssetPageEnd(pak, pakAsset) > pak->processedPageCount)
             return;
     }
 }
@@ -765,7 +778,9 @@ static bool Pak_ProcessPakFile(PakFile_s* const pak)
                         return memoryData->patchSrcSize == 0;
 
                     char pakPatchPath[MAX_PATH] = {};
-                    sprintf(pakPatchPath, "%s%s", Pak_GetReadPath(), pak->memoryData.fileName);
+                    const int nPatchPathLen = V_snprintf(pakPatchPath, sizeof(pakPatchPath), "%s%s", Pak_GetReadPath(), pak->memoryData.fileName);
+                    if (nPatchPathLen < 0 || nPatchPathLen >= static_cast<int>(sizeof(pakPatchPath)))
+                        Error(eDLL_T::RTECH, EXIT_FAILURE, "Patch path for \"%s\" is too long.\n", pak->memoryData.fileName);
 
                     // get path of next patch rpak to load
                     if (pak->memoryData.patchIndices[pak->patchCount])
@@ -847,7 +862,10 @@ static bool Pak_PrepareNextPageForPatching(PakLoadedInfo_s* const loadedInfo, Pa
         return true;
     }
 
-    // headers
+    // headers; a pak with more header pages than assets would read past the entry table
+    if (pak->memoryData.someAssetCount >= pak->GetAssetCount())
+        return false;
+
     PakAsset_s* const pakAsset = pak->memoryData.ppAssetEntries[pak->memoryData.someAssetCount];
 
     pak->memoryData.patchSrcSize = pakAsset->headerSize;
@@ -1023,8 +1041,11 @@ static bool Pak_ProcessAssets(PakLoadedInfo_s* const loadedInfo)
                 }
             LABEL_41:
 
-                pakTracker->loadedAssetIndices[pakTracker->numPaksTracked] = assetIndex;
-                ++pakTracker->numPaksTracked;
+                if (pakTracker->numPaksTracked < PAK_TRACKER_INDEX_CAPACITY)
+                {
+                    pakTracker->loadedAssetIndices[pakTracker->numPaksTracked] = assetIndex;
+                    ++pakTracker->numPaksTracked;
+                }
             }
         }
     LABEL_42:
@@ -1083,7 +1104,9 @@ static void Pak_StubInvalidAssetBinds(PakFile_s* const pak, PakSlabDescriptor_s*
             assetBinding->allocator = AlignedMemAlloc();
             assetBinding->headerSize = asset->headerSize;
             assetBinding->structSize = asset->headerSize;
-            assetBinding->headerAlignment = pak->memoryData.pageHeaders[asset->headPtr.index].pageAlignment;
+            // Nothing has validated headPtr yet; the asset pass that follows rejects a bad index.
+            assetBinding->headerAlignment = asset->headPtr.index < pak->GetPageCount()
+                ? pak->memoryData.pageHeaders[asset->headPtr.index].pageAlignment : 8;
             assetBinding->type = PakAssetBinding_s::STUB;
         }
 
@@ -1120,7 +1143,17 @@ static bool Pak_StartLoadingPak(PakLoadedInfo_s* const loadedInfo)
     const uint32_t numAssets = pakFile->GetAssetCount();
 
     if (pakFile->memoryData.pakHeader.patchIndex)
+    {
+        // The page walk wraps once; a start page past the page count would index past the headers.
+        if (pakFile->memoryData.patchDataHeader->pageCount > pakFile->GetPageCount())
+        {
+            Warning(eDLL_T::RTECH, "[PAK-PARSE] patch start page %u exceeds page count %u\n",
+                pakFile->memoryData.patchDataHeader->pageCount, pakFile->GetPageCount());
+            loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+            return false;
+        }
         pakFile->firstPageIdx = pakFile->memoryData.patchDataHeader->pageCount;
+    }
 
     Pak_SortOrInsertAssetEntries(pakFile->memoryData.ppAssetEntries, &pakFile->memoryData.ppAssetEntries[numAssets], numAssets, pakFile);
 
@@ -1137,10 +1170,25 @@ static bool Pak_StartLoadingPak(PakLoadedInfo_s* const loadedInfo)
 
     // allocate slab buffers with predetermined alignments; pages will be
     // copied into here
+    const ptrdiff_t nLoadedSlot = loadedInfo - g_pakGlobals->loadedPaks;
+    bool bSlabAllocFailed = false;
     for (int8_t i = 0; i < PAK_SLAB_BUFFER_TYPES; ++i)
     {
         if (slabDesc.slabSizeForType[i])
+        {
             loadedInfo->slabBuffers[i] = AlignedMemAlloc()->Alloc(slabDesc.slabSizeForType[i], slabDesc.slabAlignmentForType[i]);
+            bSlabAllocFailed |= !loadedInfo->slabBuffers[i];
+        }
+
+        if (nLoadedSlot >= 0 && nLoadedSlot < PAK_MAX_LOADED_PAKS)
+            s_pakSlabBufferSizes[nLoadedSlot][i] = loadedInfo->slabBuffers[i] ? slabDesc.slabSizeForType[i] : 0;
+    }
+
+    if (bSlabAllocFailed)
+    {
+        Warning(eDLL_T::RTECH, "[PAK-SLAB] slab allocation failed for '%s'\n", pakFile->GetName());
+        loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+        return false;
     }
 
     Pak_CopyPagesToSlabs(pakFile, loadedInfo, &slabDesc);
@@ -1399,6 +1447,43 @@ static bool Pak_SetupBuffersAndLoad(const PakHandle_t pakId)
         return false;
     }
 
+    // These counts size one allocation and then place every header table inside it; they come
+    // from the file. No shipped pak is anywhere near 2^24 of any of them.
+    constexpr uint32_t kPakMaxHeaderCount = 1u << 24;
+    if (pakHdr.pointerCount > kPakMaxHeaderCount || pakHdr.usesCount > kPakMaxHeaderCount
+        || pakHdr.dependentsCount > kPakMaxHeaderCount || *(unsigned int*)pakHdr.unk2 > kPakMaxHeaderCount)
+    {
+        Warning(eDLL_T::RTECH, "[PAK-PARSE] header counts out of range (pointers %u, uses %u, dependents %u)\n",
+            pakHdr.pointerCount, pakHdr.usesCount, pakHdr.dependentsCount);
+        loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+        return false;
+    }
+
+    if (memSlabCount > PAK_MAX_SLABS)
+    {
+        Warning(eDLL_T::RTECH, "[PAK-PARSE] slab count %hu exceeds %d in '%s'\n",
+            memSlabCount, PAK_MAX_SLABS, loadedInfo->fileName);
+        loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+        return false;
+    }
+
+    if (Pak_IsModSourcedPath(loadedInfo->fileName) && totalPakFileBufSize < pakHdr.compressedSize)
+    {
+        Warning(eDLL_T::RTECH, "[PAK-PARSE] mod pak '%s' is %zu bytes, header declares %llu; refused\n",
+            loadedInfo->fileName, totalPakFileBufSize, pakHdr.compressedSize);
+        loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+        return false;
+    }
+
+    // Patch files are opened from the base install, which a mod cannot supply.
+    if (patchIndex && Pak_IsModSourcedPath(loadedInfo->fileName))
+    {
+        Warning(eDLL_T::RTECH, "[PAK-PARSE] mod pak '%s' declares %hu patches; refused\n",
+            loadedInfo->fileName, patchIndex);
+        loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+        return false;
+    }
+
     const size_t streamingFilesBufSize = pakHdr.streamingFilesBufSize[STREAMING_SET_OPTIONAL] + pakHdr.streamingFilesBufSize[STREAMING_SET_MANDATORY];
     const size_t memPagePointersBufSize = 8 * memPageCount;
 
@@ -1407,10 +1492,10 @@ static bool Pak_SetupBuffersAndLoad(const PakHandle_t pakId)
         + 2
         * (patchIndex
             + 2
-            * (pakHdr.dependentsCount
+            * (uint64_t(pakHdr.dependentsCount)
                 + *(unsigned int*)pakHdr.unk2
                 + 3 * memPageCount
-                + 2 * (pakHdr.pointerCount + pakHdr.usesCount + 16i64 + 2 * (assetCount + patchIndex + 4 * assetCount + memSlabCount))))
+                + 2 * (uint64_t(pakHdr.pointerCount) + pakHdr.usesCount + 16i64 + 2 * (assetCount + patchIndex + 4 * assetCount + memSlabCount))))
         + v32;
 
     const __int64 v80 = 4 * assetCount;
@@ -1441,6 +1526,14 @@ static bool Pak_SetupBuffersAndLoad(const PakHandle_t pakId)
 
     if (ringBufferOutSize > pakHdr.decompressedSize && !patchIndex)
         ringBufferOutSize = (pakHdr.decompressedSize + PAK_DECODE_IN_RING_BUFFER_SMALL_MASK) & 0xFFFFFFFFFFFFF000ui64;
+
+    if (!isCompressed && ringBufferOutSize < PAK_DECODE_IN_RING_BUFFER_SIZE && pakHdr.compressedSize > ringBufferOutSize)
+    {
+        Warning(eDLL_T::RTECH, "[PAK-PARSE] uncompressed pak '%s' streams %llu bytes into a %llu byte buffer\n",
+            loadedInfo->fileName, pakHdr.compressedSize, ringBufferOutSize);
+        loadedInfo->status = PAK_STATUS_ERROR;
+        return false;
+    }
 
     PakFile_s* const pak = (PakFile_s*)AlignedMemAlloc()->Alloc(v34 + v35 + ringBufferOutSize + ringBufferStreamSize, 8);
 
@@ -1621,6 +1714,9 @@ static bool Pak_SetupBuffersAndLoad(const PakHandle_t pakId)
 
 constexpr uint32_t RPAK_ASSET_FOURCC_MATERIAL = 0x6C74616D; // 'matl'
 static constexpr const char* const kUnknownMaterialName = "<unknown>";
+
+// Allocated size of each loaded pak's slab buffers, by loadedPaks slot; bounds relation reads.
+static size_t s_pakSlabBufferSizes[PAK_MAX_LOADED_PAKS][PAK_SLAB_BUFFER_TYPES];
 
 
 static const char* Pak_GetMaterialName(const PakAssetShort_s& assetInfo)
@@ -1848,6 +1944,29 @@ static bool Pak_ResolveAssetDependency(const PakFile_s* const pak, PakGuid_t cur
     UNREACHABLE();
 }
 
+// A relation slot must lie inside the slab buffer its page was copied into (pages are
+// checked against that buffer at copy time). The buffer type comes from the page's own
+// slab header, not from the address. Only a buffer that no longer exists is let through.
+static bool Pak_RelationStaysInSlab(const PakFile_s* const pak, const uint32_t pageIndex, const uint32_t offset)
+{
+    const uint32_t slabIndex = pak->memoryData.pageHeaders[pageIndex].slabIndex;
+    if (slabIndex >= pak->GetSlabCount())
+        return false;
+
+    const int nSlot = pak->memoryData.pakId & PAK_MAX_LOADED_PAKS_MASK;
+    const int slabType = pak->GetSlabHeader(slabIndex)->typeFlags & (SF_CPU | SF_TEMP);
+    const uint8_t* const slabBase = static_cast<const uint8_t*>(g_pakGlobals->loadedPaks[nSlot].slabBuffers[slabType]);
+    const size_t slabSize = s_pakSlabBufferSizes[nSlot][slabType];
+    if (!slabBase || !slabSize)
+        return true;
+
+    const uint8_t* const pageBase = pak->memoryData.memPageBuffers[pageIndex];
+    if (pageBase < slabBase)
+        return false;
+
+    return uint64_t(pageBase - slabBase) + offset + sizeof(void*) <= slabSize;
+}
+
 //-----------------------------------------------------------------------------
 // resolve guid relations for asset
 //-----------------------------------------------------------------------------
@@ -1879,9 +1998,12 @@ static void Pak_ResolveAssetRelations(PakFile_s* const pak, const PakAsset_s* co
 
     for (uint32_t i = 0; i < asset->usesCount; i++)
     {
-        if (pageDescriptors[i].index >= nPages)
+        const PakPage_u& page = pageDescriptors[i];
+        // Offsets are pointer-shifted and cannot be checked against dataSize (see IsPageOffsetValid);
+        // the real bound is the end of the slab allocation the page was copied into.
+        if (page.index >= nPages || !Pak_RelationStaysInSlab(pak, page.index, page.offset))
             continue;
-        void** const pCurrentGuid = reinterpret_cast<void**>(pak->memoryData.memPageBuffers[pageDescriptors[i].index] + pageDescriptors[i].offset);
+        void** const pCurrentGuid = reinterpret_cast<void**>(pak->memoryData.memPageBuffers[page.index] + page.offset);
 
         // get current guid
         const PakGuid_t targetGuid = reinterpret_cast<uint64_t>(*pCurrentGuid);
@@ -1890,9 +2012,14 @@ static void Pak_ResolveAssetRelations(PakFile_s* const pak, const PakAsset_s* co
         int currentIndex = targetGuid & PAK_MAX_LOADED_ASSETS_MASK;
         const PakGuid_t currentGuid = g_pakGlobals->loadedAssets[currentIndex].guid;
 
-        const int64_t v9 = 2i64 * InterlockedExchangeAdd(guidDestriptors, 1u);
-        *reinterpret_cast<PakGuid_t*>(const_cast<uint32_t*>(&guidDestriptors[2 * v9 + 2])) = targetGuid;
-        *reinterpret_cast<PakGuid_t*>(const_cast<uint32_t*>(&guidDestriptors[2 * v9 + 4])) = asset->guid;
+        // The descriptor buffer holds usesCount slots; overlapping asset use ranges would run the shared counter past it.
+        const uint32_t slot = InterlockedExchangeAdd(guidDestriptors, 1u);
+        if (slot < nUses)
+        {
+            const int64_t v9 = 2i64 * slot;
+            *reinterpret_cast<PakGuid_t*>(const_cast<uint32_t*>(&guidDestriptors[2 * v9 + 2])) = targetGuid;
+            *reinterpret_cast<PakGuid_t*>(const_cast<uint32_t*>(&guidDestriptors[2 * v9 + 4])) = asset->guid;
+        }
 
         if (currentGuid != targetGuid)
         {
@@ -1970,15 +2097,35 @@ static uint32_t Pak_ProcessRemainingPagePointers(PakFile_s* const pak)
         if (curCount < 0)
             curCount += pak->memoryData.pakHeader.memPageCount;
 
+        // A page index at or past the page count goes negative in curCount and slips past the break.
+        if (curPage->index >= pak->GetPageCount())
+            continue;
+
         if (curCount >= pak->processedPageCount)
             break;
 
+        if (!Pak_RelationStaysInSlab(pak, curPage->index, curPage->offset))
+            continue;
+
         PakPage_u* const ptr = reinterpret_cast<PakPage_u*>(pak->GetPointerForPageOffset(curPage));
+        if (ptr->index >= pak->GetPageCount())
+            continue;
+
         uint8_t* const tgtBuf = pak->memoryData.memPageBuffers[ptr->index];
         ptr->ptr = tgtBuf + ptr->offset;
     }
 
     return processedPointers;
+}
+
+// Page indices here are the loader's running count, which passes the page count once pages
+// wrap, so a stock pageEnd past it is real. Only a mod pak's is clamped: a mod-authored
+// pageEnd past its own pages would wait forever.
+static uint32_t Pak_AssetPageEnd(const PakFile_s* const pak, const PakAsset_s* const pakAsset)
+{
+    if (Pak_IsModSourcedPath(pak->GetName()))
+        return Min<uint32_t>(pakAsset->pageEnd, pak->GetPageCount());
+    return pakAsset->pageEnd;
 }
 
 static void Pak_RunAssetLoadingJobs(PakFile_s* const pak)
@@ -1992,7 +2139,7 @@ static void Pak_RunAssetLoadingJobs(PakFile_s* const pak)
 
     PakAsset_s* pakAsset = &pak->memoryData.assetEntries[numAssets];
 
-    if (pakAsset->pageEnd > pak->processedPageCount)
+    if (Pak_AssetPageEnd(pak, pakAsset) > pak->processedPageCount)
         return;
 
     for (uint32_t currentAsset = numAssets; g_pakGlobals->numAssetLoadJobs <= 0xC8u;)
@@ -2030,7 +2177,7 @@ static void Pak_RunAssetLoadingJobs(PakFile_s* const pak)
 
         pakAsset = &pak->memoryData.assetEntries[currentAsset];
 
-        if (pakAsset->pageEnd > pak->processedPageCount)
+        if (Pak_AssetPageEnd(pak, pakAsset) > pak->processedPageCount)
             return;
     }
 }
@@ -2323,7 +2470,9 @@ static bool Pak_ProcessPakFile(PakFile_s* const pak)
                         return memoryData->patchSrcSize == 0;
 
                     char pakPatchPath[MAX_PATH] = {};
-                    sprintf(pakPatchPath, "%s%s", Pak_GetReadPath(), pak->memoryData.fileName);
+                    const int nPatchPathLen = V_snprintf(pakPatchPath, sizeof(pakPatchPath), "%s%s", Pak_GetReadPath(), pak->memoryData.fileName);
+                    if (nPatchPathLen < 0 || nPatchPathLen >= static_cast<int>(sizeof(pakPatchPath)))
+                        Error(eDLL_T::RTECH, EXIT_FAILURE, "Patch path for \"%s\" is too long.\n", pak->memoryData.fileName);
 
                     // get path of next patch rpak to load
                     if (pak->memoryData.patchIndices[pak->patchCount])
@@ -2405,7 +2554,10 @@ static bool Pak_PrepareNextPageForPatching(PakLoadedInfo_s* const loadedInfo, Pa
         return true;
     }
 
-    // headers
+    // headers; a pak with more header pages than assets would read past the entry table
+    if (pak->memoryData.someAssetCount >= pak->GetAssetCount())
+        return false;
+
     PakAsset_s* const pakAsset = pak->memoryData.ppAssetEntries[pak->memoryData.someAssetCount];
 
     pak->memoryData.patchSrcSize = pakAsset->headerSize;
@@ -2581,8 +2733,11 @@ static bool Pak_ProcessAssets(PakLoadedInfo_s* const loadedInfo)
                 }
             LABEL_41:
 
-                pakTracker->loadedAssetIndices[pakTracker->numPaksTracked] = assetIndex;
-                ++pakTracker->numPaksTracked;
+                if (pakTracker->numPaksTracked < PAK_TRACKER_INDEX_CAPACITY)
+                {
+                    pakTracker->loadedAssetIndices[pakTracker->numPaksTracked] = assetIndex;
+                    ++pakTracker->numPaksTracked;
+                }
             }
         }
     LABEL_42:
@@ -2641,7 +2796,9 @@ static void Pak_StubInvalidAssetBinds(PakFile_s* const pak, PakSlabDescriptor_s*
             assetBinding->allocator = AlignedMemAlloc();
             assetBinding->headerSize = asset->headerSize;
             assetBinding->structSize = asset->headerSize;
-            assetBinding->headerAlignment = pak->memoryData.pageHeaders[asset->headPtr.index].pageAlignment;
+            // Nothing has validated headPtr yet; the asset pass that follows rejects a bad index.
+            assetBinding->headerAlignment = asset->headPtr.index < pak->GetPageCount()
+                ? pak->memoryData.pageHeaders[asset->headPtr.index].pageAlignment : 8;
             assetBinding->type = PakAssetBinding_s::STUB;
         }
 
@@ -2663,7 +2820,17 @@ static bool Pak_StartLoadingPak(PakLoadedInfo_s* const loadedInfo)
     const uint32_t numAssets = pakFile->GetAssetCount();
 
     if (pakFile->memoryData.pakHeader.patchIndex)
+    {
+        // The page walk wraps once; a start page past the page count would index past the headers.
+        if (pakFile->memoryData.patchDataHeader->pageCount > pakFile->GetPageCount())
+        {
+            Warning(eDLL_T::RTECH, "[PAK-PARSE] patch start page %u exceeds page count %u\n",
+                pakFile->memoryData.patchDataHeader->pageCount, pakFile->GetPageCount());
+            loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+            return false;
+        }
         pakFile->firstPageIdx = pakFile->memoryData.patchDataHeader->pageCount;
+    }
 
     Pak_SortOrInsertAssetEntries(pakFile->memoryData.ppAssetEntries, &pakFile->memoryData.ppAssetEntries[numAssets], numAssets, pakFile);
 
@@ -2680,10 +2847,25 @@ static bool Pak_StartLoadingPak(PakLoadedInfo_s* const loadedInfo)
 
     // allocate slab buffers with predetermined alignments; pages will be
     // copied into here
+    const ptrdiff_t nLoadedSlot = loadedInfo - g_pakGlobals->loadedPaks;
+    bool bSlabAllocFailed = false;
     for (int8_t i = 0; i < PAK_SLAB_BUFFER_TYPES; ++i)
     {
         if (slabDesc.slabSizeForType[i])
+        {
             loadedInfo->slabBuffers[i] = AlignedMemAlloc()->Alloc(slabDesc.slabSizeForType[i], slabDesc.slabAlignmentForType[i]);
+            bSlabAllocFailed |= !loadedInfo->slabBuffers[i];
+        }
+
+        if (nLoadedSlot >= 0 && nLoadedSlot < PAK_MAX_LOADED_PAKS)
+            s_pakSlabBufferSizes[nLoadedSlot][i] = loadedInfo->slabBuffers[i] ? slabDesc.slabSizeForType[i] : 0;
+    }
+
+    if (bSlabAllocFailed)
+    {
+        Warning(eDLL_T::RTECH, "[PAK-SLAB] slab allocation failed for '%s'\n", pakFile->GetName());
+        loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+        return false;
     }
 
     Pak_CopyPagesToSlabs(pakFile, loadedInfo, &slabDesc);
@@ -2737,6 +2919,43 @@ static uint32 Pak_GetPatchIndexForPak(const char* const pakName)
     }
 
     return 0; // Found nothing.
+}
+
+static constexpr int PAK_YIELD_MAX = 8;
+static char s_yieldPaks[PAK_YIELD_MAX][64];
+static int s_nYieldPakCount = 0;
+
+void Pak_MarkYieldDuplicates(const char* const pszPakFile)
+{
+    if (!pszPakFile || !pszPakFile[0])
+        return;
+    for (int i = 0; i < s_nYieldPakCount; i++)
+    {
+        if (!V_stricmp(s_yieldPaks[i], pszPakFile))
+            return;
+    }
+    if (s_nYieldPakCount >= PAK_YIELD_MAX)
+    {
+        Warning(eDLL_T::RTECH, "Pak_MarkYieldDuplicates: table full, '%s' keeps its own file time\n", pszPakFile);
+        return;
+    }
+    V_strncpy(s_yieldPaks[s_nYieldPakCount++], pszPakFile, sizeof(s_yieldPaks[0]));
+}
+
+void Pak_ClearYieldDuplicates(void)
+{
+    s_nYieldPakCount = 0;
+}
+
+static bool Pak_YieldsDuplicates(const char* const pszPakFile)
+{
+    const char* const pszName = V_UnqualifiedFileName(pszPakFile);
+    for (int i = 0; i < s_nYieldPakCount; i++)
+    {
+        if (!V_stricmp(s_yieldPaks[i], pszName))
+            return true;
+    }
+    return false;
 }
 
 static bool Pak_SetupBuffersAndLoad(const PakHandle_t pakId)
@@ -2860,6 +3079,15 @@ static bool Pak_SetupBuffersAndLoad(const PakHandle_t pakId)
 
     loadedInfo->fileTime = pakHdr.fileTime;
 
+    // The asset tracker hands a duplicate guid to the pak with the newer file
+    // time and hot-swaps the live asset; the oldest time files it behind instead.
+    if (Pak_YieldsDuplicates(loadedInfo->fileName))
+    {
+        loadedInfo->fileTime = {};
+        Msg(eDLL_T::RTECH, "Pak_SetupBuffersAndLoad: '%s' yields duplicate guids to loaded paks\n",
+            V_UnqualifiedFileName(loadedInfo->fileName));
+    }
+
     uint32_t assetCount = pakHdr.assetCount;
     const uint16_t patchIndex = pakHdr.patchIndex;
     const uint16_t memPageCount = pakHdr.memPageCount;
@@ -2883,6 +3111,43 @@ static bool Pak_SetupBuffersAndLoad(const PakHandle_t pakId)
         return false;
     }
 
+    // These counts size one allocation and then place every header table inside it; they come
+    // from the file. No shipped pak is anywhere near 2^24 of any of them.
+    constexpr uint32_t kPakMaxHeaderCount = 1u << 24;
+    if (pakHdr.pointerCount > kPakMaxHeaderCount || pakHdr.usesCount > kPakMaxHeaderCount
+        || pakHdr.dependentsCount > kPakMaxHeaderCount || *(unsigned int*)pakHdr.unk2 > kPakMaxHeaderCount)
+    {
+        Warning(eDLL_T::RTECH, "[PAK-PARSE] header counts out of range (pointers %u, uses %u, dependents %u)\n",
+            pakHdr.pointerCount, pakHdr.usesCount, pakHdr.dependentsCount);
+        loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+        return false;
+    }
+
+    if (memSlabCount > PAK_MAX_SLABS)
+    {
+        Warning(eDLL_T::RTECH, "[PAK-PARSE] slab count %hu exceeds %d in '%s'\n",
+            memSlabCount, PAK_MAX_SLABS, loadedInfo->fileName);
+        loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+        return false;
+    }
+
+    if (Pak_IsModSourcedPath(loadedInfo->fileName) && totalPakFileBufSize < pakHdr.compressedSize)
+    {
+        Warning(eDLL_T::RTECH, "[PAK-PARSE] mod pak '%s' is %zu bytes, header declares %llu; refused\n",
+            loadedInfo->fileName, totalPakFileBufSize, pakHdr.compressedSize);
+        loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+        return false;
+    }
+
+    // Patch files are opened from the base install, which a mod cannot supply.
+    if (patchIndex && Pak_IsModSourcedPath(loadedInfo->fileName))
+    {
+        Warning(eDLL_T::RTECH, "[PAK-PARSE] mod pak '%s' declares %hu patches; refused\n",
+            loadedInfo->fileName, patchIndex);
+        loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+        return false;
+    }
+
     const size_t streamingFilesBufSize = pakHdr.streamingFilesBufSize[STREAMING_SET_OPTIONAL] + pakHdr.streamingFilesBufSize[STREAMING_SET_MANDATORY];
     const size_t memPagePointersBufSize = 8 * memPageCount;
 
@@ -2891,10 +3156,10 @@ static bool Pak_SetupBuffersAndLoad(const PakHandle_t pakId)
         + 2
         * (patchIndex
             + 2
-            * (pakHdr.dependentsCount
+            * (uint64_t(pakHdr.dependentsCount)
                 + *(unsigned int*)pakHdr.unk2
                 + 3 * memPageCount
-                + 2 * (pakHdr.pointerCount + pakHdr.usesCount + 16i64 + 2 * (assetCount + patchIndex + 4 * assetCount + memSlabCount))))
+                + 2 * (uint64_t(pakHdr.pointerCount) + pakHdr.usesCount + 16i64 + 2 * (assetCount + patchIndex + 4 * assetCount + memSlabCount))))
         + v32;
 
     const __int64 v80 = 4 * assetCount;
@@ -2925,6 +3190,14 @@ static bool Pak_SetupBuffersAndLoad(const PakHandle_t pakId)
 
     if (ringBufferOutSize > pakHdr.decompressedSize && !patchIndex)
         ringBufferOutSize = (pakHdr.decompressedSize + PAK_DECODE_IN_RING_BUFFER_SMALL_MASK) & 0xFFFFFFFFFFFFF000ui64;
+
+    if (!isCompressed && ringBufferOutSize < PAK_DECODE_IN_RING_BUFFER_SIZE && pakHdr.compressedSize > ringBufferOutSize)
+    {
+        Warning(eDLL_T::RTECH, "[PAK-PARSE] uncompressed pak '%s' streams %llu bytes into a %llu byte buffer\n",
+            loadedInfo->fileName, pakHdr.compressedSize, ringBufferOutSize);
+        loadedInfo->status = PAK_STATUS_ERROR;
+        return false;
+    }
 
     PakFile_s* const pak = (PakFile_s*)AlignedMemAlloc()->Alloc(v34 + v35 + ringBufferOutSize + ringBufferStreamSize, 8);
 

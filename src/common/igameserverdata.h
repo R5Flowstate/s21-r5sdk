@@ -44,6 +44,7 @@ struct ConnectedNetConsoleData_s
 	u64 sendSessionId;     // Random id identifying our half of this connection.
 	u64 recvSessionId;     // Peer's session id, latched from its first accepted frame.
 	bool recvSessionKnown; // False until recvSessionId has been latched.
+	bool helloSent;        // Server only: our session id has been announced to the peer.
 	NetConFrameHeader_s frameHeader; // Current frame header.
 	vector<byte> recvBuffer;
 
@@ -63,6 +64,7 @@ struct ConnectedNetConsoleData_s
 		sendSessionId = 0;
 		recvSessionId = 0;
 		recvSessionKnown = false;
+		helloSent = false;
 		frameHeader.magic = 0;
 		frameHeader.length = 0;
 	}

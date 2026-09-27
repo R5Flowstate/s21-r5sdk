@@ -57,17 +57,6 @@ inline uint32_t Pak_S21GetGuidDescCount(const void* const pak)
 		reinterpret_cast<const uint8_t*>(pak) + kS21Pak_HeaderOffset + 0x5C);
 }
 
-inline uint32_t Pak_S21GetPageDataSize(const void* const pak, const uint32_t pageIdx)
-{
-	if (!pak)
-		return 0;
-	const PakPageHeader_s* const headers = *reinterpret_cast<const PakPageHeader_s* const*>(
-		reinterpret_cast<const uint8_t*>(pak) + kS21Pak_PageHeadersOffset);
-	if (!headers)
-		return 0;
-	return headers[pageIdx].dataSize;
-}
-
 #endif // RTECH_PAKPARSE_H
 #else // !CLIENT_DLL
 #ifndef RTECH_PAKPARSE_H
@@ -78,6 +67,10 @@ inline uint32_t Pak_S21GetPageDataSize(const void* const pak, const uint32_t pag
 
 #include "rtech/ipakfile.h"
 #include "rtech/async/asyncio.h"
+
+// A pak marked here never takes over a guid another loaded pak already owns.
+void Pak_MarkYieldDuplicates(const char* pszPakFile);
+void Pak_ClearYieldDuplicates(void);
 
 // This function returns the pak handle of the patch master RPak
 inline PakHandle_t(*v_Pak_Initialize)(int mode);

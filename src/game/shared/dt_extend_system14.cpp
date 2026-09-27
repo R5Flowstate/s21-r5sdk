@@ -458,12 +458,6 @@ static void DTExtend_AuditExtendUnwritten(void)
 			++nZeroProxy;
 			continue;
 		}
-		if (DTExtend_ValueProxyForAppendedProp(ep.tableName, ep.propName) != nullptr)
-		{
-			++nValueProxy;
-			continue;
-		}
-
 		bool found = false;
 		int off = -1;
 		for (int a = 0; a < s_assignedCount; ++a)
@@ -476,6 +470,12 @@ static void DTExtend_AuditExtendUnwritten(void)
 				off = s_assigned[a].offset;
 				break;
 			}
+		}
+
+		if (found && DTExtend_ValueProxyForAppendedProp(ep.tableName, ep.propName) != nullptr)
+		{
+			++nValueProxy;
+			continue;
 		}
 
 		if (found && off > 0)
@@ -731,7 +731,7 @@ void DTExtend_Apply(void** tables, int count)
 
 	// [TMPL-PICK] One line per leaf type -- which donor prop won the pre-scan and what +0x60 ProxyFn rides along.
 	// Pack calls the proxy for every type; non-proxied appends inherit the donor's proxy verbatim (a translating EHANDLE donor would transform every appended value of that type).
-	const char* s_nestedExtendTables[5];
+	const char* s_nestedExtendTables[7];
 	int kNumNestedExtendTables = 0;
 	s_nestedExtendTables[kNumNestedExtendTables++] = "DT_WeaponX_LocalWeaponData";
 	// m_akimboDisabled (value-proxied). The S21 Recv leaf exists only on
@@ -746,6 +746,11 @@ void DTExtend_Apply(void** tables, int count)
 	// same way DT_WeaponX_PredictingClientOnly was. The client then reads a
 	// wire-0 m_gameTimescale, and CL_CalcMoveFrametime divides by it.
 	s_nestedExtendTables[kNumNestedExtendTables++] = "DT_GlobalNonRewinding";
+	// m_jetpackDeactivateTime / m_prevJumpPressTime (value-proxied). The S21 client
+	// times the jetpack post effect from the first; without them it predicts full gravity.
+	s_nestedExtendTables[kNumNestedExtendTables++] = "DT_Local";
+	// The 20 track-entity camera extras (value-proxied).
+	s_nestedExtendTables[kNumNestedExtendTables++] = "DT_ThirdPersonView";
 	if (!JetDrive_WireEnabled())
 		Msg(eDLL_T::ENGINE,
 			"[dt_extend] DT_LocalPlayerExclusive: bridge_jetdrive_wire 0 -- the 14 "

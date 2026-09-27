@@ -8,6 +8,7 @@
 #include "game/shared/player_extend_sidecar.h"
 #include "game/shared/sdk_entity_state.h"
 #include "tier0/dbg.h"
+#include <cfloat>
 #include <cstring>
 
 
@@ -25,6 +26,15 @@ static volatile LONG s_used = 0;
 static inline uint64_t PackHandle(const SDKEntityHandle& h)
 {
 	return h.IsValid() ? static_cast<uint64_t>(h.Raw()) : 0;
+}
+
+// Fields whose idle value is not zero on the S21 client.
+static void PlayerExtend_ApplyIdleSentinels(PlayerExtendBundle* pBundle)
+{
+	pBundle->player.m_skywardObstacleAvoidanceEndPos[0] = FLT_MAX;
+	pBundle->player.m_skywardObstacleAvoidanceEndPos[1] = FLT_MAX;
+	pBundle->player.m_skywardObstacleAvoidanceEndPos[2] = FLT_MAX;
+	pBundle->player.m_glideUpwardsBoostEndTime = -1.0f;
 }
 
 static PlayerExtendSlot* FindSlot(uint64_t key)
@@ -66,6 +76,7 @@ static PlayerExtendSlot* EnsureSlot(uint64_t key)
 	slot->handleKey = 0;
 	InterlockedIncrement(&slot->seq);
 	memset(&slot->bundle, 0, sizeof(slot->bundle));
+	PlayerExtend_ApplyIdleSentinels(&slot->bundle);
 	InterlockedIncrement(&slot->seq);
 	slot->handleKey = key;
 	return slot;
@@ -137,7 +148,10 @@ static PlayerExtendSlot* BeginWrite(void* pEntity, PlayerExtendBundle* pScratch)
 	if (!slot)
 		return nullptr;
 	if (!CopyBundle(pEntity, pScratch))
+	{
 		memset(pScratch, 0, sizeof(*pScratch));
+		PlayerExtend_ApplyIdleSentinels(pScratch);
+	}
 	return slot;
 }
 

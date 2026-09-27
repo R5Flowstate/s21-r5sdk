@@ -9,13 +9,11 @@
 #include "jetdrive.h"
 #include "player_launch.h"
 #include "bridge_cmd_chain.h"
-#include "translocation.h"
 #include "player.h"
 #include "baseentity.h"
 #include "entitylist.h"
 #include "game/shared/edict_dirty.h"
 #include "game/shared/sdk_entity_state.h"
-#include "game/shared/dt_extend.h"
 #include "vscript/languages/squirrel_re/include/sqvm.h"
 #include "vscript/languages/squirrel_re/vsquirrel.h"
 #include "vscript/languages/squirrel_re/include/squirrel.h"
@@ -29,6 +27,8 @@
 #include "trigger_slip_diag.h"
 #include "move_sim_trace.h"
 #include "wallclimb.h"
+#include "wall_launch.h"
+#include "armored_leap.h"
 #include <cstring>
 #include <unordered_map>
 #include <unordered_set>
@@ -36,7 +36,6 @@
 // gpGlobals is defined in the game module; declare locally -- same pattern
 // snapshot_diag.cpp / vscript_player.cpp use.
 extern CGlobalVars* gpGlobals;
-extern int64_t Server_PrecacheModel_Invoke(const char* modelName);
 
 //-----------------------------------------------------------------------------
 // Networked DPT_Time: gpGlobals->curtime, not Plat_FloatTime.
@@ -50,23 +49,11 @@ static inline float JetDrive_CurTime(void)
 // Per-player state. SDKEntityMap, not a native struct field -- see jetdrive.h.
 //-----------------------------------------------------------------------------
 static SDKEntityMap<JetDriveState> s_jetDriveMapServer(ESide::Server, "jetDrive.srv");
-static SDKEntityMap<float> s_jdAttackTime(ESide::Server, "jetDrive.atk");
-// Handle-keyed like every other shadow map here: raw CPlayer* keys dangle
-// across disconnect/changelevel and alias onto recycled player slots.
-static SDKEntityMap<uint8_t> s_jdHoldPlayers(ESide::Server, "jetDrive.hold");
-static SDKEntityMap<float>   s_jdPendingTime(ESide::Server, "jetDrive.pending");
-static constexpr float kJdHoldOrphanSeconds = 0.5f;
-static constexpr float kJdAttackLockSeconds = 1.5f;
-static constexpr ptrdiff_t kJdWeaponWeapState = 0x1234;
-static constexpr ptrdiff_t kJdWeaponNextReady = 4600; // m_nextReadyTime
-static constexpr ptrdiff_t kJdWeaponNextPrimary = 4604; // m_nextPrimaryAttackTime
-static constexpr ptrdiff_t kJdWeaponTimeIdle = 4656; // m_flTimeWeaponIdle
-static constexpr unsigned int kJdWeapStateAttack = 9;
-static constexpr ptrdiff_t kJdEntOffModelIndex = 0xDE;
-static constexpr ptrdiff_t kJdWeaponOffWorldModelIndex = 0x1208;
-static constexpr ptrdiff_t kJdWeaponOffCStudio = 0xFD8;
-static const char* const kJdWhistlePtpov =
-	"mdl/weapons/vantage_tactical_whistle/ptpov_vantage_tactical_whistle.rmdl";
+// Last jet_driving viewmodel-modifier state seen per player.
+static SDKEntityMap<uint8_t> s_jdVmModifier(ESide::Server, "jetDrive.vmmod");
+// CPlayer::m_activeViewmodelModifiersChanged. ItemPreFrame re-sends the idle,
+// toss-hold and charge anims of every active weapon when it is set.
+static constexpr ptrdiff_t JD_PLAYER_OFF_VM_MODIFIERS_CHANGED = 0x638F;
 
 //-----------------------------------------------------------------------------
 // Tunables. FCVAR_REPLICATED so the client's native JetDriveAccel sees the same values.
@@ -91,13 +78,9 @@ static ConVar jetdrive_anim_linger_time("jetdrive_anim_linger_time", "1.0", FCVA
 	"JetDrive: added to curtime to set the anim-linger deadline on drive end.");
 static ConVar jetdrive_delay_time("jetdrive_delay_time", "0.2", FCVAR_RELEASE | FCVAR_REPLICATED,
 	"JetDrive: wind-up delay before BeginJetDrive's drive actually starts moving the player.");
-static ConVar jetdrive_weapon_clock_hold("jetdrive_weapon_clock_hold", "0.75",
-	FCVAR_RELEASE,
-	"Seconds ahead of server time the JetDrive weapon fire/idle clocks are held "
-	"while the drive is live. 0 = leave the native stamps alone.");
 static ConVar sdk_jetdrive_anim_diag("sdk_jetdrive_anim_diag", "0",
 	FCVAR_DEVELOPMENTONLY,
-	"Log JetDrive weapon clock arm/refresh/release.");
+	"Log jet_driving viewmodel-modifier edges.");
 
 // Duck-cancel: IN_DUCK (0x4) plus 0x4000000. No named constant for the high bit.
 static constexpr int JETDRIVE_DUCKCANCEL_BUTTON_MASK = 0x4000004;
@@ -110,16 +93,9 @@ static constexpr ptrdiff_t JD_MV_OFF_BUTTONS_PRESSED = 44; // CMoveData+0x2C
 static constexpr ptrdiff_t JD_MV_OFF_VELOCITY = 304;       // S3 m_vecVelocity
 static constexpr ptrdiff_t JD_PLAYER_OFF_FLOORHEIGHT = 23968;
 static constexpr unsigned int PLAYERANIMEVENT_DOUBLEJUMP = 7;
-static constexpr uintptr_t JD_WEAPON_TYPE_FLAGS = 0x19B0; // CWeaponX server
-static constexpr uint32_t JD_WPT_TACTICAL = 0x004u;
-static constexpr uint32_t JD_WPT_VIEWHANDS = 0x100u;
 
 static __int64 (*v_CGameMovement__FullWalkMove)(void* ctx) = nullptr;
 static void (*v_CPlayer__DoAnimationEvent)(void* player, unsigned int event, int a3, int a4) = nullptr;
-static int64_t (*v_CBaseEntity_SetModel)(int64_t entity, const char* modelName) = nullptr;
-static void JetDrive_BindWhistleStudio(void* pWeapon);
-static void JetDrive_BindWhistleOnPlayer(void* pPlayer);
-static bool JetDrive_AttackLockLive(void* pWeapon);
 
 static inline float GraphCapped(float val, float a, float b, float outAtA, float outAtB)
 {
@@ -414,9 +390,6 @@ void JetDrive_Begin(CPlayer* player, float speed, float accel,
 	// else: leave m_jetDriveTargetEnt/Offset untouched -- safe because
 	// JetDrive_End always resets them to invalid/0 between drives.
 
-	s_jdHoldPlayers[player] = 1;
-	s_jdPendingTime.Erase(player);
-	JetDrive_BindWhistleOnPlayer(player);
 	JetDrive_Mirror(player, s);
 }
 
@@ -448,8 +421,6 @@ void JetDrive_End(CPlayer* player)
 	*reinterpret_cast<float*>(
 		reinterpret_cast<uintptr_t>(player) + JD_PLAYER_OFF_FLOORHEIGHT) = origin.z;
 
-	s_jdHoldPlayers[player] = 1;
-	s_jdPendingTime[player] = JetDrive_CurTime();
 	JetDrive_Mirror(player, *s);
 }
 
@@ -478,439 +449,11 @@ void JetDrive_EnableDoubleJump(CPlayer* player, const Vector3D& launchVelocity,
 	JetDrive_Mirror(player, s);
 }
 
-static bool JetDrive_IsLaunchWeapon(void* pWeapon)
-{
-	if (!pWeapon)
-		return false;
-	const char* const pszName = reinterpret_cast<const char*>(
-		reinterpret_cast<uintptr_t>(pWeapon) + 0x15B0);
-	if (!pszName || !pszName[0] || !strstr(pszName, "companion_launch"))
-		return false;
-	return strstr(pszName, "entry") == nullptr;
-}
-
-static void* JetDrive_PlayerWeaponAt(void* pPlayer, uintptr_t base, int index)
-{
-	if (!pPlayer)
-		return nullptr;
-	const uint32_t raw = *reinterpret_cast<const uint32_t*>(
-		reinterpret_cast<uintptr_t>(pPlayer) + base + 4u * static_cast<unsigned>(index));
-	return SDKEntityState_Resolve(SDKEntityHandle(raw), ESide::Server);
-}
-
-static void JetDrive_ForEachLaunchWeapon(void* pPlayer, void (*fn)(void* pWeapon))
-{
-	if (!pPlayer || !fn)
-		return;
-	static constexpr uintptr_t kWeapons0 = 0x1690;
-	static constexpr uintptr_t kOffhand0 = 0x16B4;
-	static constexpr uintptr_t kActive0 = 0x16CC;
-	void* seen[20];
-	int nSeen = 0;
-
-	for (int i = 0; i < 9; ++i)
-	{
-		void* const pWeap = JetDrive_PlayerWeaponAt(pPlayer, kWeapons0, i);
-		if (!JetDrive_IsLaunchWeapon(pWeap))
-			continue;
-		bool bDup = false;
-		for (int s = 0; s < nSeen; ++s)
-		{
-			if (seen[s] == pWeap)
-			{
-				bDup = true;
-				break;
-			}
-		}
-		if (bDup || nSeen >= 20)
-			continue;
-		seen[nSeen++] = pWeap;
-	}
-	for (int i = 0; i < 8; ++i)
-	{
-		void* const pWeap = JetDrive_PlayerWeaponAt(pPlayer, kOffhand0, i);
-		if (!JetDrive_IsLaunchWeapon(pWeap))
-			continue;
-		bool bDup = false;
-		for (int s = 0; s < nSeen; ++s)
-		{
-			if (seen[s] == pWeap)
-			{
-				bDup = true;
-				break;
-			}
-		}
-		if (bDup || nSeen >= 20)
-			continue;
-		seen[nSeen++] = pWeap;
-	}
-	for (int i = 0; i < 3; ++i)
-	{
-		void* const pWeap = JetDrive_PlayerWeaponAt(pPlayer, kActive0, i);
-		if (!JetDrive_IsLaunchWeapon(pWeap))
-			continue;
-		bool bDup = false;
-		for (int s = 0; s < nSeen; ++s)
-		{
-			if (seen[s] == pWeap)
-			{
-				bDup = true;
-				break;
-			}
-		}
-		if (bDup || nSeen >= 20)
-			continue;
-		seen[nSeen++] = pWeap;
-	}
-
-	for (int i = 0; i < nSeen; ++i)
-		fn(seen[i]);
-}
-
-static const char* JetDrive_StudioName(void* pWeapon)
-{
-	if (!pWeapon)
-		return "";
-	const uintptr_t cstudio = *reinterpret_cast<uintptr_t*>(
-		reinterpret_cast<uint8_t*>(pWeapon) + kJdWeaponOffCStudio);
-	if (!cstudio)
-		return "";
-	const uintptr_t hdr = *reinterpret_cast<uintptr_t*>(cstudio + 0x08);
-	if (!hdr)
-		return "";
-	return reinterpret_cast<const char*>(hdr + 0x10);
-}
-
-static void JetDrive_BindWhistleStudio(void* pWeapon)
-{
-	static volatile LONG s_nBind = 0;
-	const LONG n = InterlockedIncrement(&s_nBind);
-	if (!pWeapon)
-		return;
-	if (!v_CBaseEntity_SetModel)
-	{
-		if (n <= 8)
-			Msg(eDLL_T::SERVER, "[JETDRIVE] ptpov bind skipped (SetModel unresolved)\n");
-		return;
-	}
-	const char* const cur = JetDrive_StudioName(pWeapon);
-	if (cur && strstr(cur, "ptpov"))
-	{
-		if (n <= 8)
-			Msg(eDLL_T::SERVER, "[JETDRIVE] ptpov already '%.63s'\n", cur);
-		return;
-	}
-
-	uint8_t* const w = reinterpret_cast<uint8_t*>(pWeapon);
-	const int16_t modelIdx = *reinterpret_cast<int16_t*>(w + kJdEntOffModelIndex);
-	const int32_t worldIdx = *reinterpret_cast<int32_t*>(w + kJdWeaponOffWorldModelIndex);
-
-	(void)Server_PrecacheModel_Invoke(kJdWhistlePtpov);
-	(void)v_CBaseEntity_SetModel(reinterpret_cast<int64_t>(pWeapon), kJdWhistlePtpov);
-	const uintptr_t cstudio = *reinterpret_cast<uintptr_t*>(w + kJdWeaponOffCStudio);
-	*reinterpret_cast<int16_t*>(w + kJdEntOffModelIndex) = modelIdx;
-	*reinterpret_cast<int32_t*>(w + kJdWeaponOffWorldModelIndex) = worldIdx;
-	if (cstudio)
-		*reinterpret_cast<uintptr_t*>(w + kJdWeaponOffCStudio) = cstudio;
-	MarkEntityEdictDirty(pWeapon);
-
-	if (n <= 8)
-		Msg(eDLL_T::SERVER, "[JETDRIVE] bound whistle ptpov was='%.63s' now='%.63s'\n",
-			cur && cur[0] ? cur : "?", JetDrive_StudioName(pWeapon));
-}
-
-static void JetDrive_BindWhistleOnPlayer(void* pPlayer)
-{
-	JetDrive_ForEachLaunchWeapon(pPlayer, JetDrive_BindWhistleStudio);
-}
-
-static bool JetDrive_AttackLockLive(void* pWeapon)
-{
-	const float* const pAtk = s_jdAttackTime.Find(pWeapon);
-	if (!pAtk)
-		return false;
-	return (JetDrive_CurTime() - *pAtk) < kJdAttackLockSeconds;
-}
-
-static bool JetDrive_ShouldLockAnims(void* pWeapon)
-{
-	return JetDrive_ShouldHoldOffhand(pWeapon) || JetDrive_AttackLockLive(pWeapon);
-}
-
-static void JetDrive_ArmIdleTimer(void* pWeapon, float duration)
-{
-	if (!pWeapon)
-		return;
-	uint8_t* const w = reinterpret_cast<uint8_t*>(pWeapon);
-	const float until = JetDrive_CurTime() + duration;
-	*reinterpret_cast<float*>(w + kJdWeaponNextReady) = until;
-	*reinterpret_cast<float*>(w + kJdWeaponTimeIdle) = until;
-	MarkEntityEdictDirty(pWeapon);
-}
-
-static void JetDrive_SetIdleAnims(void* pWeapon, bool bEnable)
-{
-	if (!pWeapon)
-		return;
-	const int off = DTExtend_FindNativePropOffset(pWeapon, "m_shouldPlayIdleAnims");
-	if (off <= 0)
-		return;
-	*reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(pWeapon) + off) = bEnable ? 1 : 0;
-	MarkEntityEdictDirty(pWeapon);
-}
-
-static void JetDrive_ArmDriveClocks(void* pWeapon)
-{
-	if (!pWeapon)
-		return;
-	const float hold = jetdrive_weapon_clock_hold.GetFloat();
-	if (hold <= 0.0f)
-		return;
-	const float now = JetDrive_CurTime();
-	if (now <= 0.0f)
-		return;
-
-	float* const pReady = reinterpret_cast<float*>(
-		reinterpret_cast<uintptr_t>(pWeapon) + kJdWeaponNextReady);
-	if (*pReady - now > hold * 0.5f)
-		return;
-
-	const float stamp = now + hold;
-	*pReady = stamp;
-	*reinterpret_cast<float*>(
-		reinterpret_cast<uintptr_t>(pWeapon) + kJdWeaponNextPrimary) = stamp;
-	*reinterpret_cast<float*>(
-		reinterpret_cast<uintptr_t>(pWeapon) + kJdWeaponTimeIdle) = stamp;
-	MarkEntityEdictDirty(pWeapon);
-
-	if (sdk_jetdrive_anim_diag.GetBool())
-	{
-		const unsigned int state = *reinterpret_cast<const unsigned int*>(
-			reinterpret_cast<uintptr_t>(pWeapon) + kJdWeaponWeapState);
-		uint8_t idleAnims = 1;
-		const int off = DTExtend_FindNativePropOffset(pWeapon, "m_shouldPlayIdleAnims");
-		if (off > 0)
-			idleAnims = *reinterpret_cast<const uint8_t*>(
-				reinterpret_cast<const uint8_t*>(pWeapon) + off);
-		Msg(eDLL_T::SERVER,
-			"[JETDRIVE] clocks weapon=%p state=%u ready=%.3f idle=%.3f now=%.3f idleAnims=%u\n",
-			pWeapon, state, stamp, stamp, now, static_cast<unsigned>(idleAnims));
-	}
-}
-
-static void JetDrive_ReleaseDriveClocks(void* pWeapon)
-{
-	if (!pWeapon)
-		return;
-	const float now = JetDrive_CurTime();
-	if (now <= 0.0f)
-		return;
-
-	*reinterpret_cast<float*>(
-		reinterpret_cast<uintptr_t>(pWeapon) + kJdWeaponNextReady) = now;
-	*reinterpret_cast<float*>(
-		reinterpret_cast<uintptr_t>(pWeapon) + kJdWeaponNextPrimary) = now;
-	*reinterpret_cast<float*>(
-		reinterpret_cast<uintptr_t>(pWeapon) + kJdWeaponTimeIdle) = now;
-	MarkEntityEdictDirty(pWeapon);
-}
-
-static void JetDrive_HoldTickWeapon(void* pWeapon)
-{
-	JetDrive_SetIdleAnims(pWeapon, false);
-	JetDrive_ArmDriveClocks(pWeapon);
-}
-
-static void JetDrive_ReleaseHoldWeapon(void* pWeapon)
-{
-	JetDrive_ReleaseDriveClocks(pWeapon);
-	JetDrive_SetIdleAnims(pWeapon, true);
-
-	if (sdk_jetdrive_anim_diag.GetBool())
-	{
-		const float now = JetDrive_CurTime();
-		const unsigned int state = *reinterpret_cast<const unsigned int*>(
-			reinterpret_cast<uintptr_t>(pWeapon) + kJdWeaponWeapState);
-		const float ready = *reinterpret_cast<const float*>(
-			reinterpret_cast<uintptr_t>(pWeapon) + kJdWeaponNextReady);
-		const float idle = *reinterpret_cast<const float*>(
-			reinterpret_cast<uintptr_t>(pWeapon) + kJdWeaponTimeIdle);
-		uint8_t idleAnims = 1;
-		const int off = DTExtend_FindNativePropOffset(pWeapon, "m_shouldPlayIdleAnims");
-		if (off > 0)
-			idleAnims = *reinterpret_cast<const uint8_t*>(
-				reinterpret_cast<const uint8_t*>(pWeapon) + off);
-		Msg(eDLL_T::SERVER,
-			"[JETDRIVE] release weapon=%p state=%u ready=%.3f idle=%.3f now=%.3f idleAnims=%u\n",
-			pWeapon, state, ready, idle, now, static_cast<unsigned>(idleAnims));
-	}
-
-	Translocation_HolsterWeaponOriginal(pWeapon);
-}
-
 static void JetDrive_FireDoubleJumpAnim(CPlayer* player)
 {
 	if (!player || !v_CPlayer__DoAnimationEvent)
 		return;
 	v_CPlayer__DoAnimationEvent(player, PLAYERANIMEVENT_DOUBLEJUMP, 0, 0);
-}
-
-bool JetDrive_FilterWeaponState(void* pWeapon, unsigned int newState)
-{
-	if (!JetDrive_IsLaunchWeapon(pWeapon))
-		return false;
-	JetDrive_BindWhistleStudio(pWeapon);
-
-	if (newState == kJdWeapStateAttack)
-	{
-		s_jdAttackTime[pWeapon] = JetDrive_CurTime();
-		JetDrive_ArmIdleTimer(pWeapon, kJdAttackLockSeconds);
-		return false;
-	}
-
-	if (!JetDrive_ShouldLockAnims(pWeapon))
-		return false;
-
-	unsigned int* const pState = reinterpret_cast<unsigned int*>(
-		reinterpret_cast<uintptr_t>(pWeapon) + kJdWeaponWeapState);
-	if (*pState != kJdWeapStateAttack)
-	{
-		*pState = kJdWeapStateAttack;
-		MarkEntityEdictDirty(pWeapon);
-	}
-
-	static volatile LONG s_nLock = 0;
-	if (InterlockedIncrement(&s_nLock) <= 16)
-		Msg(eDLL_T::SERVER,
-			"[JETDRIVE] keep ATTACK (refuse state %u) weap=%p\n",
-			newState, pWeapon);
-	return true;
-}
-
-bool JetDrive_FilterIdealActivity(void* pWeapon, unsigned int activity)
-{
-	if (!JetDrive_IsLaunchWeapon(pWeapon))
-		return false;
-	if (!JetDrive_ShouldLockAnims(pWeapon))
-		return false;
-	if (activity == 453 || activity == 454 || activity == 458)
-		return true;
-	if (activity >= 468 && activity <= 471)
-		return true;
-	if (activity == 478 || activity == 479)
-		return true;
-	return false;
-}
-
-bool JetDrive_ShouldBlockSetActiveWeapon(void* pPlayer, void* pWeapon)
-{
-	if (!pPlayer || !pWeapon)
-		return false;
-	if (JetDrive_IsLaunchWeapon(pWeapon))
-		return false;
-	const uint32_t flags = *reinterpret_cast<const uint32_t*>(
-		reinterpret_cast<uintptr_t>(pWeapon) + JD_WEAPON_TYPE_FLAGS);
-	if ((flags & (JD_WPT_TACTICAL | JD_WPT_VIEWHANDS)) != 0)
-		return false;
-
-	CPlayer* const pOwner = reinterpret_cast<CPlayer*>(pPlayer);
-	if (JetDrive_IsActive(pOwner))
-		return true;
-	if (s_jdPendingTime.Find(pOwner))
-		return false;
-
-	static constexpr uintptr_t kWeapons0 = 0x1690;
-	static constexpr uintptr_t kOffhand0 = 0x16B4;
-	static constexpr uintptr_t kActive0 = 0x16CC;
-	for (int i = 0; i < 9; ++i)
-	{
-		void* const pWeap = JetDrive_PlayerWeaponAt(pPlayer, kWeapons0, i);
-		if (JetDrive_IsLaunchWeapon(pWeap) && JetDrive_AttackLockLive(pWeap))
-			return true;
-	}
-	for (int i = 0; i < 8; ++i)
-	{
-		void* const pWeap = JetDrive_PlayerWeaponAt(pPlayer, kOffhand0, i);
-		if (JetDrive_IsLaunchWeapon(pWeap) && JetDrive_AttackLockLive(pWeap))
-			return true;
-	}
-	for (int i = 0; i < 3; ++i)
-	{
-		void* const pWeap = JetDrive_PlayerWeaponAt(pPlayer, kActive0, i);
-		if (JetDrive_IsLaunchWeapon(pWeap) && JetDrive_AttackLockLive(pWeap))
-			return true;
-	}
-	return false;
-}
-
-bool JetDrive_ShouldHoldOffhand(void* pWeapon)
-{
-	if (!JetDrive_IsLaunchWeapon(pWeapon))
-		return false;
-	const uint32_t rawOwner = *reinterpret_cast<const uint32_t*>(
-		reinterpret_cast<const uint8_t*>(pWeapon) + 0x11F0);
-	void* const pOwner = SDKEntityState_Resolve(SDKEntityHandle(rawOwner), ESide::Server);
-	if (!pOwner)
-		return false;
-	CPlayer* const pPlayer = reinterpret_cast<CPlayer*>(pOwner);
-	return JetDrive_IsActive(pPlayer)
-		|| s_jdHoldPlayers.Find(pPlayer) != nullptr;
-}
-
-bool JetDrive_NoteOffhandHolster(void* pWeapon)
-{
-	if (!JetDrive_IsLaunchWeapon(pWeapon))
-		return false;
-	JetDrive_BindWhistleStudio(pWeapon);
-	const uint32_t rawOwner = *reinterpret_cast<const uint32_t*>(
-		reinterpret_cast<const uint8_t*>(pWeapon) + 0x11F0);
-	void* const pOwner = SDKEntityState_Resolve(SDKEntityHandle(rawOwner), ESide::Server);
-	if (!pOwner)
-		return false;
-	CPlayer* const pPlayer = reinterpret_cast<CPlayer*>(pOwner);
-	if (JetDrive_IsActive(pPlayer)
-		|| s_jdHoldPlayers.Find(pPlayer) != nullptr)
-		return true;
-	if (JetDrive_AttackLockLive(pWeapon))
-		return true;
-	const unsigned int weapState = *reinterpret_cast<const unsigned int*>(
-		reinterpret_cast<uintptr_t>(pWeapon) + kJdWeaponWeapState);
-	if (weapState == kJdWeapStateAttack)
-		return true;
-	return false;
-}
-
-void JetDrive_TickHolds(void* pPlayer)
-{
-	if (pPlayer && s_jdHoldPlayers.Find(pPlayer))
-		JetDrive_ForEachLaunchWeapon(pPlayer, JetDrive_HoldTickWeapon);
-
-	if (!s_jdPendingTime.Size())
-		return;
-
-	// Resolve through the handle first: a stale entry must never deref freed
-	// memory (the destroy observer normally evicts before this runs).
-	const float now = JetDrive_CurTime();
-	SDKEntityHandle expired[16];
-	int nExpired = 0;
-	for (const auto& kv : s_jdPendingTime)
-	{
-		CPlayer* const pPending = reinterpret_cast<CPlayer*>(
-			SDKEntityState_Resolve(kv.first, ESide::Server));
-		const bool bDrop = !pPending || JetDrive_IsActive(pPending)
-			|| (now - kv.second >= kJdHoldOrphanSeconds);
-		if (!bDrop)
-			continue;
-		if (pPending && !JetDrive_IsActive(pPending))
-			JetDrive_ForEachLaunchWeapon(pPending, JetDrive_ReleaseHoldWeapon);
-		if (nExpired < static_cast<int>(sizeof(expired) / sizeof(expired[0])))
-			expired[nExpired++] = kv.first;
-	}
-	for (int i = 0; i < nExpired; ++i)
-	{
-		s_jdHoldPlayers.Erase(expired[i]);
-		s_jdPendingTime.Erase(expired[i]);
-	}
 }
 
 bool JetDrive_IsActive(CPlayer* player)
@@ -927,6 +470,40 @@ bool JetDrive_IsInDecelWindow(CPlayer* player)
 		return false;
 	const JetDriveState* const s = s_jetDriveMapServer.Find(player);
 	return s && s->m_jetDriveInDecelWindow;
+}
+
+// Drive live, or inside the post-drive anim linger (m_jetDriveAnimTime).
+bool JetDrive_IsJetDriving(const void* pPlayer)
+{
+	if (!pPlayer)
+		return false;
+	const JetDriveState* const s = s_jetDriveMapServer.Find(pPlayer);
+	if (!s)
+		return false;
+	return s->m_jetDriveActive || s->m_jetDriveAnimTime > JetDrive_CurTime();
+}
+
+void JetDrive_PreRunCommand(void* pPlayer)
+{
+	if (!pPlayer)
+		return;
+
+	const uint8_t now = JetDrive_IsJetDriving(pPlayer) ? 1 : 0;
+	const uint8_t* const pLast = s_jdVmModifier.Find(pPlayer);
+	if ((pLast ? *pLast : 0) == now)
+		return;
+
+	if (now)
+		s_jdVmModifier[pPlayer] = 1;
+	else
+		s_jdVmModifier.Erase(pPlayer);
+
+	*reinterpret_cast<bool*>(
+		reinterpret_cast<uintptr_t>(pPlayer) + JD_PLAYER_OFF_VM_MODIFIERS_CHANGED) = true;
+
+	if (sdk_jetdrive_anim_diag.GetBool())
+		Msg(eDLL_T::SERVER, "[JETDRIVE] jet_driving %u -> %u player=%p t=%.3f\n",
+			now ? 0u : 1u, static_cast<unsigned>(now), pPlayer, JetDrive_CurTime());
 }
 
 static int JetDrive_ButtonsPressed(void* mv)
@@ -1006,7 +583,10 @@ static Vector3D JetDrive_ResolveTargetPos(const JetDriveState& s)
 	return origin + s.m_jetDriveTargetEntOffset;
 }
 
-void JetDrive_AccelFromMoveCtx(void* ctx)
+// ctx of the FullWalkMove whose in-move slot already ran the mover.
+static void* s_pJetDriveSlotCtx = nullptr;
+
+static void JetDrive_AccelFromMoveCtx(void* ctx, float dt)
 {
 	if (!ctx)
 		return;
@@ -1014,7 +594,13 @@ void JetDrive_AccelFromMoveCtx(void* ctx)
 		reinterpret_cast<uintptr_t>(ctx) + JD_CTX_OFF_PLAYER);
 	void* const mv = *reinterpret_cast<void**>(
 		reinterpret_cast<uintptr_t>(ctx) + JD_CTX_OFF_MOVEDATA);
-	JetDrive_Accel(player, mv, TriggerPass_FrameTime());
+	JetDrive_Accel(player, mv, dt);
+}
+
+void JetDrive_AccelInMove(void* ctx, float dt)
+{
+	s_pJetDriveSlotCtx = ctx;
+	JetDrive_AccelFromMoveCtx(ctx, dt);
 }
 
 void JetDrive_Accel(CPlayer* player, void* mv, float dt)
@@ -1418,14 +1004,30 @@ static __int64 __fastcall Hook_CGameMovement_FullWalkMove_JetDrive(void* ctx)
 	SlipDiag_BeforeFullWalkMove(ctx);
 	PlayerLaunch_BeginFullWalkMove(ctx);
 	WallClimb_BeforeFullWalkMove(ctx);
+	ArmoredLeap_BeginFullWalkMove(ctx);
+	s_pJetDriveSlotCtx = nullptr;
 	const __int64 ret = v_CGameMovement__FullWalkMove
 		? v_CGameMovement__FullWalkMove(ctx)
 		: 0;
+	ArmoredLeap_EndFullWalkMove();
 	PlayerLaunch_EndFullWalkMove();
-	JetDrive_AccelFromMoveCtx(ctx);
+	if (s_pJetDriveSlotCtx != ctx)
+	{
+		// The in-move slot needs the half-gravity and CheckVelocity hooks.
+		static bool s_bWarned = false;
+		if (!s_bWarned)
+		{
+			s_bWarned = true;
+			Warning(eDLL_T::SERVER,
+				"[JETDRIVE] in-move slot did not run -- mover falls back to after FullWalkMove (client prediction will disagree)\n");
+		}
+		JetDrive_AccelFromMoveCtx(ctx, TriggerPass_FrameTime());
+	}
+	s_pJetDriveSlotCtx = nullptr;
 	SlipDiag_AfterFullWalkMove(ctx);
 	MoveSimTrace_AfterFullWalkMove(ctx);
 	WallClimb_AfterFullWalkMove(ctx);
+	WallLaunch_AfterFullWalkMove(ctx);
 	return ret;
 }
 
@@ -1436,7 +1038,6 @@ void VJetDrive::GetAdr(void) const
 	LogFunAdr("JetDrive_End", (void*)&JetDrive_End);
 	LogFunAdr("CGameMovement::FullWalkMove", v_CGameMovement__FullWalkMove);
 	LogFunAdr("CPlayer::DoAnimationEvent", v_CPlayer__DoAnimationEvent);
-	LogFunAdr("CBaseEntity::SetModel", v_CBaseEntity_SetModel);
 }
 
 void VJetDrive::GetFun(void) const
@@ -1461,14 +1062,6 @@ void VJetDrive::GetFun(void) const
 	if (!v_CPlayer__DoAnimationEvent)
 		Warning(eDLL_T::SERVER,
 			"[JETDRIVE] CPlayer::DoAnimationEvent pattern unresolved -- DJ viewmodel overlay stays client-predicted\n");
-
-	Module_FindPattern(g_GameDll,
-		"48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? "
-		"57 48 83 EC 20 33 FF 48 8B DA 48 8B F1")
-		.GetPtr(v_CBaseEntity_SetModel);
-	if (!v_CBaseEntity_SetModel)
-		Warning(eDLL_T::SERVER,
-			"[JETDRIVE] CBaseEntity::SetModel pattern unresolved -- whistle ptpov will not bind\n");
 }
 
 void VJetDrive::GetCon(void) const

@@ -108,12 +108,44 @@ static bool PakModule_IsTrustAllowlisted(const wchar_t* const path)
 			base = p + 1;
 	}
 
+	bool bNameAllowed = false;
 	for (size_t i = 0; i < SDK_ARRAYSIZE(s_allowedModuleDlls); ++i)
 	{
 		if (_wcsicmp(base, s_allowedModuleDlls[i]) == 0)
-			return true;
+		{
+			bNameAllowed = true;
+			break;
+		}
 	}
-	return false;
+	if (!bNameAllowed)
+		return false;
+
+	// A mod pak resolves under mods/<id>/paks/Win64/, so the basename alone
+	// would let a mod ship its own ui_fs.dll. Only the install's pak dir counts.
+	wchar_t szExpected[MAX_PATH];
+	const DWORD nExe = GetModuleFileNameW(nullptr, szExpected, MAX_PATH);
+	if (nExe == 0 || nExe >= MAX_PATH)
+		return false;
+	wchar_t* const pSlash = wcsrchr(szExpected, L'\\');
+	if (!pSlash)
+		return false;
+	pSlash[1] = L'\0';
+	if (wcscat_s(szExpected, L"paks\\Win64\\") != 0 || wcscat_s(szExpected, base) != 0)
+		return false;
+
+	wchar_t szActual[MAX_PATH];
+	const DWORD nFull = GetFullPathNameW(path, MAX_PATH, szActual, nullptr);
+	if (nFull == 0 || nFull >= MAX_PATH)
+		return false;
+
+	if (_wcsicmp(szActual, szExpected) != 0)
+	{
+		Warning(eDLL_T::RTECH,
+			"[PAK-TRUST] '%ls' is not the install's '%ls' -- stock Authenticode applies\n",
+			szActual, szExpected);
+		return false;
+	}
+	return true;
 }
 
 static LONG WINAPI Hook_WinVerifyTrust(HWND hwnd, GUID* action, LPVOID pWVTData)

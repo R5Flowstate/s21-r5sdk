@@ -19,6 +19,7 @@
 #include "vscript/languages/squirrel_re/vsquirrel.h"
 #include "rtech/pak/pakstate.h"
 #include "rtech/pak/paktools.h"
+#include "rtech/pak/pakparse.h"
 #include "engine/server/snapshot_diag.h"
 #include "vscript_server.h"
 #include "mapedit_paks.h"
@@ -27,9 +28,6 @@ extern CGlobalVars* gpGlobals;
 
 static ConVar sdk_mapedit_extra_paks_max("sdk_mapedit_extra_paks_max", "3", FCVAR_RELEASE,
 	"Extra map paks the map editor may hold loaded alongside the running level.", true, 0.f, true, 6.f);
-
-static ConVar sdk_mapedit_pak_time_gate("sdk_mapedit_pak_time_gate", "1", FCVAR_RELEASE,
-	"Refuse an extra map pak whose header time is newer than the running level's pak (a newer duplicate guid replaces the live asset).");
 
 static constexpr int MAPEDIT_PAKS_MAX = 6;
 static constexpr int MAPEDIT_PAK_NAME_LEN = 64;
@@ -98,23 +96,6 @@ static int MapEditPaks_TrackedCount(void)
 	return nCount;
 }
 
-// RPak header: magic(4) version(2) flags(2) createdTime(8).
-static bool MapEditPaks_ReadHeaderTime(const char* pszPakFile, uint64_t& nTime)
-{
-	char szFull[MAX_OSPATH];
-	snprintf(szFull, sizeof(szFull), "%s%s", Pak_GetReadPath(), pszPakFile);
-	FILE* pFile = fopen(szFull, "rb");
-	if (!pFile)
-		return false;
-	uint8_t hdr[16];
-	const bool bOk = fread(hdr, 1, sizeof(hdr), pFile) == sizeof(hdr);
-	fclose(pFile);
-	if (!bOk)
-		return false;
-	memcpy(&nTime, hdr + 8, sizeof(nTime));
-	return true;
-}
-
 static const char* MapEditPaks_CurrentLevel(void)
 {
 	if (!gpGlobals)
@@ -161,25 +142,6 @@ static SQRESULT ServerScript_MapEdit_RequestMapPak(HSQUIRRELVM v)
 		sq_pushbool(v, SQFalse);
 		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 	}
-	if (sdk_mapedit_pak_time_gate.GetBool() && pszLevel[0])
-	{
-		char szLevelFile[MAPEDIT_PAK_NAME_LEN + 8];
-		V_snprintf(szLevelFile, sizeof(szLevelFile), "%s.rpak", pszLevel);
-		uint64_t nExtraTime = 0, nLevelTime = 0;
-		if (!MapEditPaks_ReadHeaderTime(szFile, nExtraTime) || !MapEditPaks_ReadHeaderTime(szLevelFile, nLevelTime))
-		{
-			Warning(eDLL_T::SERVER, "[MAPEDIT-PAK] MapEdit_RequestMapPak refused: cannot read pak header time for '%s' / '%s'\n", szName, pszLevel);
-			sq_pushbool(v, SQFalse);
-			SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-		}
-		if (nExtraTime > nLevelTime)
-		{
-			Warning(eDLL_T::SERVER, "[MAPEDIT-PAK] MapEdit_RequestMapPak refused: '%s' header time %llu is newer than '%s' %llu; its duplicate guids would replace live assets (sdk_mapedit_pak_time_gate 0 to override)\n",
-				szName, static_cast<unsigned long long>(nExtraTime), pszLevel, static_cast<unsigned long long>(nLevelTime));
-			sq_pushbool(v, SQFalse);
-			SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-		}
-	}
 	if (MapEditPaks_Find(szName))
 	{
 		Warning(eDLL_T::SERVER, "[MAPEDIT-PAK] MapEdit_RequestMapPak refused: '%s' already tracked\n", szName);
@@ -215,6 +177,8 @@ static SQRESULT ServerScript_MapEdit_RequestMapPak(HSQUIRRELVM v)
 		sq_pushbool(v, SQFalse);
 		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 	}
+	// Its copies of guids the level already owns must not replace live assets.
+	Pak_MarkYieldDuplicates(szFile);
 	const PakHandle_t nHandle = g_pakLoadApi->LoadAsync(szFile, AlignedMemAlloc(), 1, 0);
 	if (nHandle == PAK_INVALID_HANDLE)
 	{
@@ -413,5 +377,6 @@ void MapEditPaks_LevelShutdown(void)
 		pEntry->m_nHandle = PAK_INVALID_HANDLE;
 		++nCount;
 	}
+	Pak_ClearYieldDuplicates();
 	Msg(eDLL_T::SERVER, "[MAPEDIT-PAK] Level reset unloaded %d extra map pak(s)\n", nCount);
 }

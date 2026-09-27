@@ -27,13 +27,13 @@ static bool s_bPlayerFovLooked = false;
 
 static float PlayerFov_SettingFov(void* pPlayer)
 {
-	if (!s_bPlayerFovLooked)
+	if (!s_bPlayerFovLooked && Bridge_HasPlayerSettingsLayout())
 	{
 		s_bPlayerFovLooked = true;
-		s_nPlayerFovOff = Bridge_LookupPlayerSettingsFieldOffset("player_fov");
+		s_nPlayerFovOff = Bridge_LookupPlayerSettingsFieldOffset("fov");
 		if (s_nPlayerFovOff == 0xFFFFFFFFu || s_nPlayerFovOff >= kSettingsOffCap)
 		{
-			Warning(eDLL_T::SERVER, "[PLAYER-FOV] player_fov settings field unresolved -- GetDefaultFOV falls back to 70\n");
+			Warning(eDLL_T::SERVER, "[PLAYER-FOV] fov settings field unresolved -- GetDefaultFOV falls back to 70\n");
 			s_nPlayerFovOff = 0xFFFFFFFFu;
 		}
 	}

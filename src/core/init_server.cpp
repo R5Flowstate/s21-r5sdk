@@ -114,6 +114,8 @@
 #include "vscript/languages/squirrel_re/include/sqstdstring.h"
 #include "vscript/languages/squirrel_re/vsquirrel.h"
 #include "vscript/vscript.h"
+#include "vscript/script_convar_guard.h"
+#include "vscript/script_wraps.h"
 #include "game/shared/r1/weapon_parse.h"
 #include "game/server/r1/blast_pattern.h"
 #include "game/server/persistence_ext.h"
@@ -124,20 +126,38 @@
 #include "game/server/extended_range_use.h"
 #include "game/server/jetdrive.h"
 #include "game/server/track_entity.h"
+#include "game/server/classvar_natives.h"
 #include "game/server/player_fov.h"
 #include "game/server/player_launch.h"
 #include "game/server/translocation.h"
+#include "game/server/energize.h"
+#include "game/server/weapon_custom_activity.h"
 #include "game/server/skydive.h"
+#include "game/server/jetpack.h"
+#include "game/server/glide.h"
+#include "game/server/armored_leap.h"
+#include "game/server/player_stance.h"
+#include "game/server/entity_script_ext.h"
+#include "game/server/script_mover_traversal.h"
+#include "game/server/offhand_jump_toggle.h"
+#include "game/server/offhand_melee_cancel.h"
+#include "game/server/weapon_last_fire_time.h"
+#include "game/server/weapon_regen.h"
+#include "game/server/skyward.h"
+#include "game/server/missile_expand_contract.h"
 #include "game/server/infinite_ammo.h"
 #include "game/server/weapon_ammo_pool_mod.h"
 #include "game/server/consumable_inv.h"
 #include "game/server/slide_super_jump.h"
+#include "game/server/dodge_rules.h"
 #include "game/server/mantle_boost.h"
+#include "game/server/mantle_boost_vm_probe.h"
 #include "game/server/mantle_boost_anim.h"
 #include "game/server/halfduck_zip_parity.h"
 #include "game/server/move_sim_trace.h"
 #include "game/server/surfaceprop_id.h"
 #include "game/server/repel_realm_gate.h"
+#include "game/server/realm_adopt.h"
 #include "game/server/weapon_realm_follow.h"
 #include "game/server/weapon_holster_reselect.h"
 #include "game/server/zipline_cooldown.h"
@@ -150,6 +170,10 @@
 #include "game/shared/deathfield_system.h"
 #include "game/server/tapstrafe.h"
 #include "game/server/wallclimb.h"
+#include "game/server/wall_launch.h"
+#include "game/server/double_jump_power.h"
+#include "game/server/weapon_stockpile_bonus.h"
+#include "game/server/status_effect_capacity.h"
 #include "game/server/trigger_slip_diag.h"
 #include "game/server/trigger_starttouch_dedupe.h"
 #include "game/server/trigger_clientpredict.h"
@@ -203,6 +227,7 @@
 #include "game/server/sound.h"
 #include "game/shared/weapon_heat.h"
 #include "game/server/akimbo.h"
+#include "game/server/weapon_activity_modifiers.h"
 #include "public/edict.h"
 #include "game/shared/sdk_entity_state.h"
 
@@ -245,6 +270,8 @@ void ScriptConstantRegistrationCallback(CSquirrelVM* s)
 {
 	Script_RegisterListenServerConstants(s);
 	TrackEntity_RegisterScriptConstants(s);
+	ArmoredLeap_RegisterScriptConstants(s);
+	EntityScriptExt_RegisterScriptConstants(s);
 }
 
 // Forwards the detour target-failure reports to the SDK log. Without a sink they
@@ -312,6 +339,8 @@ void Systems_Init()
 		Assert(0);
 		Error(eDLL_T::COMMON, 0xBAD0C0DE, "Failed to detour process: error code = %08x\n", hr);
 	}
+	else
+		Detour_LinkSharedTargets();
 
 	initTimer.End();
 	Msg(eDLL_T::NONE, "%-16s '%10.6f' seconds ('%12lu' clocks)\n",
@@ -355,6 +384,8 @@ void Systems_Shutdown()
 
 	CFastTimer shutdownTimer;
 	shutdownTimer.Start();
+
+	Detour_UnlinkSharedTargets();
 
 	// Begin the detour transaction to unhook the process
 	DetourTransactionBegin();
@@ -571,19 +602,34 @@ REGISTER(VConnectPasswordGate);   // REGISTER SERVER ONLY! challenge-bind the co
 	REGISTER(VRemoteFuncBufferExpand);  // REGISTER SERVER ONLY! heap-backs Remote_RegisterClientFunction buffer (16KB/256 -> 256KB/2048) so S21 scripts can register all client functions
 	REGISTER(VZiplineValidationDedi);
 	REGISTER(VStatusEffectParseFix);    // REGISTER SERVER ONLY! NOPs the S3 status_effect_types.txt parser's fatal 'Code expects disable_wall_run_and_double_jump' so the dedi boots with the S21-aligned enum
+	REGISTER(VStatusEffectCapacity);    // REGISTER SERVER ONLY! [SE-CAPACITY] 256 status-effect types (8-bit type in seComboVars)
 	REGISTER(VMapEntitySkipper);        // REGISTER SERVER ONLY! [MAP-SKIP] refuses crasher classes (prop_dynamic/info_target/...) baked into the.bsp LUMP_ENTITIES during MapEntity_ParseEntity -- unreachable by VPK strip / script BlockMapEntityParseCreationOf
 	REGISTER(VGibFinderGuard);          // REGISTER SERVER ONLY! [GIB-FINDERS]/[GIB-GUARD] resolve gibModels finders + fail-closed HasGibModel / gib-spawn
 	REGISTER(VScriptRemoteS2CBridge);   // REGISTER SERVER ONLY! [BRIDGE-S2C-SR] hooks the shared S3 Remote_CallFunction_NonReplay/_Replay/_UI impl and forwards name-carried S->C remote calls to the S21 client on the Bridge S2C ScriptRemote lane (bridge_s2c_scriptremote, default on)
 	REGISTER(VExtendedRangeUse);        // REGISTER SERVER ONLY! [EXT-USE] injects CodeCallback_GetExtendedRangeUseEntitiesForPlayer results into the native use-candidate list (Alter remote deathbox + Void Nexus)
 	REGISTER(VJetDrive);                // REGISTER SERVER ONLY! [JETDRIVE] from-scratch port of Vantage's tactical recall-launch movement subsystem -- S3 has zero trace of it (Season 14+ content, confirmed absent from the whole binary via ), unlike the S21 client which has it natively..
-	REGISTER(VPlayerFov);               // REGISTER SERVER ONLY! [PLAYER-FOV] CPlayer.GetDefaultFOV native (settings player_fov * cl_fovScale userinfo)
+	REGISTER(VPlayerFov);               // REGISTER SERVER ONLY! [PLAYER-FOV] CPlayer.GetDefaultFOV native (settings fov * cl_fovScale userinfo)
 	REGISTER(VTrackEntity);             // REGISTER SERVER ONLY! [TRACK-ENT] ClearTrackEntitySettings detour so S21 camera sidecar resets with the S3 native
 	REGISTER(VPlayerLaunch);            // REGISTER SERVER ONLY! [PLAYER-LAUNCH] CheckJumpButton-gated ApplyPlayerLaunch parity inside FullWalkMove
 	REGISTER(VSkydiveBridge);           // REGISTER SERVER ONLY! [SKYDIVE-SIM] per-executed-usercmd skydive simulation through the engine's own skydive wrappers. S21 predicts the skydive client-side every command; a server copy on a script thread integrates the same springs at a different rate and can never agree with it.
+	REGISTER(VSkywardBridge);           // REGISTER SERVER ONLY! [SKYWARD] server-authoritative skyward launch; movement rides FullTossMove via VSkydiveBridge
+	REGISTER(VGlideBridge);            // REGISTER SERVER ONLY! [GLIDE] S21 script-activated glide replaces the stock check/flight on the server half
+	REGISTER(VPlayerStance);            // REGISTER SERVER ONLY! [STANCE] instant stand/crouch helpers (leap start, drag revive)
+	REGISTER(VEntityScriptExt);         // REGISTER SERVER ONLY! [NEVER-CRUSH]/[DISSOLVE] S21 entity natives: never-crush pushes, velocity at point, Dissolve defaults
+	REGISTER(VScriptMoverTraversal);     // REGISTER SERVER ONLY! [TRAV] CScriptMover non-physics traversal natives (Newcastle Mobile Shield)
+	REGISTER(VArmoredLeap);             // REGISTER SERVER ONLY! [AL-PHASE] Newcastle armored leap natives, phase machine and per-tick movement
+	REGISTER(VClassVarNatives);          // REGISTER SERVER ONLY! [CLASSVAR] replays Player_SetClassVar writes after each settings rebuild (legend change), matching the client sticky replay
+	REGISTER(VWeaponLastFireTime);      // REGISTER SERVER ONLY! update_player_last_fire_time on the S3 attack paths
+	REGISTER(VOffhandMeleeCancel);      // REGISTER SERVER ONLY! S21 offhand_cancelled_by_melee rule on the S3 melee test
+	REGISTER(VOffhandJumpToggle);       // REGISTER SERVER ONLY! [OFFHAND-JUMP] S21 offhand_deactivate_on_jump_toggle_or_release select/holster on the server offhand frames
+	REGISTER(VWeaponRegen);             // REGISTER SERVER ONLY! S21 regen_ammo_forced_delay on the server clip regen
+	REGISTER(VJetpackBridge);           // REGISTER SERVER ONLY! [JETPACK] S21 jetpack flight model on the S3 server half (check/apply/meter detours, post-effect drag and gravity)
+	REGISTER(VMissileExpandContract);   // REGISTER SERVER ONLY! [MISSILE-EC] S21 expand-contract missile path, wiggle, grace period and grid target natives
 	REGISTER(VInfiniteAmmoDedi);        // REGISTER SERVER ONLY! [INF-AMMO] InfiniteAmmoState enforcement on the S3 native ammo paths; patterns are r5apex_ds-only (client twin left unhooked)
 	REGISTER(VWeaponAmmoPoolMod);       // REGISTER SERVER ONLY! [ALT-AMMO] per-entity WeaponInfo clone so a mod can override ammo_pool_type (field sits outside the S3 0x1150 moddable block)
 	REGISTER(VConsumableInvBridge);     // REGISTER SERVER ONLY! [CONSUMABLEINV-FULL] u16 type shadow for m_consumableInventory (S3 u8 type truncates loot idx>=256)
 	REGISTER(VMantleBoostBridge);       // REGISTER SERVER ONLY! [MANTLE-BOOST] mantle-exit boost: one TraversalMove detour -- pre-orig sweet-spot, post-orig finish boost + forced Jump
+	REGISTER(VMantleBoostVmProbe);      // REGISTER SERVER ONLY! [MB-VM] sprint start/stop trace around a mantle boost (sdk_mantle_boost_vm_probe)
 	REGISTER(VMantleBoostAnimServer);   // REGISTER SERVER ONLY! [MB-ANIM] ACT_MP_MANTLE_BOOST_AIR selection in CMultiPlayerAnimState::CalcMainActivity
 	REGISTER(VMoveScaleWeaponParity);   // REGISTER SERVER ONLY! move-scale weapon term -> client parity
 	REGISTER(VHalfDuckZipParity);       // REGISTER SERVER ONLY! [HALFDUCK] m_doingHalfDuck is latched once at duck-start and is not networked; duck is suppressed while ziplining, so the two engines sample it one command apart and only one applies the (standHull-duckHull)*0.5 origin step. Forces the latch on a duck that begins just after a zipline release. Twin: VHalfDuckZipParityClient.
@@ -591,6 +637,7 @@ REGISTER(VConnectPasswordGate);   // REGISTER SERVER ONLY! challenge-bind the co
 	REGISTER(VSurfPropIdUnclamp);       // REGISTER SERVER ONLY! [SURFPROP-ID] S3 remaps surface id >127 to default; S21 does not. Digital_Water is 133.
 	REGISTER(VRepelRealmGate);          // REGISTER SERVER ONLY! [REPEL-REALM] player-vs-player repel pass gated on shared m_realmsBitMask; disjoint-realm players no longer push each other
 	REGISTER(VWeaponRealmFollow);       // REGISTER SERVER ONLY! [REALM-FOLLOW] carried weapons adopt owner realms at activation + on every SetRealmsBitMask (opponent tracers)
+	REGISTER(VRealmAdopt);              // REGISTER SERVER ONLY! [REALM-ADOPT] all-realms script entities adopt owner/parent realms; realm-filtered world FX
 	REGISTER(VHolsterReselect);         // REGISTER SERVER ONLY! [HOLSTER-RESEL] holstered 0xFD + leftover activeWeapons must still write m_selectedWeapons
 	REGISTER(VZiplineExitParity);       // REGISTER SERVER ONLY! [ZIP-EXIT] auto-detach exit-velocity rewrite (client rope clamp + vertical magnitude) so both engines leave the rope with the same velocity
 	REGISTER(VMeleeActivityTraceServer);   // REGISTER SERVER ONLY! [MELEE-ACT] bridge_melee_trace: melee custom-activity lifetime, diffed against the client twin
@@ -598,8 +645,12 @@ REGISTER(VConnectPasswordGate);   // REGISTER SERVER ONLY! challenge-bind the co
 	REGISTER(VAllianceCompat);          // REGISTER SERVER! FreeDM/Control alliance matrix + IsEnemyTeam detour (SetTeamIsInAlliance native)
 	REGISTER(VDeathFieldSystem);        // REGISTER SERVER! SetDeathFieldParams hook + g_pWorldEntity resolve for realm rings
 	REGISTER(VSlideSuperJumpBridge);    // REGISTER SERVER ONLY! [SSJ] slide super-jump twin (boosted_slide_jump mod): airborne second press within 0.3s of a slide-jump gets sqrt(2gh) on the S3 Jump detour
+	REGISTER(VDodgeRules);              // REGISTER SERVER ONLY! [DODGE] airborne dodge rules + ducked dodge on the S3 Jump detour (client twin in game/client/dodge_rules.cpp)
 	REGISTER(VTapStrafeBridge);         // REGISTER SERVER ONLY! [TAPSTRAFE] Gap B: from-scratch port of 's "jump grace"/tap-strafe (lurch) assist -- S3 has zero trace of the mechanic (confirmed via convar-string sweep, only 2 leftover ConVar-registration stubs survive). ONE detour on CGameMovement::FullWalkMove, airborne-gated, mantle_boost_disables_tap_strafes-gated via MantleBoost_ShouldSuppressTapStrafe. See tapstrafe.h.
 	REGISTER(VWallClimb);               // REGISTER SERVER ONLY! [WALLCLIMB] remap S21-layout wallrun/climb finders + bind disable_wall_run. Tap sampled from VJetDrive FullWalkMove.
+	REGISTER(VWallLaunch);              // REGISTER SERVER ONLY! [WALL-LAUNCH] Sparrow climb high jump + edge air; twin: VWallLaunchClient.
+	REGISTER(VDoubleJumpPower);         // REGISTER SERVER ONLY! [DJ-POWER] Sparrow double-jump power drain/refill; twin: VDoubleJumpPowerClient.
+	REGISTER(VWeaponStockpileBonus);    // REGISTER SERVER ONLY! [STOCKPILE-BONUS] per-weapon ammo_stockpile_max raise (Sparrow Bocek arrows).
 	REGISTER(VTriggerSlipDiag);         // REGISTER SERVER ONLY! [SLIP-TOUCH]/[SLIP-END]/[SLIP-FORCE] enter/leave/force diag for CTriggerSlip (promoted CTriggerSlipSphere). sdk_slip_diag 0/1/2. StartTouch EndTouch FullWalkMove.
 	REGISTER(VBridgeFireClock);         // REGISTER SERVER ONLY! [FIRE-CLOCK] bounded command_time stamp on weapon-sim latestPredictedTime for one shared fire clock.
 	REGISTER(VTriggerStartTouchDedupe); // REGISTER SERVER ONLY! [TRIG-DEDUP] CBaseTrigger::StartTouch fires OnStartTouch + the script m_enterCallback on EVERY call, not just the first (EndTouch guards the same lookup) -- one detour restores the guard for the 19 trigger classes that reach that body.
@@ -672,6 +723,8 @@ REGISTER(VConnectPasswordGate);   // REGISTER SERVER ONLY! challenge-bind the co
 	REGISTER(VScript);
 	REGISTER(VScriptShared);
 	REGISTER(VScriptServer);
+	REGISTER(VScriptConVarGuard);
+	REGISTER(VScriptWraps);
 
 	// Squirrel
 	REGISTER(VSquirrelAPI);
@@ -722,6 +775,8 @@ REGISTER(VConnectPasswordGate);   // REGISTER SERVER ONLY! challenge-bind the co
 	REGISTER(VBaseAnimating);
 	REGISTER(VPlayer);
 	REGISTER(VTranslocation);          // REGISTER SERVER ONLY! Loba toss-hold + drop-click latch
+	REGISTER(VWeaponCustomActivity);   // REGISTER SERVER ONLY! S21 WCAF_* flags on the S3 weapon
+	REGISTER(VEnergize);               // REGISTER SERVER ONLY! resolves SetIdealWeaponActivity before translocation attaches
 	REGISTER(VAI_BaseNPC);
 	REGISTER(VPlayerMove);
 	REGISTER(VBridgeCmdChain);
@@ -734,6 +789,7 @@ REGISTER(VConnectPasswordGate);   // REGISTER SERVER ONLY! challenge-bind the co
 	REGISTER(VSoundBridge);         // REGISTER SERVER ONLY! EmitSoundOnEntity -> SVC_Sounds broadcast (native send is CSOMET-dead on dedi)
 	REGISTER(VWeaponHeat);
 	REGISTER(VAkimboBridge);
+	REGISTER(VWeaponActivityModifiers); // REGISTER SERVER ONLY! [WEAP-1P-MODS] weapon activitymodifier1p + jet_driving in the 1p sequence pick; owns the GetActivityModifiers detour
 
 
 

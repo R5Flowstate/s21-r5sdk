@@ -272,6 +272,9 @@ struct PakTracker_s
 	char gap_9DC04[522240];
 };
 
+// loadedAssetIndices runs on into gap_9DC04; the append must stop at the struct's end.
+#define PAK_TRACKER_INDEX_CAPACITY ((sizeof(PakTracker_s) - offsetof(PakTracker_s, loadedAssetIndices)) / sizeof(int))
+
 struct PakGuidDescriptor_s
 {
 	int unk1;

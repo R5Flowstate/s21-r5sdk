@@ -120,6 +120,19 @@ static bool SV_BanPend_Pop(BanPend_t& out)
 	return true;
 }
 
+// Runs on the ban-check worker; the disconnect itself must happen on the main frame.
+static void SV_BanPend_Reject(const int nSlot, const PlatformUserId_t nUserID)
+{
+	g_TaskQueue.Dispatch([nSlot, nUserID]
+		{
+			if (!g_pServer || nSlot < 0 || nSlot >= MAX_PLAYERS)
+				return;
+			CClient* const pClient = g_pServer->GetClient(nSlot);
+			if (pClient && pClient->GetNetChan() && pClient->GetPlatformUserId() == nUserID)
+				pClient->Disconnect(REP_MARK_BAD, "#Valve_Reject_Banned");
+		}, 0);
+}
+
 static void SV_BanPend_DrainOne(void)
 {
 	BanPend_t e;
@@ -128,7 +141,10 @@ static void SV_BanPend_DrainOne(void)
 
 	if ((Plat_FloatTime() - e.flQueued) > 30.0)
 	{
-		InterlockedIncrement(&s_nBanPendStale);
+		if (InterlockedIncrement(&s_nBanPendStale) <= 8)
+			Warning(eDLL_T::SERVER, "[BAN] stale-reject slot=%d uid=%llu\n",
+				e.nSlot, static_cast<unsigned long long>(e.nUserID));
+		SV_BanPend_Reject(e.nSlot, e.nUserID);
 		return;
 	}
 	if (!g_pServer || e.nSlot < 0 || e.nSlot >= MAX_PLAYERS)
@@ -152,7 +168,7 @@ static void SV_BanPend_DrainOne(void)
 			if (InterlockedIncrement(&s_nBanBusyReject) <= 8)
 				Warning(eDLL_T::SERVER, "[BAN] busy-reject slot=%d uid=%llu\n",
 					e.nSlot, static_cast<unsigned long long>(e.nUserID));
-			pClient->Disconnect(REP_MARK_BAD, "#Valve_Reject_Banned");
+			SV_BanPend_Reject(e.nSlot, e.nUserID);
 		}
 		return;
 	}
@@ -554,6 +570,8 @@ CClient* CServer::ConnectClient(CServer* pServer, user_creds_s* pChallenge)
 
 	for (auto& callback : !PluginSystem()->GetConnectClientCallbacks())
 	{
+		if (!pClient)
+			break;
 		if (!callback.Function()(pServer, pClient, pChallenge))
 		{
 			pClient->Disconnect(REP_MARK_BAD, "#Valve_Reject_Banned");

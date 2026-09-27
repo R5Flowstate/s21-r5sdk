@@ -14,6 +14,7 @@
 //=============================================================================//
 
 #include "core/stdafx.h"
+#include "engine/agent_link.h"
 #include "common/callback.h"
 #include "game/shared/scriptnetdata_limits.h"
 #include "engine/server/server.h"
@@ -52,12 +53,26 @@
 #include "game/server/jetdrive.h"
 #include "game/server/trigger_updraft.h"
 #include "game/server/skydive.h"
+#include "game/server/jetpack.h"
+#include "game/server/glide.h"
+#include "game/server/wall_launch.h"
+#include "game/server/double_jump_power.h"
+#include "game/server/weapon_stockpile_bonus.h"
+#include "game/server/mantle_boost.h"
+#include "game/server/armored_leap.h"
+#include "game/server/drag_revive.h"
+#include "game/server/entity_script_ext.h"
+#include "game/server/skyward.h"
+#include "game/server/missile_expand_contract.h"
 #include "game/server/cmd_recorder.h"
+#include "game/server/demo_natives_sv.h"
 #include "game/server/mapedit_paks.h"
+#include "game/server/mapedit_models.h"
 #include "game/server/bot_cmd.h"
 #include "game/server/player_overheat.h"
 #include "game/server/context_action.h"
 #include "game/server/translocation.h"
+#include "game/server/weapon_custom_activity.h"
 #include "game/shared/status_effects_sdk.h"
 #include "game/shared/util_shared.h"
 #include "game/client/vscript_player.h"
@@ -477,7 +492,7 @@ static SQRESULT ServerScript_SendServerTextMessage(HSQUIRRELVM v)
     const SQChar* pszMessage = nullptr;
     SQBool bAdminMsg = false;
 
-    if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pPlayer)))
+    if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pPlayer)) || !pPlayer)
         return SQ_ERROR;
 
     sq_getstring(v, 2, &pszPrefix);
@@ -519,7 +534,7 @@ static SQRESULT ServerScript_ChatBuilder(HSQUIRRELVM v)
 {
     CPlayer* pPlayer = nullptr;
 
-    if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pPlayer)))
+    if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pPlayer)) || !pPlayer)
         return SQ_ERROR;
 
     ChatBuilderSeg_t segs[kChatBuilderMaxSegments] = {};
@@ -578,7 +593,7 @@ static SQRESULT ServerScript_ChatBuilderRainbow(HSQUIRRELVM v)
     SQFloat flSustain = 0.0f;
     SQFloat flFade = 0.0f;
 
-    if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pPlayer)))
+    if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pPlayer)) || !pPlayer)
         return SQ_ERROR;
 
     sq_getstring(v, 2, &pszText);
@@ -1820,6 +1835,7 @@ void Script_RegisterServerFunctions(CSquirrelVM* s)
     Script_RegisterCoreServerFunctions(s);
     Script_RegisterAdminServerFunctions(s);
     Script_RegisterDedicatedS21ServerNatives(s);
+    EntityScriptExt_RegisterServerFunctions(s);
 
     // NOTE: plugin functions must always come after SDK functions!
     for (auto& callback : !PluginSystem()->GetRegisterServerScriptFuncsCallbacks())
@@ -1950,6 +1966,11 @@ void Script_RegisterCoreServerFunctions(CSquirrelVM* s)
     s->RegisterConstant("FX_PATTACH_WEAPON_CHARGE_FRACTION_CURVED", 0x18);
     s->RegisterConstant("FORCE_STANCE_STAND", 0);
     s->RegisterConstant("FORCE_STANCE_CROUCH", 1);
+    s->RegisterConstant("PLAYER_SKYWARD_LAUNCH_STATE_NONE", 0);
+    s->RegisterConstant("PLAYER_SKYWARD_LAUNCH_STATE_DEPLOY", 1);
+    s->RegisterConstant("PLAYER_SKYWARD_LAUNCH_STATE_HOVER", 2);
+    s->RegisterConstant("PLAYER_SKYWARD_LAUNCH_STATE_LAUNCH", 3);
+    s->RegisterConstant("PLAYER_SKYWARD_LAUNCH_STATE_TRANSITION", 4);
     s->RegisterConstant("WT_GADGET", 9);
     s->RegisterConstant("TRACE_COLLISION_GROUP_NPC_MOVEMENT", 10); // S3 engine index
     // Newer script alias of the restrict-who-targets bit (same value as AI_AP_FLAG_TITAN_ONLY).
@@ -2037,7 +2058,10 @@ void Script_RegisterAdminServerFunctions(CSquirrelVM* s)
     DEFINE_SERVER_SCRIPTFUNC_NAMED(s, GetNumHumanPlayers, "Gets the number of human players on the server", "int", "", false);
     DEFINE_SERVER_SCRIPTFUNC_NAMED(s, GetNumFakeClients, "Gets the number of bot players on the server", "int", "", false);
     CmdRecorder_RegisterGlobalFuncs(s);
+    DemoSv_RegisterServerFunctions(s);
     MapEditPaks_RegisterServerFunctions(s);
+    MapEditModels_RegisterServerFunctions(s);
+    AgentLink_RegisterScriptFunctions(s);
 
     DEFINE_SERVER_SCRIPTFUNC_NAMED(s, CreateFakePlayer, "Creates a fake player and returns the edict index (-1 on failure). Use GetPlayerArray() to get entity.", "int", "string name, int team", false);
 
@@ -2071,6 +2095,7 @@ static void Script_RegisterServerEntityClassFuncs()
     WeaponScriptVars_RegisterWeaponTypeDisableFuncs(g_serverScriptEntityStruct);
     Translocation_RegisterProjectileFuncs(g_serverScriptEntityStruct);
     Script_RegisterDedicatedEntityNatives(g_serverScriptEntityStruct);
+    EntityScriptExt_RegisterEntityFunctions(g_serverScriptEntityStruct);
 }
 //---------------------------------------------------------------------------------
 static void Script_RegisterServerPlayerClassFuncs()
@@ -2128,6 +2153,15 @@ static void Script_RegisterServerPlayerClassFuncs()
     JetDrive_RegisterScriptFunctions(g_serverScriptPlayerStruct);
     UpdraftBridge_RegisterScriptFunctions(g_serverScriptPlayerStruct);
     SkydiveBridge_RegisterScriptFunctions(g_serverScriptPlayerStruct);
+    Jetpack_RegisterScriptFunctions(g_serverScriptPlayerStruct);
+    Glide_RegisterScriptFunctions(g_serverScriptPlayerStruct);
+    WallLaunch_RegisterScriptFunctions(g_serverScriptPlayerStruct);
+    DoubleJumpPower_RegisterScriptFunctions(g_serverScriptPlayerStruct);
+    MantleBoost_RegisterScriptFunctions(g_serverScriptPlayerStruct);
+    ArmoredLeap_RegisterScriptFunctions(g_serverScriptPlayerStruct);
+    DragRevive_RegisterScriptFunctions(g_serverScriptPlayerStruct);
+    EntityScriptExt_RegisterPlayerFunctions(g_serverScriptPlayerStruct);
+    SkywardBridge_RegisterScriptFunctions(g_serverScriptPlayerStruct);
     CmdRecorder_RegisterPlayerFuncs(g_serverScriptPlayerStruct);
     BotCmd_RegisterPlayerFuncs(g_serverScriptPlayerStruct);
     Translocation_RegisterPlayerFuncs(g_serverScriptPlayerStruct);
@@ -2188,6 +2222,9 @@ static void Script_RegisterServerWeaponClassFuncs()
     AkimboBridge_RegisterWeaponFuncs(g_serverScriptWeaponStruct);
     PlayerOverheat_RegisterWeaponFuncs(g_serverScriptWeaponStruct);
     Translocation_RegisterWeaponFuncs(g_serverScriptWeaponStruct);
+    WeaponCustomAct_RegisterWeaponFuncs(g_serverScriptWeaponStruct);
+    WeaponStockpileBonus_RegisterWeaponFuncs(g_serverScriptWeaponStruct);
+    MissileExpandContract_RegisterWeaponFuncs(g_serverScriptWeaponStruct);
 }
 
 //---------------------------------------------------------------------------------

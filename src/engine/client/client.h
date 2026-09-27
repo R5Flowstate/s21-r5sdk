@@ -479,6 +479,7 @@ public:
 	bool SendNetMsgEx(CNetMessage* pMsg, bool bLocal, bool bForceReliable, bool bVoice);
 
 	bool Authenticate(const char* const playerName, char* const reasonBuf, const size_t reasonBufLen);
+	bool ConsumeHostProof(void);
 	bool Connect(const char* szName, CNetChan* pNetChan, bool bFakePlayer,
 		CUtlVector<NET_SetConVar::cvar_t>* conVars, char* szMessage, int nMessageSize);
 	void Disconnect(const Reputation_t nRepLvl, const char* szReason, ...);
@@ -638,6 +639,8 @@ public:
 		m_flBridgeRtt = 0.0f;
 		m_flBridgeRttTime = 0.0;
 		m_bBridgeRttValid = false;
+		m_bIdentityVerified = false;
+		m_bLocalHost = false;
 	}
 
 public: // Inlines
@@ -682,6 +685,14 @@ public: // Inlines
 	float GetBridgeRtt(void) const { return m_flBridgeRtt; }
 	double GetBridgeRttTime(void) const { return m_flBridgeRttTime; }
 
+	// True only when the platform uid is proven: a verified join token, or the
+	// loopback host. Anything keyed by uid (prefs, stats) must check this.
+	void SetIdentityVerified(bool bVerified) { m_bIdentityVerified = bVerified; }
+	bool IsIdentityVerified(void) const { return m_bIdentityVerified; }
+	// Proved it runs on the server's own machine (see host_proof.h).
+	void SetLocalHost(bool bLocal) { m_bLocalHost = bLocal; }
+	bool IsLocalHost(void) const { return m_bLocalHost; }
+
 private:
 	void BuildCommsBanDisplayMessage(const char* pszReasonStr, const char* const pszExpiryDateTime);
 
@@ -713,6 +724,8 @@ private:
 	float m_flBridgeRtt;
 	double m_flBridgeRttTime;
 	bool m_bBridgeRttValid;
+	bool m_bIdentityVerified;
+	bool m_bLocalHost;
 };
 
 void BridgeLatency_OnClientReport(CClient* pClient, unsigned nRttMs);
@@ -773,4 +786,6 @@ class VClient : public IDetour
 	virtual void Detour(const bool bAttach) const;
 };
 ///////////////////////////////////////////////////////////////////////////////
+void HostProof_Publish(const int nPort);
+
 #endif // CLIENT_DLL

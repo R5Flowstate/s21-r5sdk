@@ -18,13 +18,16 @@
 #include "game/shared/dt_extend_diag.h"
 #include "game/shared/dt_extend_system14.h"
 #include "game/shared/s21_dt_schema.h"
+#include "game/shared/status_effect.h"
 #include "game/shared/scriptnetdata_ext.h"
 #include "common/global.h" // host_timescale
 #include "game/server/consumable_inv.h"
 #include "game/server/jetdrive.h"
+#include "game/server/weapon_custom_activity.h"
 #include "game/server/player_launch.h"
 #include "game/server/trigger_gravity.h"
 #include "game/server/trigger_updraft.h"
+#include "game/server/skyward.h"
 #include "game/server/track_entity.h"
 #include "game/server/zipline_extend_state.h"
 #include "game/server/poseparam_ext.h"
@@ -53,6 +56,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <cmath>
+#include <cfloat>
 #include <cstdio>
 #include <ctime>
 
@@ -180,6 +184,18 @@ const DTExtendProp s_extendProps[] = {
 	EI("DT_LocalPlayerExclusive", "m_playerLaunchLock3pRotation"),
 	EV("DT_LocalPlayerExclusive", "m_playerLaunchVelocity"),
 	ET("DT_LocalPlayerExclusive", "m_playerLaunchStartTime"),
+	EF("DT_LocalPlayerExclusive", "m_skywardDeployEndTime"),
+	EF("DT_LocalPlayerExclusive", "m_skywardDeploySpeed"),
+	EF("DT_LocalPlayerExclusive", "m_skywardOffsetSpeed"),
+	EV("DT_LocalPlayerExclusive", "m_skywardDeployStartPos"),
+	// Script-activated glide state the S3 player has no member for; the client cancels a glide whose activate reads 0.
+	EI("DT_LocalPlayerExclusive", "m_activateGlide"),
+	ET("DT_LocalPlayerExclusive", "m_glideUpwardsBoostEndTime"),
+	EI("DT_LocalPlayerExclusive", "m_touchedGroundSinceLastGlide"),
+
+	// --- DT_Local (2) --- S3 CPlayerLocalData has neither; the S21 client times the jetpack post effect and the glide engage debounce from them.
+	ET("DT_Local", "m_jetpackDeactivateTime"),
+	ET("DT_Local", "m_prevJumpPressTime"),
 
 	// --- DT_LootGrabber (4) --- Client offsets/widths: m_impactEffectColorID 5600 (1B), m_lootGrabberType 5602 (1B), m_lootBeingGrabbed 5608 (4B), m_lootGrabDist 5612 (float). m_lootGrabberType: IsVendingMachine == 1, IsLinkedBox == 2. m_minimapData deliberately absent -- CBaseEntity already sends it via nested DT_BaseEntity; re-declaring would double it.
 	EI("DT_LootGrabber", "m_impactEffectColorID"),
@@ -1177,6 +1193,8 @@ int DTExtend_BaseOffset(const char* tableName)
 	// [JETDRIVE] Value-proxied only -- never consumed today, same as DT_WeaponX_LocalWeaponData below. m_Local is embedded directly in CPlayer, and sizeof(CPlayer) is 32496 on this dedi (factory allocs and zeroes exactly that), so 20000 is NOT tail slack: it is mid-class, inside the base-class field span.
 	// Never point a NON-proxied prop here.
 	if (strcmp(tableName, "DT_LocalPlayerExclusive") == 0)  return 20000;
+	// Value-proxied only; relative to CPlayer::m_Local, not the player.
+	if (strcmp(tableName, "DT_Local") == 0)                 return 0x38;
 	// Real, measured slack -- not a margin guess: the S21Class registration allocates CLootRoller at 6064 while its S3 parent CPhysicsProp ends at 5200, so [5200, 6064) is 864 bytes no native code touches. m_tier lands at 5200 and m_hasVaultKey at 5204.
 	if (strcmp(tableName, "DT_LootRoller") == 0)            return 5200;
 	// Same measurement for the two prop_dynamic-backed S21 classes: the parent CDynamicProp allocates 4912 (Create immediate 0x1330) and the S21Class registration grows it to 6112, so [4912, 6112) is untouched by native code.
@@ -3078,10 +3096,97 @@ PX_WIRE_PROXY(PxArmoredLeapAirPos_ValueProxy, m_armoredLeapAirPos)
 PX_WIRE_PROXY(PxArmoredLeapEndPos_ValueProxy, m_armoredLeapEndPos)
 PX_WIRE_PROXY(PxLaserSightColor_ValueProxy, m_laserSightColor)
 PX_WIRE_PROXY(PxRagdollCreationOrigin_ValueProxy, m_ragdollCreationOrigin)
-PX_WIRE_PROXY(PxSkywardObstacleAvoidanceEndPos_ValueProxy, m_skywardObstacleAvoidanceEndPos)
 PX_WIRE_PROXY(PxSkywardOffset_ValueProxy, m_skywardOffset)
+PX_WIRE_PROXY(PxSkywardDeployEndTime_ValueProxy, m_skywardDeployEndTime)
+PX_WIRE_PROXY(PxSkywardDeploySpeed_ValueProxy, m_skywardDeploySpeed)
+PX_WIRE_PROXY(PxActivateGlide_ValueProxy, m_activateGlide)
+PX_WIRE_PROXY(PxGlideUpwardsBoostEndTime_ValueProxy, m_glideUpwardsBoostEndTime)
+PX_WIRE_PROXY(PxTouchedGroundSinceLastGlide_ValueProxy, m_touchedGroundSinceLastGlide)
+PX_WIRE_PROXY(PxSkywardOffsetSpeed_ValueProxy, m_skywardOffsetSpeed)
+PX_WIRE_PROXY(PxSkywardDeployStartPos_ValueProxy, m_skywardDeployStartPos)
 
-BX_WIRE_PROXY(BxWeaponTypeDisabledFlags_ValueProxy, m_weaponTypeDisabledFlags)
+// Idles at vec3_invalid, not zero: the S21 client steers the leader toward this point whenever it is valid.
+static void __fastcall PxSkywardObstacleAvoidanceEndPos_ValueProxy(void* /*pProp*/, void* pStruct,
+	void* /*pData*/, void* pOut, int /*iElement*/, int /*objectID*/)
+{
+	if (!pOut)
+		return;
+
+	float* const pDst = reinterpret_cast<float*>(pOut);
+	pDst[0] = FLT_MAX;
+	pDst[1] = FLT_MAX;
+	pDst[2] = FLT_MAX;
+	if (!pStruct)
+		return;
+
+	PlayerExtendBundle bundle;
+	if (!PlayerExtend_GetBundle(pStruct, &bundle))
+		return;
+	memcpy(pDst, bundle.player.m_skywardObstacleAvoidanceEndPos,
+		sizeof(bundle.player.m_skywardObstacleAvoidanceEndPos));
+}
+
+static const struct { const char* propName; DTExtendProxyFn proxy; } s_skywardExclusiveWireProxies[] = {
+	{ "m_skywardDeployEndTime",  &PxSkywardDeployEndTime_ValueProxy },
+	{ "m_skywardDeploySpeed",    &PxSkywardDeploySpeed_ValueProxy },
+	{ "m_skywardOffsetSpeed",    &PxSkywardOffsetSpeed_ValueProxy },
+	{ "m_skywardDeployStartPos", &PxSkywardDeployStartPos_ValueProxy },
+};
+
+static const struct { const char* propName; DTExtendProxyFn proxy; } s_glideExclusiveWireProxies[] = {
+	{ "m_activateGlide",                &PxActivateGlide_ValueProxy },
+	{ "m_glideUpwardsBoostEndTime",     &PxGlideUpwardsBoostEndTime_ValueProxy },
+	{ "m_touchedGroundSinceLastGlide",  &PxTouchedGroundSinceLastGlide_ValueProxy },
+};
+
+// DT_Local props are handed &CPlayer::m_Local; the sidecar is keyed on the player.
+static constexpr ptrdiff_t kPlayerLocalDataOffset = 0x5A90;
+
+static void* PlayerExtend_LocalDataPlayer(void* pStruct)
+{
+	void* pPlayer = nullptr;
+	if (pStruct)
+	{
+		void* const pOwner = static_cast<uint8_t*>(pStruct) - kPlayerLocalDataOffset;
+		// Test the struct itself first so the subtraction is only trusted inside a player.
+		if (SDKEntityState_Resolve(SDKEntityState_GetHandle(pStruct), ESide::Server) == pStruct)
+			pPlayer = pStruct;
+		else if (SDKEntityState_Resolve(SDKEntityState_GetHandle(pOwner), ESide::Server) == pOwner)
+			pPlayer = pOwner;
+	}
+
+	if (!pPlayer)
+	{
+		static volatile LONG s_nMiss = 0;
+		if (pStruct && InterlockedIncrement(&s_nMiss) == 1)
+			Warning(eDLL_T::SERVER, "[LOCAL-WIRE] DT_Local struct %p is not CPlayer+0x%X -- appended DT_Local props sent as 0\n",
+				pStruct, static_cast<unsigned int>(kPlayerLocalDataOffset));
+	}
+	return pPlayer;
+}
+
+#define PX_LOCAL_WIRE_PROXY(fn, member)                                        \
+	static void __fastcall fn(void* /*pProp*/, void* pStruct, void* /*pData*/, \
+		void* pOut, int /*iElement*/, int /*objectID*/) \
+	{                                                                          \
+		PlayerExtend_EmitPlayer(PlayerExtend_LocalDataPlayer(pStruct), pOut,   \
+			offsetof(PlayerExtendWire, member), sizeof(PlayerExtendWire::member)); \
+	}
+
+PX_LOCAL_WIRE_PROXY(PxJetpackDeactivateTime_ValueProxy, m_jetpackDeactivateTime)
+PX_LOCAL_WIRE_PROXY(PxPrevJumpPressTime_ValueProxy, m_prevJumpPressTime)
+
+#undef PX_LOCAL_WIRE_PROXY
+
+static void __fastcall BxWeaponTypeDisabledFlags_ValueProxy(void* /*pProp*/, void* pStruct, void* /*pData*/,
+	void* pOut, int /*iElement*/, int /*objectID*/)
+{
+	PlayerExtend_EmitBCC(pStruct, pOut,
+		offsetof(BCCExtendWire, m_weaponTypeDisabledFlags), sizeof(BCCExtendWire::m_weaponTypeDisabledFlags));
+	if (pOut)
+		*static_cast<int32_t*>(pOut) = static_cast<int32_t>(
+			WeaponScriptVars_WeaponTypesToS21(static_cast<uint32_t>(*static_cast<int32_t*>(pOut))));
+}
 BX_WIRE_PROXY(BxWeaponInventorySlotLockedFlags_ValueProxy, m_weaponInventorySlotLockedFlags)
 BX_WIRE_PROXY(BxPhaseShiftType_ValueProxy, m_phaseShiftType)
 BX_WIRE_PROXY(BxAkimboState_ValueProxy, m_akimboState)
@@ -3254,6 +3359,19 @@ DTExtendProxyFn DTExtend_ValueProxyForAppendedProp(const char* tableName, const 
 		for (const auto& entry : s_playerLaunchWireProxies)
 			if (strcmp(propName, entry.propName) == 0)
 				return entry.proxy;
+		for (const auto& entry : s_skywardExclusiveWireProxies)
+			if (strcmp(propName, entry.propName) == 0)
+				return entry.proxy;
+		for (const auto& entry : s_glideExclusiveWireProxies)
+			if (strcmp(propName, entry.propName) == 0)
+				return entry.proxy;
+	}
+	if (tableName && propName && strcmp(tableName, "DT_Local") == 0)
+	{
+		if (strcmp(propName, "m_jetpackDeactivateTime") == 0)
+			return &PxJetpackDeactivateTime_ValueProxy;
+		if (strcmp(propName, "m_prevJumpPressTime") == 0)
+			return &PxPrevJumpPressTime_ValueProxy;
 	}
 	if (tableName && propName && strcmp(tableName, "DT_ThirdPersonView") == 0)
 	{
@@ -6636,6 +6754,21 @@ bool DTExtend_AppendSuppressedByWireLever(const char* tableName, const char* pro
 		}
 	}
 
+	if (!SkywardBridge_WireEnabled())
+	{
+		static const char* const s_skywardExclusiveNames[] = {
+			"m_skywardDeployEndTime",
+			"m_skywardDeploySpeed",
+			"m_skywardOffsetSpeed",
+			"m_skywardDeployStartPos",
+		};
+		for (const char* psz : s_skywardExclusiveNames)
+		{
+			if (strcmp(propName, psz) == 0)
+				return true;
+		}
+	}
+
 	return false;
 }
 
@@ -7778,7 +7911,27 @@ static void __fastcall WeapState_XlatProxy(void* pProp, void* pStruct,
 		: BridgeStat_e::WEAPSTATE_XLAT_PASSTHROUGH);
 }
 
-// Install on the DT_WeaponX m_weapState DPT_Int leaf.
+static ConVar bridge_wcaf_s21_bits("bridge_wcaf_s21_bits", "1", FCVAR_RELEASE,
+	"S21 bridge: emit S21 WCAF_* bits for m_customActivityFlags on the wire (S3 "
+	"PLAYRAISEONCOMPLETE=2 -> S21 0x80, DISABLEWEAPON 4 -> 2, ...). The dedi keeps "
+	"its own S3 bits. 0 = raw S3 bits.");
+
+static void __fastcall WeapCustomActFlags_XlatProxy(void* pProp, void* pStruct,
+	void* /*pData*/, void* pOut, int /*iElement*/, int /*objectID*/)
+{
+	if (!pOut) return;
+
+	int v = 0;
+	if (pStruct && pProp)
+	{
+		const int off = *(int*)((const char*)pProp + SP_OFFSET) & 0xFFFFF;
+		v = *(const uint8_t*)((const char*)pStruct + off); // CWeaponX char field
+	}
+
+	*(int*)pOut = bridge_wcaf_s21_bits.GetBool() ? WeaponCustomAct_WireFlags(pStruct, v) : v;
+}
+
+// Install on the DT_WeaponX m_weapState and m_customActivityFlags DPT_Int leaves.
 // Same walk/timing as the activity proxy above (cache populated, after DTExtend_RenameProps, before precalc).
 static bool s_weapStateXlatProxyApplied = false;
 static void DTExtend_ApplyWeapStateXlatProxy()
@@ -7787,6 +7940,7 @@ static void DTExtend_ApplyWeapStateXlatProxy()
 	s_weapStateXlatProxyApplied = true;
 
 	int installed = 0;
+	int installedWcaf = 0;
 	for (int t = 0; t < s_cachedSendTableCount; ++t)
 	{
 		uint8_t* table = reinterpret_cast<uint8_t*>(s_cachedSendTablePtrs[t]);
@@ -7803,13 +7957,35 @@ static void DTExtend_ApplyWeapStateXlatProxy()
 			uint8_t* p = props + static_cast<uint64_t>(i) * SP_SIZE;
 			if (*reinterpret_cast<int*>(p + SP_TYPE) != 0) continue; // DPT_Int only
 			const char* nm = *reinterpret_cast<const char**>(p + SP_VARNAME);
-			if (ODP_StrLenSafe(nm, 64) < 0 || strcmp(nm, "m_weapState") != 0) continue;
-			*reinterpret_cast<uintptr_t*>(p + 0x60) = (uintptr_t)&WeapState_XlatProxy;
-			++installed;
-			Msg(eDLL_T::ENGINE, "[WEAPSTATE-XLAT] %s.m_weapState -> S3->S21 translate proxy installed\n",
-				tn ? tn : "?");
+			if (ODP_StrLenSafe(nm, 64) < 0) continue;
+			if (strcmp(nm, "m_weapState") == 0)
+			{
+				*reinterpret_cast<uintptr_t*>(p + 0x60) = (uintptr_t)&WeapState_XlatProxy;
+				++installed;
+				Msg(eDLL_T::ENGINE, "[WEAPSTATE-XLAT] %s.m_weapState -> S3->S21 translate proxy installed\n",
+					tn ? tn : "?");
+			}
+			else if (strcmp(nm, "m_customActivityFlags") == 0)
+			{
+				*reinterpret_cast<uintptr_t*>(p + 0x60) = (uintptr_t)&WeapCustomActFlags_XlatProxy;
+				// S3 ships 6 bits; S21 flags reach PLAYMELEERAISEONCOMPLETE (0x100).
+				int* const pnb = reinterpret_cast<int*>(p + SP_NBITS);
+				const int before = *pnb;
+				if (before < 9)
+					*pnb = 9;
+				++installedWcaf;
+				Msg(eDLL_T::ENGINE, "[WCAF-XLAT] %s.m_customActivityFlags -> S3->S21 bit proxy installed "
+					"(nBits %d -> %d flags=0x%X)\n", tn ? tn : "?",
+					before, *pnb, *reinterpret_cast<int*>(p + SP_FLAGS));
+			}
 		}
 	}
+
+	if (installedWcaf == 0)
+		Warning(eDLL_T::ENGINE,
+			"[WCAF-XLAT] no DT_WeaponX.m_customActivityFlags prop found -- custom-activity "
+			"flags stay RAW S3 on the wire (PLAYRAISEONCOMPLETE reads as DISABLEWEAPON)\n");
+	BridgeReady_Report("WeapCustomActFlags_XlatProxy", installedWcaf, 1);
 
 	Msg(eDLL_T::ENGINE, "[WEAPSTATE-XLAT] comprehensive pass: installed %d weapon-state translate proxy(ies)\n",
 		installed);
@@ -8319,6 +8495,7 @@ static void DTExtend_InstallRegenStampWire(void** tables, int count)
 
 // seComboVars: one packed int per status-effect slot. S3 stores X<<7 (endless
 // |1); S21 expects X<<6. Wire-only remap so native S3 readers stay coherent.
+// With 256 types the dedi type already sits at bits 24-31, as on S21.
 static ConVar bridge_status_combo_wire("bridge_status_combo_wire", "1", FCVAR_RELEASE,
 	"S21 bridge: repack seComboVars from the S3 layout (final <<7) to the S21 layout "
 	"(final <<6) on the wire only. 0 = send the raw S3 value.");
@@ -8339,7 +8516,12 @@ static void __fastcall StatusCombo_WireProxy(void* /*pProp*/, void* /*pStruct*/,
 	const uint32_t in = *reinterpret_cast<const uint32_t*>(pData);
 	uint32_t out = in;
 	if (bridge_status_combo_wire.GetBool())
-		out = ((in >> 7) << 6) | (in & 1u);
+	{
+		if (StatusEffects_WideTypes())
+			out = (in & 0xFF000000u) | (((in >> 7) & 0x1FFFFu) << 6) | (in & 1u);
+		else
+			out = ((in >> 7) << 6) | (in & 1u);
+	}
 	*reinterpret_cast<uint32_t*>(pOut) = out;
 }
 
@@ -8429,6 +8611,116 @@ static void DTExtend_InstallStatusComboWire(void** tables, int count)
 			nPatched, nFound);
 	// nFound > 0 && nPatched == 0: re-entry, already armed -- silent.
 }
+
+#ifndef CLIENT_DLL
+// DT_WeaponX.m_modBitfieldCurrent: the client recomputes mod values only when
+// this changes, so the akimbo optic mask rides on it too. Native readers keep
+// the unmasked set.
+static constexpr uint32_t kWeaponModBitfieldCurrentOffset = 0x157C;
+static DTExtendProxyFn s_modBitfieldCurrentNativeProxy = nullptr;
+
+static void __fastcall ModBitfieldCurrent_WireProxy(void* pProp, void* pStruct,
+	void* pData, void* pOut, int iElement, int objectID)
+{
+	if (!pOut)
+		return;
+
+	if (s_modBitfieldCurrentNativeProxy)
+		s_modBitfieldCurrentNativeProxy(pProp, pStruct, pData, pOut, iElement, objectID);
+	else
+		*reinterpret_cast<uint32_t*>(pOut) = pData ? *reinterpret_cast<const uint32_t*>(pData) : 0;
+
+	if (pStruct)
+		*reinterpret_cast<uint32_t*>(pOut) &= ~AkimboBridge_GetModBitfieldDisabled(pStruct);
+}
+
+static int DTExtend_InstallModBitfieldCurrentWireInTree(uint8_t* table, int& nFound, int depth = 0)
+{
+	if (!table || depth > 32)
+		return 0;
+
+	uint8_t* props = *reinterpret_cast<uint8_t**>(table + ST_PROPS);
+	const int nProps = *reinterpret_cast<const int*>(table + ST_NPROPS);
+	if (!props || nProps <= 0 || nProps > 4096)
+		return 0;
+
+	const char* tableName = *reinterpret_cast<const char**>(table + ST_NETTABLENAME);
+	int patched = 0;
+	for (int i = 0; i < nProps; ++i)
+	{
+		uint8_t* prop = props + static_cast<uint64_t>(i) * SP_SIZE;
+		const char* name = *reinterpret_cast<const char**>(prop + SP_VARNAME);
+		if (!name || strcmp(name, "m_modBitfieldCurrent") != 0)
+			continue;
+
+		++nFound;
+		const uint32_t off = *reinterpret_cast<const uint32_t*>(prop + SP_OFFSET) & 0xFFFFF;
+		const int spType = *reinterpret_cast<const int*>(prop + SP_TYPE);
+		if (!tableName || strcmp(tableName, "DT_WeaponX") != 0
+			|| off != kWeaponModBitfieldCurrentOffset
+			|| spType != static_cast<int>(SendPropType::DPT_Int))
+		{
+			Warning(eDLL_T::ENGINE,
+				"[MODBITS-WIRE] %s.m_modBitfieldCurrent off=0x%X type=%d -- NOT armed\n",
+				tableName ? tableName : "?", off, spType);
+			continue;
+		}
+
+		const DTExtendProxyFn curProxy = *reinterpret_cast<DTExtendProxyFn*>(prop + 0x60);
+		if (curProxy == &ModBitfieldCurrent_WireProxy)
+			continue;
+
+		if (curProxy && s_modBitfieldCurrentNativeProxy && curProxy != s_modBitfieldCurrentNativeProxy)
+		{
+			Warning(eDLL_T::ENGINE,
+				"[MODBITS-WIRE] %s.m_modBitfieldCurrent carries a second native proxy %p -- NOT armed\n",
+				tableName, reinterpret_cast<void*>(curProxy));
+			continue;
+		}
+
+		s_modBitfieldCurrentNativeProxy = curProxy;
+		*reinterpret_cast<uintptr_t*>(prop + 0x60) = reinterpret_cast<uintptr_t>(&ModBitfieldCurrent_WireProxy);
+		++patched;
+	}
+
+	for (int i = 0; i < nProps; ++i)
+	{
+		uint8_t* prop = props + static_cast<uint64_t>(i) * SP_SIZE;
+		if (*reinterpret_cast<const int*>(prop + SP_TYPE) != static_cast<int>(SendPropType::DPT_DataTable))
+			continue;
+		uint8_t* child = *reinterpret_cast<uint8_t**>(prop + 0x70);
+		patched += DTExtend_InstallModBitfieldCurrentWireInTree(child, nFound, depth + 1);
+	}
+
+	return patched;
+}
+
+static void DTExtend_InstallModBitfieldCurrentWire(void** tables, int count)
+{
+	if (!tables || count <= 0)
+		return;
+
+	int nFound = 0;
+	int nPatched = 0;
+	for (int t = 0; t < count; ++t)
+	{
+		uint8_t* topTable = reinterpret_cast<uint8_t*>(tables[t]);
+		if (topTable)
+			nPatched += DTExtend_InstallModBitfieldCurrentWireInTree(topTable, nFound);
+	}
+
+	if (nFound == 0)
+	{
+		Warning(eDLL_T::ENGINE,
+			"[MODBITS-WIRE] m_modBitfieldCurrent prop not found -- akimbo optic mask NOT on the wire\n");
+		return;
+	}
+
+	if (nPatched > 0)
+		Msg(eDLL_T::ENGINE, "[MODBITS-WIRE] armed on %d of %d m_modBitfieldCurrent prop(s), native proxy %p\n",
+			nPatched, nFound, reinterpret_cast<void*>(s_modBitfieldCurrentNativeProxy));
+}
+#endif // !CLIENT_DLL
 
 
 // ===========================================================================
@@ -9380,6 +9672,9 @@ static char Hook_SendTable_Init(void** tables, int count)
 	// [SE-COMBO-WIRE] Must be armed BEFORE the precalc build: the flatten takes its own copy of each SendProp, so a proxy installed in the common tail below lands only on the tree prop the encoder no longer reads (armed 87/87, zero encodes).
 	// The install is idempotent, so the tail call still catches anything built later.
 	DTExtend_InstallStatusComboWire(tables, count);
+#ifndef CLIENT_DLL
+	DTExtend_InstallModBitfieldCurrentWire(tables, count);
+#endif // !CLIENT_DLL
 	DTExtend_InstallPlayAnimTypeXlate(tables, count);
 	DTExtend_InstallRegenStampWire(tables, count);
 	AnimAnchorProxy_Install(tables, count);
@@ -9409,6 +9704,9 @@ static char Hook_SendTable_Init(void** tables, int count)
 
 	// [SE-COMBO-WIRE] Same common tail: repack seComboVars S3 (<<7) -> S21 (<<6).
 	DTExtend_InstallStatusComboWire(tables, count);
+#ifndef CLIENT_DLL
+	DTExtend_InstallModBitfieldCurrentWire(tables, count);
+#endif // !CLIENT_DLL
 
 	// [ANIM-ANCHOR-PROXY] Same common tail: idempotent re-arm (pre-flatten
 	// install above already covered the encoder-visible copies).

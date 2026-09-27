@@ -25,6 +25,7 @@
 #include "rtech/pak/pakstate.h"
 #include "engine/client/clientstate.h"
 #include "ebisusdk/EbisuSDK.h"
+#include "engine/client/demo_bridge.h"
 #include "common/global.h"
 /*****************************************************************************/
 #include "windows/id3dx.h"
@@ -530,6 +531,7 @@ void SDK_Init()
 
 	SDK_TRACE("InitFromBase (game dll)...");
 	g_GameDll.InitFromBase(pEnv->ImageBaseAddress);
+	g_GameDll.CapturePristineCode(); // before any hook or patch
 
 	SDK_TRACE("InitFromBase (sdk dll)...");
 	g_SDKDll.InitFromBase((QWORD)s_hModuleHandle);
@@ -1342,6 +1344,8 @@ void SDK_Shutdown()
 	}
 
 	Msg(eDLL_T::NONE, "SDK shutdown initiated\n");
+
+	DemoRecord_Shutdown();
 
 	// Overlay AddLog is dead after WinSys_Shutdown; Detach/CRT still call SDK_Log.
 	g_bSdkObserveInit = false;

@@ -31,13 +31,17 @@ static volatile LONG s_nDetourInvalidSkips = 0;
 PFN_DetourPreAttachValidate g_DetourPreAttachValidate = nullptr;
 PFN_DetourLogSink g_DetourLogSink = nullptr;
 
-// Target address -> the detour that claimed it first, for the attach pass.
+// Target address -> every detour that claimed it, in attach order, for the attach pass.
 struct DetourClaim_t
 {
 	void* pDetour;
+	void** ppPointer;
+	void* pTrampoline;
 	const char* pszClass;
 };
-static std::unordered_map<void*, DetourClaim_t> s_DetourTargets;
+static std::unordered_map<void*, std::vector<DetourClaim_t>> s_DetourTargets;
+static std::vector<void*> s_DetourTargetOrder;
+static bool s_bDetourChainsLinked = false;
 
 // The V-class whose Detour(true) is currently running. Attach is single
 // threaded, so a plain global is enough to attribute every report below.
@@ -51,6 +55,97 @@ void Detour_SetAttachingClass(const char* const pszClass)
 void Detour_ResetAttachTargets(void)
 {
 	s_DetourTargets.clear();
+	s_DetourTargetOrder.clear();
+	s_bDetourChainsLinked = false;
+}
+
+static void Detour_Log(const char* const pszMsg)
+{
+	OutputDebugStringA(pszMsg);
+	if (g_DetourLogSink)
+		g_DetourLogSink(pszMsg);
+}
+
+// Follows the committed entry jmp (E9 rel32 into the trampoline, then FF 25 through
+// its detour slot) to the hook that now receives the engine's calls.
+static void* Detour_ResolveEntryHook(const unsigned char* p)
+{
+	for (int nHop = 0; nHop < 4 && p; ++nHop)
+	{
+		if (p[0] == 0xE9)
+		{
+			p = p + 5 + *reinterpret_cast<const int32_t*>(p + 1);
+			continue;
+		}
+		if (p[0] == 0xFF && p[1] == 0x25)
+			return *reinterpret_cast<void* const*>(p + 6 + *reinterpret_cast<const int32_t*>(p + 2));
+		break;
+	}
+	return nullptr;
+}
+
+//-----------------------------------------------------------------------------
+// One transaction can only give a target one entry jmp, so every other hook on it
+// would never run. After the commit, link them: the entry hook's original pointer
+// is aimed at the next claimant, and so on, the last one keeping its trampoline.
+//-----------------------------------------------------------------------------
+void Detour_LinkSharedTargets(void)
+{
+	for (void* const pTarget : s_DetourTargetOrder)
+	{
+		std::vector<DetourClaim_t>& claims = s_DetourTargets[pTarget];
+		if (claims.size() < 2)
+			continue;
+
+		void* const pEntry = Detour_ResolveEntryHook(reinterpret_cast<const unsigned char*>(pTarget));
+		size_t nEntry = claims.size();
+		for (size_t i = 0; i < claims.size(); ++i)
+		{
+			claims[i].pTrampoline = *claims[i].ppPointer;
+			if (claims[i].pDetour == pEntry)
+				nEntry = i;
+		}
+
+		char buf[512];
+		if (nEntry == claims.size())
+		{
+			_snprintf_s(buf, _TRUNCATE,
+				"[DETOUR] shared target %p: entry jmp resolves to %p, no claimant matches -- %zu hooks left unlinked\n",
+				pTarget, pEntry, claims.size() - 1);
+			Detour_Log(buf);
+			continue;
+		}
+
+		// Entry claimant first, then the rest in attach order.
+		std::vector<size_t> order;
+		order.push_back(nEntry);
+		for (size_t i = 0; i < claims.size(); ++i)
+			if (i != nEntry)
+				order.push_back(i);
+
+		for (size_t k = 0; k + 1 < order.size(); ++k)
+			*claims[order[k]].ppPointer = claims[order[k + 1]].pDetour;
+
+		int nLen = _snprintf_s(buf, _TRUNCATE, "[DETOUR] shared target %p linked:", pTarget);
+		for (const size_t i : order)
+			if (nLen > 0 && static_cast<size_t>(nLen) < sizeof(buf))
+				nLen += _snprintf_s(buf + nLen, sizeof(buf) - nLen, _TRUNCATE, " %s ->", claims[i].pszClass);
+		strncat_s(buf, " original\n", _TRUNCATE);
+		Detour_Log(buf);
+	}
+	s_bDetourChainsLinked = true;
+}
+
+// Restores each linked hook's own trampoline so DetourDetach finds what it attached.
+void Detour_UnlinkSharedTargets(void)
+{
+	if (!s_bDetourChainsLinked)
+		return;
+	for (void* const pTarget : s_DetourTargetOrder)
+		for (DetourClaim_t& claim : s_DetourTargets[pTarget])
+			if (claim.pTrampoline)
+				*claim.ppPointer = claim.pTrampoline;
+	s_bDetourChainsLinked = false;
 }
 
 void Detour_ResetNullSkipCount(void)
@@ -131,7 +226,7 @@ static int Detour_PrologueSpillsXmmArg(const unsigned char* code)
 	return -1;
 }
 
-void Detour_NoteAttachTarget(void* pFn, void* pDetour)
+void Detour_NoteAttachTarget(void* pFn, void* pDetour, void** ppPointer)
 {
 	if (!pFn)
 		return;
@@ -149,25 +244,25 @@ void Detour_NoteAttachTarget(void* pFn, void* pDetour)
 		if (g_DetourLogSink)
 			g_DetourLogSink(adv);
 	}
-	const auto it = s_DetourTargets.emplace(pFn, DetourClaim_t{ pDetour, pszClass });
+	std::vector<DetourClaim_t>& claims = s_DetourTargets[pFn];
+	if (claims.empty())
+		s_DetourTargetOrder.push_back(pFn);
+	for (const DetourClaim_t& claim : claims)
+		if (claim.pDetour == pDetour)
+			return; // the same hook twice would link to itself
+	claims.push_back(DetourClaim_t{ pDetour, ppPointer, nullptr, pszClass });
 
-	if (it.second)
+	if (claims.size() == 1)
 		return;
 
-	// Two classes resolved the same engine function -- usually two byte patterns
-	// that are each 1-hit unique but land on the same address. Detours points the
-	// entry jmp at whichever attaches last, so the earlier hook keeps a valid
-	// trampoline that nothing ever jumps to and goes silent with no other symptom.
-	// Cost a week on CPlayerMove::RunCommand (VPlayerMove vs VBridgeFireTap).
+	// Within one transaction the target gets a single entry jmp (the first attach
+	// wins; pending operations commit newest first), so the other hooks never run
+	// unless Detour_LinkSharedTargets runs after the commit.
 	char buf[256];
 	_snprintf_s(buf, _TRUNCATE,
-		"[DETOUR] DUPLICATE hook on target %p: already claimed by %s (%p), now also %s (%p) -- "
-		"one of them will be orphaned and never run\n",
-		pFn, it.first->second.pszClass, it.first->second.pDetour, pszClass, pDetour);
-	OutputDebugStringA(buf);
-
-	if (g_DetourLogSink)
-		g_DetourLogSink(buf);
+		"[DETOUR] shared target %p: claimed by %s (%p), now also %s (%p) -- only runs if linked after commit\n",
+		pFn, claims.front().pszClass, claims.front().pDetour, pszClass, pDetour);
+	Detour_Log(buf);
 }
 
 //-----------------------------------------------------------------------------

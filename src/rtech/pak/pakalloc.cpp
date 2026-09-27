@@ -34,6 +34,21 @@ void Pak_AlignSlabHeaders(PakFile_s* const pak, PakSlabDescriptor_s* const desc)
             desc->slabAlignmentForType[SF_HEAD] = slabHeaderAlignment;
         }
     }
+
+    // Headers are copied at their declared size but laid out at the type's structSize, so a longer
+    // header (newer asset versions on an older binding) overlaps the next slot; the last one would
+    // run past the slab.
+    uint64_t tailSlack = 0;
+    for (uint32_t i = 0; i < pak->GetAssetCount(); ++i)
+    {
+        const PakAsset_s& asset = pak->memoryData.assetEntries[i];
+        const uint32_t structSize = g_pakGlobals->assetBindings[asset.HashTableIndexForAssetType()].structSize;
+        if (asset.headerSize > structSize)
+            tailSlack = Max<uint64_t>(tailSlack, asset.headerSize - structSize);
+    }
+
+    if (tailSlack && desc->slabSizeForType[SF_HEAD])
+        desc->slabSizeForType[SF_HEAD] += tailSlack;
 }
 
 //-----------------------------------------------------------------------------
@@ -93,6 +108,17 @@ void Pak_CopyPagesToSlabs(PakFile_s* const pak, PakLoadedInfo_s* const loadedInf
             // the page does not have to be aligned to the same alignment as the slab, as aligning it to its own alignment is sufficient as long as
             // every subsequent page does the same thing
             const size_t alignedSlabSize = ALIGN_VALUE(desc->slabSizes[slabIndex], static_cast<size_t>(pageHeader->pageAlignment));
+
+            // The type buffer was sized from the slab headers; pages summing past it would be
+            // copied outside the allocation. A well-formed pak always fits.
+            const int slabType = typeFlags & (SF_CPU | SF_TEMP);
+            if (alignedSlabSize + pageHeader->dataSize > desc->slabSizeForType[slabType])
+            {
+                Warning(eDLL_T::RTECH, "[PAK-SLAB] page %u (%u bytes) overruns slab type %d (%zu bytes) in '%s'\n",
+                    i, pageHeader->dataSize, slabType, desc->slabSizeForType[slabType], pak->GetName());
+                loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+                return;
+            }
 
             // get a pointer to the newly aligned location within the slab for this page
             pak->memoryData.memPageBuffers[i] = reinterpret_cast<uint8_t*>(loadedInfo->slabBuffers[typeFlags & (SF_CPU | SF_TEMP)]) + alignedSlabSize;

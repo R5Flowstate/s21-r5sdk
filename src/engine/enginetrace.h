@@ -20,6 +20,9 @@ inline CEngineTraceServer* g_pEngineTraceServerVFTable = nullptr;
 class CEngineTraceClient : public CEngineTrace
 {};
 inline CEngineTraceClient* g_pEngineTraceClient = nullptr;
+
+// The live client trace singleton; null until a map is loaded.
+CEngineTraceClient* EngineTrace_GetClient(void);
 #endif // DEDICATED
 
 ///////////////////////////////////////////////////////////////////////////////

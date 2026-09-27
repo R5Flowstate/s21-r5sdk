@@ -47,6 +47,10 @@ static const char* const MILES_LANGUAGE_FORCE = "english";
 static constexpr int MBNK_BANK_INDEX_OFF = 0xA0;  // KNBC CompiledBank.BankIndex
 static constexpr int MBNK_BUILDTAG_OFF = 0x10;    // KNBC CompiledBank.BuildTag
 static constexpr int MPRJ_BANK_COUNT_OFF = 0xF2;  // JRPC CompiledSettings.BankCount
+static constexpr int MPRJ_BUS_COUNT_OFF = 0xE8;   // JRPC CompiledSettings.BusCount
+// custom.mbnk routes legend VO/foley onto buses appended past the stock 669;
+// an older project resolves those ids to nothing and the mixer traps.
+static constexpr unsigned int MPRJ_MIN_BUSES_FOR_CUSTOM = 687;
 static constexpr DWORD MILES_MSTR_HEADER_ONLY = 32; // RTSC header, no samples
 
 static bool MilesBankDisk_ReadHeader(const char* pszPath, unsigned char* pBuf, const DWORD nSize)
@@ -89,6 +93,19 @@ static bool MilesBankDisk_ProjectDeclaresBank(const unsigned int nBankIndex)
 		return false;
 
 	return header[MPRJ_BANK_COUNT_OFF] > nBankIndex;
+}
+
+static unsigned int MilesBankDisk_ProjectBusCount(void)
+{
+	unsigned char header[MPRJ_BUS_COUNT_OFF + 4] = {};
+
+	if (!MilesBankDisk_ReadHeader(MILES_PROJECT_PATH, header, sizeof(header)))
+		return 0;
+
+	if (memcmp(header, "JRPC", 4) != 0)
+		return 0;
+
+	return *reinterpret_cast<const unsigned int*>(header + MPRJ_BUS_COUNT_OFF);
 }
 
 static unsigned int MilesBankDisk_ListCount(const char* bankList)
@@ -384,6 +401,16 @@ static __int64 __fastcall Hook_MilesShared_LoadBanksListFromFile(char* bankList,
 			"[MILES-BANK] audio.mprj declares fewer than %u banks -- refusing to append "
 			"custom (BankIndex %u); redeploy the patched project\n",
 			bankIndex + 1, bankIndex);
+		return result;
+	}
+
+	const unsigned int nBuses = MilesBankDisk_ProjectBusCount();
+	if (nBuses < MPRJ_MIN_BUSES_FOR_CUSTOM)
+	{
+		Warning(eDLL_T::AUDIO,
+			"[MILES-BANK] audio.mprj has %u buses, custom needs %u -- refusing to append "
+			"custom; ship custom.mbnk and audio.mprj together\n",
+			nBuses, MPRJ_MIN_BUSES_FOR_CUSTOM);
 		return result;
 	}
 

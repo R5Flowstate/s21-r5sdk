@@ -166,7 +166,7 @@ struct BridgeS2CDeferred_t
 
 // ScriptRemote orchestrator: no __try here (ScriptVariant_t[16] has a dtor).
 // Defer queue is file-scope and fixed-size; packet path allocates nothing.
-#define BRIDGE_S2C_DEFER_MAX 128
+#define BRIDGE_S2C_DEFER_MAX 1024
 #define SPLIT_QUEUE_PKT_MAX 2048
 #define S21_NC_StreamReliable(p)    ((bf_write*)((char*)(p) + 0x2040))
 #define S21_NC_Socket(p)            (*(int*)((char*)(p) + 0x20E8))
@@ -205,6 +205,7 @@ struct S21PlaylistOverride_t
 {
 	char m_szName[S21BR_PLO_NAME_SIZE];
 	char m_szValue[S21BR_PLO_VALUE_SIZE];
+	bool m_bAllowlisted;
 };
 
 constexpr int kLerpDepthRingSize = 32;
@@ -443,6 +444,7 @@ extern volatile LONG s_ackFullReqLog;
 extern volatile LONG s_ackInvariantLog;
 extern S21PlaylistOverride_t s_playlistOverrides[S21BR_PLO_MAX_ENTRIES];
 extern volatile long s_nPlaylistOverrides;
+extern volatile long s_nPlaylistOverridesGen;
 extern unsigned long long DeathObs_ImageVA(void* ret);
 extern PFN_MiniDumpWriteDump s_origMiniDumpWriteDump;
 extern void S21Bridge_OnDataBlockComplete(const uint8_t* rawBuf, int rawSize);

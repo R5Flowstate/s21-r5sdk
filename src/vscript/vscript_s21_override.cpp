@@ -3,6 +3,7 @@
 //=============================================================================//
 
 #include "core/stdafx.h"
+#include "engine/agent_link.h"
 #include "core/sdk_stage.h"
 #include "vscript_s21_override.h"
 #include "common/global.h"
@@ -16,6 +17,9 @@
 #include "game/client/classvar_natives.h"
 #include "rtech/pak/mapedit_paks_cl.h"
 #include "game/client/mantle_boost_rui.h"
+#include "game/client/wall_launch.h"
+#include "game/client/double_jump_power.h"
+#include "game/client/demo_natives.h"
 #include "vscript/languages/squirrel_re/vsquirrel.h"
 #include "vscript/ivscript.h"
 #include "pluginsystem/modsystem.h"
@@ -72,7 +76,11 @@ static void EnsureLateNativeRegistration(uint8_t vmType, CSquirrelVM* s)
 				Script_RegisterChatMuteClient(vm);
 				ClassVar_RegisterClientFunctions(vm);
 				MantleBoostRui_RegisterClientFunctions(vm);
+				WallLaunchClient_RegisterClientFunctions(vm);
+				DoubleJumpPowerClient_RegisterClientFunctions(vm);
 				MapEditPaks_RegisterClientFunctions(vm);
+				Demo_RegisterClientFunctions(vm);
+				AgentLink_RegisterScriptFunctions(vm);
 			}
 		}
 		break;
@@ -89,10 +97,12 @@ static void EnsureLateNativeRegistration(uint8_t vmType, CSquirrelVM* s)
 				// SDK-only native: live netchannel ping (not EA datacenter).
 				// Must late-reg; bulk Script_RegisterUIFunctions is not fired on S21.
 				Script_RegisterConnectionPingUI(vm);
+				AgentLink_RegisterScriptFunctions(vm);
 				Script_RegisterServerBrowserUI(vm);
 				// Lets the menu withhold actions that cannot succeed until the
 				// platform has issued the identity a connect will be verified on.
 				Script_RegisterPlatformIdentityUI(vm);
+				Demo_RegisterUIFunctions(vm);
 			}
 		}
 		break;
@@ -397,19 +407,6 @@ static bool ModScript_AppendDiskFile(char* dst, size_t* pUsed, const size_t cap,
 
 static constexpr size_t kModScriptNameCap = 128;
 
-static bool ModScript_TokenLooksLikeScript(const char* tok, const size_t n)
-{
-	if (!tok || n < 4)
-		return false;
-	if (n >= 4 && _strnicmp(tok + n - 4, ".nut", 4) == 0)
-		return true;
-	if (n >= 5 && _strnicmp(tok + n - 5, ".gnut", 5) == 0)
-		return true;
-	if (n >= 5 && _strnicmp(tok + n - 5, ".rson", 5) == 0)
-		return true;
-	return false;
-}
-
 static bool ModScript_SplicedHasOverlongName(const char* buf, const size_t used)
 {
 	if (!buf)
@@ -431,8 +428,14 @@ static bool ModScript_SplicedHasOverlongName(const char* buf, const size_t used)
 		{
 			const char q = *p++;
 			tok = p;
+			// The RSON lexer keeps scanning past a backslash escape; so must this, or one
+			// long name reads here as two short ones.
 			while (p < end && *p != q && *p != '\n')
+			{
+				if (*p == '\\' && p + 1 < end)
+					++p;
 				++p;
+			}
 			n = static_cast<size_t>(p - tok);
 			if (p < end && *p == q)
 				++p;
@@ -445,7 +448,8 @@ static bool ModScript_SplicedHasOverlongName(const char* buf, const size_t used)
 			n = static_cast<size_t>(p - tok);
 		}
 
-		if (ModScript_TokenLooksLikeScript(tok, n) && n > kModScriptNameCap)
+		// Any token this long is refused: the native keeps whatever the filter misclassifies.
+		if (n > kModScriptNameCap)
 			return true;
 	}
 

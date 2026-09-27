@@ -3,6 +3,12 @@
 #include "rtech/ipakfile.h"
 #include "pakstate.h"
 
+// Paks a mod requested by its own path; their headers are mod-authored.
+inline bool Pak_IsModSourcedPath(const char* const pszPath)
+{
+    return pszPath && !V_strnicmp(pszPath, "mods", 4) && (pszPath[4] == '\\' || pszPath[4] == '/');
+}
+
 extern void Pak_OpenAssociatedStreamingFiles(PakLoadedInfo_s* const loadedInfo, PakLoadedInfo_s::StreamingInfo_t& streamInfo,
     const uint16_t fileNamesBufSize, const PakStreamSet_e set);
 

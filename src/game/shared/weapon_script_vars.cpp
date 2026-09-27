@@ -2308,11 +2308,119 @@ void WeaponScriptVars_FlushDisableHoldFlags(void)
 	}
 }
 
-static SQRESULT Script_DisableWeaponTypes(HSQUIRRELVM v)
+void WeaponScriptVars_DisableWeaponTypes(void* pEntity, const uint32_t flags)
+{
+	if (!pEntity)
+		return;
+
+	// Do not port the bit-0 guard: S3 bit 0 is WPT_PRIMARY.
+	WeaponTypeDisableState& state = s_weaponTypeDisabledMapServer[pEntity];
+
+	uint32_t bit = 1;
+	for (int i = 0; i < WEAPON_TYPE_DISABLE_BITS; ++i, bit <<= 1)
+	{
+		if ((flags & bit) == 0)
+			continue;
+		if (state.refCount[i] == 0xFF)
+		{
+			Warning(eDLL_T::SERVER,
+				"DisableWeaponTypes: refcount overflow for type %d on entity %p\n",
+				i, pEntity);
+			continue;
+		}
+		if (state.refCount[i] == 0)
+			state.disabledFlags |= bit;
+		++state.refCount[i];
+	}
+
+	state.holdFlags |= state.disabledFlags;
+	WeaponScriptVars_WriteNativeDisabledFlags(pEntity,
+		state.disabledFlags | state.holdFlags);
+
+	// Clear any active weapon whose type is now disabled. The S3 server has
+	// no engine-native gating, so this server-side rail stays; the engine's
+	// next-tick re-selection picks a valid fallback.
+	WeaponEnforce_ForceSwapIfNowDisabled(pEntity);
+}
+
+void WeaponScriptVars_EnableWeaponTypes(void* pEntity, const uint32_t flags)
+{
+	if (!pEntity)
+		return;
+
+	WeaponTypeDisableState* pState = s_weaponTypeDisabledMapServer.Find(pEntity);
+	if (!pState)
+	{
+		if (flags != 0)
+			Warning(eDLL_T::SERVER,
+				"EnableWeaponTypes: no disabled state for entity %p (refcount underflow)\n",
+				pEntity);
+		return;
+	}
+
+	WeaponTypeDisableState& state = *pState;
+
+	uint32_t bit = 1;
+	for (int i = 0; i < WEAPON_TYPE_DISABLE_BITS; ++i, bit <<= 1)
+	{
+		if ((flags & bit) == 0)
+			continue;
+		if (state.refCount[i] == 0)
+		{
+			Warning(eDLL_T::SERVER,
+				"EnableWeaponTypes: refcount underflow for type %d on entity %p\n",
+				i, pEntity);
+			continue;
+		}
+		--state.refCount[i];
+		if (state.refCount[i] == 0)
+			state.disabledFlags &= ~bit;
+	}
+
+	// Push the new bitmask to the native DT prop + dirty-mark BEFORE any
+	// map erase (erasing invalidates `state`).
+	const uint32_t newFlags = state.disabledFlags | state.holdFlags;
+	WeaponScriptVars_WriteNativeDisabledFlags(pEntity, newFlags);
+
+	// Drop empty entries to keep the map bounded across long sessions.
+	bool anySet = newFlags != 0;
+	if (!anySet)
+	{
+		for (int i = 0; i < WEAPON_TYPE_DISABLE_BITS; ++i)
+			if (state.refCount[i] != 0) { anySet = true; break; }
+		if (!anySet)
+			s_weaponTypeDisabledMapServer.Erase(pEntity);
+	}
+}
+
+// S3 bit i (PRIMARY, MELEE, TACTICAL, ULTIMATE, CONSUMABLE, INCAP_SHIELD, GRENADE,
+// OTHER, VIEWHANDS, SURVIVAL) -> S21 bit (the S21 name table puts VIEWHANDS first
+// and SURVIVAL before OTHER).
+static constexpr uint8_t s_weaponTypeS3ToS21Bit[WEAPON_TYPE_DISABLE_BITS] = { 1, 2, 3, 4, 5, 6, 7, 9, 0, 8 };
+
+uint32_t WeaponScriptVars_WeaponTypesToS21(const uint32_t s3Flags)
+{
+	uint32_t out = 0;
+	for (int i = 0; i < WEAPON_TYPE_DISABLE_BITS; ++i)
+		if (s3Flags & (1u << i))
+			out |= 1u << s_weaponTypeS3ToS21Bit[i];
+	return out;
+}
+
+uint32_t WeaponScriptVars_WeaponTypesFromS21(const uint32_t s21Flags)
+{
+	uint32_t out = 0;
+	for (int i = 0; i < WEAPON_TYPE_DISABLE_BITS; ++i)
+		if (s21Flags & (1u << s_weaponTypeS3ToS21Bit[i]))
+			out |= 1u << i;
+	return out;
+}
+
+static bool WeaponScriptVars_GetTypeFlagsArg(HSQUIRRELVM v, const char* pszNative, void** ppEntity, uint32_t* pFlags)
 {
 	void* pEntity = nullptr;
 	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pEntity)) || !pEntity)
-		SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
+		return false;
 
 	SQInteger rawFlags = 0;
 	sq_getinteger(v, 2, &rawFlags);
@@ -2320,41 +2428,26 @@ static SQRESULT Script_DisableWeaponTypes(HSQUIRRELVM v)
 
 	if (flags >= (1u << WEAPON_TYPE_DISABLE_BITS))
 	{
-		v_SQVM_ScriptError("DisableWeaponTypes: flags 0x%X exceed max (must be < 0x%X)",
-			flags, (1u << WEAPON_TYPE_DISABLE_BITS));
+		v_SQVM_ScriptError("%s: flags 0x%X exceed max (must be < 0x%X)",
+			pszNative, flags, (1u << WEAPON_TYPE_DISABLE_BITS));
+		return false;
+	}
+
+	*ppEntity = pEntity;
+	*pFlags = flags;
+	return true;
+}
+
+static SQRESULT Script_DisableWeaponTypes(HSQUIRRELVM v)
+{
+	void* pEntity = nullptr;
+	uint32_t flags = 0;
+	if (!WeaponScriptVars_GetTypeFlagsArg(v, "DisableWeaponTypes", &pEntity, &flags))
 		SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
-	}
-	// Do not port the bit-0 guard: S3 bit 0 is WPT_PRIMARY. Only the server VM mutates the mask.
+
+	// Only the server VM mutates the mask.
 	if (v && v->GetContext() == SQCONTEXT::SERVER)
-	{
-		WeaponTypeDisableState& state = s_weaponTypeDisabledMapServer[pEntity];
-
-		uint32_t bit = 1;
-		for (int i = 0; i < WEAPON_TYPE_DISABLE_BITS; ++i, bit <<= 1)
-		{
-			if ((flags & bit) == 0)
-				continue;
-			if (state.refCount[i] == 0xFF)
-			{
-				Warning(eDLL_T::SERVER,
-					"DisableWeaponTypes: refcount overflow for type %d on entity %p\n",
-					i, pEntity);
-				continue;
-			}
-			if (state.refCount[i] == 0)
-				state.disabledFlags |= bit;
-			++state.refCount[i];
-		}
-
-		state.holdFlags |= state.disabledFlags;
-		WeaponScriptVars_WriteNativeDisabledFlags(pEntity,
-			state.disabledFlags | state.holdFlags);
-
-		// Clear any active weapon whose type is now disabled. The S3 server has
-		// no engine-native gating, so this server-side rail stays; the engine's
-		// next-tick re-selection picks a valid fallback.
-		WeaponEnforce_ForceSwapIfNowDisabled(pEntity);
-	}
+		WeaponScriptVars_DisableWeaponTypes(pEntity, flags);
 
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
@@ -2362,67 +2455,13 @@ static SQRESULT Script_DisableWeaponTypes(HSQUIRRELVM v)
 static SQRESULT Script_EnableWeaponTypes(HSQUIRRELVM v)
 {
 	void* pEntity = nullptr;
-	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pEntity)) || !pEntity)
+	uint32_t flags = 0;
+	if (!WeaponScriptVars_GetTypeFlagsArg(v, "EnableWeaponTypes", &pEntity, &flags))
 		SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
-
-	SQInteger rawFlags = 0;
-	sq_getinteger(v, 2, &rawFlags);
-	const uint32_t flags = static_cast<uint32_t>(rawFlags);
-
-	if (flags >= (1u << WEAPON_TYPE_DISABLE_BITS))
-	{
-		v_SQVM_ScriptError("EnableWeaponTypes: flags 0x%X exceed max (must be < 0x%X)",
-			flags, (1u << WEAPON_TYPE_DISABLE_BITS));
-		SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
-	}
 
 	// Server-authoritative (see DisableWeaponTypes). Client/UI VMs are read-only.
 	if (v && v->GetContext() == SQCONTEXT::SERVER)
-	{
-		WeaponTypeDisableState* pState = s_weaponTypeDisabledMapServer.Find(pEntity);
-		if (!pState)
-		{
-			if (flags != 0)
-				Warning(eDLL_T::SERVER,
-					"EnableWeaponTypes: no disabled state for entity %p (refcount underflow)\n",
-					pEntity);
-			SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-		}
-
-		WeaponTypeDisableState& state = *pState;
-
-		uint32_t bit = 1;
-		for (int i = 0; i < WEAPON_TYPE_DISABLE_BITS; ++i, bit <<= 1)
-		{
-			if ((flags & bit) == 0)
-				continue;
-			if (state.refCount[i] == 0)
-			{
-				Warning(eDLL_T::SERVER,
-					"EnableWeaponTypes: refcount underflow for type %d on entity %p\n",
-					i, pEntity);
-				continue;
-			}
-			--state.refCount[i];
-			if (state.refCount[i] == 0)
-				state.disabledFlags &= ~bit;
-		}
-
-		// Push the new bitmask to the native DT prop + dirty-mark BEFORE any
-		// map erase (erasing invalidates `state`).
-		const uint32_t newFlags = state.disabledFlags | state.holdFlags;
-		WeaponScriptVars_WriteNativeDisabledFlags(pEntity, newFlags);
-
-		// Drop empty entries to keep the map bounded across long sessions.
-		bool anySet = newFlags != 0;
-		if (!anySet)
-		{
-			for (int i = 0; i < WEAPON_TYPE_DISABLE_BITS; ++i)
-				if (state.refCount[i] != 0) { anySet = true; break; }
-			if (!anySet)
-				s_weaponTypeDisabledMapServer.Erase(pEntity);
-		}
-	}
+		WeaponScriptVars_EnableWeaponTypes(pEntity, flags);
 
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
@@ -2989,11 +3028,11 @@ void WeaponScriptVars_RegisterWPTConstants(CSquirrelVM* s)
 	// WPT_INCAP_SHIELD. Alias so scripts written for either spelling work.
 	s->RegisterConstant("WPT_INCAP",        0x020);
 
-	// Composite masks. 0xFF covers all native bits; the _OR_INCAP variant
-	// additionally exempts WPT_INCAP_SHIELD (0x020) so bleedout/knockdown
-	// shield stays usable while everything else is disabled.
-	s->RegisterConstant("WPT_ALL_EXCEPT_VIEWHANDS",          0xFF);
-	s->RegisterConstant("WPT_ALL_EXCEPT_VIEWHANDS_OR_INCAP", 0xFF & ~0x020);
+	// Composite masks: every type but VIEWHANDS, SURVIVAL included (S21 0x3FE /
+	// 0x3BE once translated). The _OR_INCAP variant also exempts WPT_INCAP_SHIELD
+	// so the bleedout shield stays usable.
+	s->RegisterConstant("WPT_ALL_EXCEPT_VIEWHANDS",          0x2FF);
+	s->RegisterConstant("WPT_ALL_EXCEPT_VIEWHANDS_OR_INCAP", 0x2FF & ~0x020);
 }
 
 struct EWeaponVarCompat_t
@@ -3028,11 +3067,25 @@ static const WeaponVarSlotReservation_t s_reservedWeaponVarSlots[] = {
 	{ "toss_has_post_loop",                        "custom_bool_5"  },
 	{ "object_placement_vehicle_attachment_index", "custom_int_1"   },
 	{ "battle_chatter_event",                      "ui32_mesh_override" },
+	// Read back by weapon_activity_modifiers.cpp for the 1p sequence pick.
+	{ "activitymodifier1p",                        "ui31_mesh_override" },
 };
 
 static ConVar bridge_weaponvar_slot_reserve("bridge_weaponvar_slot_reserve", "1",
 	FCVAR_RELEASE,
 	"Back S21-only weapon settings keys with reserved native slots (0 = donor aliases only).");
+
+const char* WeaponScriptVars_GetReservedSlot(const char* s21Key)
+{
+	if (!s21Key || !bridge_weaponvar_slot_reserve.GetBool())
+		return nullptr;
+	for (const WeaponVarSlotReservation_t& row : s_reservedWeaponVarSlots)
+	{
+		if (strcmp(row.s21Key, s21Key) == 0)
+			return row.s3Slot;
+	}
+	return nullptr;
+}
 
 // Returns 1 if a new alias was added, 0 if the name already exists natively
 // (left intact), -1 on error.
@@ -3098,7 +3151,6 @@ void WeaponScriptVars_RegisterS21EWeaponVarAliases(CSquirrelVM* s)
 		{ "is_twohanded_consumable", "titanarmor_critical_hit_required" },
 		{ "is_consumable", "titanarmor_critical_hit_required" },
 		{ "activitymodifier3p", "printname" },
-		{ "activitymodifier1p", "printname" },
 		{ "alt_hand_3p_attach_name", "printname" },
 		{ "update_player_last_fire_time", "custom_float_0" },
 		{ "allow_zoom_on_raise", "titanarmor_critical_hit_required" },

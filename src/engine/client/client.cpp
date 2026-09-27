@@ -371,6 +371,8 @@ void VClient::Detour(const bool bAttach) const
 #include "networksystem/hostmanager.h"
 #include "jwt/include/decode.h"
 #include "mbedtls/include/mbedtls/sha256.h"
+#include "tier2/cryptutils.h"
+#include "engine/shared/host_proof.h"
 #include "game/server/recipientfilter.h"
 #include "game/server/util_server.h"
 #include "game/shared/scriptnetdata_limits.h"
@@ -384,6 +386,7 @@ void VClient::Detour(const bool bAttach) const
 #include "engine/cmd.h"
 #include "engine/server/sv_rcon.h"
 #include "game/server/gameinterface.h"
+#include "engine/server/demo_record_sv.h"
 #include <cstdlib>
 #include <cstring>
 
@@ -397,6 +400,7 @@ static uint32_t s_nBridgeRelSeqDrops = 0;
 //---------------------------------------------------------------------------------
 void CClient::Clear(void)
 {
+	DemoSv_OnClientCleared(this);
 	GetClientExtended()->Reset(); // Reset extended data.
 	CClient__Clear(this);
 
@@ -642,6 +646,102 @@ static bool Auth_TokenReplayFromOtherPeer(const char* const token, const int tok
 	memcpy(s_authReplayTable[slot].addr, pPeerIP->s6_addr, sizeof(s_authReplayTable[slot].addr));
 	s_authReplayTable[slot].acceptTime = flNow;
 	return false;
+}
+
+//---------------------------------------------------------------------------------
+// Purpose: publish this server's host proof key for its own machine
+//---------------------------------------------------------------------------------
+static HANDLE s_hHostProofMap = nullptr;
+static int s_nHostProofPort = 0;
+static char s_szHostProof[HOST_PROOF_HEX_LEN + 1];
+
+void HostProof_Publish(const int nPort)
+{
+	if (nPort <= 0 || (s_hHostProofMap && s_nHostProofPort == nPort))
+		return;
+
+	if (s_hHostProofMap)
+	{
+		CloseHandle(s_hHostProofMap);
+		s_hHostProofMap = nullptr;
+	}
+	s_szHostProof[0] = '\0';
+
+	unsigned char key[HOST_PROOF_HEX_LEN / 2];
+	const char* pszError = nullptr;
+	if (!Plat_GenerateRandom(key, sizeof(key), pszError))
+	{
+		Warning(eDLL_T::SERVER, "[HOST-PROOF] %s; no local host admin\n", pszError);
+		return;
+	}
+
+	char szName[64];
+	V_snprintf(szName, sizeof(szName), HOST_PROOF_MAPPING_FMT, nPort);
+
+	HANDLE hMap = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, HOST_PROOF_HEX_LEN + 1, szName);
+	if (!hMap)
+	{
+		Warning(eDLL_T::SERVER, "[HOST-PROOF] CreateFileMapping failed (%lu); no local host admin\n", GetLastError());
+		return;
+	}
+
+	// Someone else already owns the name and would know the key.
+	if (GetLastError() == ERROR_ALREADY_EXISTS)
+	{
+		CloseHandle(hMap);
+		Warning(eDLL_T::SERVER, "[HOST-PROOF] '%s' already exists; no local host admin\n", szName);
+		return;
+	}
+
+	char* const pView = static_cast<char*>(MapViewOfFile(hMap, FILE_MAP_WRITE, 0, 0, HOST_PROOF_HEX_LEN + 1));
+	if (!pView)
+	{
+		CloseHandle(hMap);
+		return;
+	}
+
+	static const char s_Hex[] = "0123456789abcdef";
+	for (size_t i = 0; i < sizeof(key); i++)
+	{
+		s_szHostProof[i * 2] = s_Hex[key[i] >> 4];
+		s_szHostProof[i * 2 + 1] = s_Hex[key[i] & 0xF];
+	}
+	s_szHostProof[HOST_PROOF_HEX_LEN] = '\0';
+
+	memcpy(pView, s_szHostProof, HOST_PROOF_HEX_LEN + 1);
+	UnmapViewOfFile(pView);
+	SecureZeroMemory(key, sizeof(key));
+
+	s_hHostProofMap = hMap;
+	s_nHostProofPort = nPort;
+}
+
+static bool HostProof_Matches(const char* const pszProof)
+{
+	if (!s_szHostProof[0] || !pszProof || V_strlen(pszProof) != HOST_PROOF_HEX_LEN)
+		return false;
+
+	unsigned char diff = 0;
+	for (int i = 0; i < HOST_PROOF_HEX_LEN; i++)
+		diff |= static_cast<unsigned char>(pszProof[i] ^ s_szHostProof[i]);
+	return diff == 0;
+}
+
+//---------------------------------------------------------------------------------
+// Purpose: check and wipe the host proof the client sent at connect, so the
+//          key never stays readable in its userinfo
+//---------------------------------------------------------------------------------
+bool CClient::ConsumeHostProof(void)
+{
+	KeyValues* const pProof = m_ConVars ? m_ConVars->FindKey(HOST_PROOF_CONVAR) : nullptr;
+	if (!pProof)
+		return false;
+
+	char* const pszValue = const_cast<char*>(pProof->GetString());
+	const bool bMatch = HostProof_Matches(pszValue);
+	// The engine owns this string; wipe it in place rather than free it here.
+	SecureZeroMemory(pszValue, V_strlen(pszValue));
+	return bMatch;
 }
 
 //---------------------------------------------------------------------------------
@@ -902,6 +1002,7 @@ bool CClient::Authenticate(const char* const playerName, char* const reasonBuf, 
 
 #undef ERROR_AND_RETURN
 
+	GetClientExtended()->SetIdentityVerified(true);
 	return true;
 }
 
@@ -944,6 +1045,17 @@ bool CClient::Connect(const char* szName, CNetChan* pNetChan, bool bFakePlayer,
 
 			return false;
 		}
+	}
+
+	if (pNetChan && !bFakePlayer)
+	{
+		const bool bProof = ConsumeHostProof();
+		const CNetAdr& remoteAdr = pNetChan->GetRemoteAddress();
+		const bool bLoopback = remoteAdr.IsLoopback() || NET_IsAddressLoopback(remoteAdr);
+		GetClientExtended()->SetLocalHost(bProof && bLoopback);
+		// Relays forward remote players from 127.0.0.1 without a token; only the host proof vouches for that uid.
+		if (bLoopback)
+			GetClientExtended()->SetIdentityVerified(bProof);
 	}
 
 #undef REJECT_CONNECTION

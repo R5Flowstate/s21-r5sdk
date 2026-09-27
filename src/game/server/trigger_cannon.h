@@ -25,6 +25,8 @@ void TriggerCannon_OnJumpPadLaunched(void* pPlayer, void* pTrigger);
 // AirMove and suppress lurch for the same window.
 bool TriggerCannon_BeginFlightLock(void* pPlayer, void* pMoveData, float savedDir[3]);
 void TriggerCannon_EndFlightLock(void* pMoveData, const float savedDir[3]);
+// Ends a player's launch air-control lock before its flight time runs out.
+void TriggerCannon_CancelFlightLock(const void* pPlayer);
 
 // Shared with the lift/blackhole pass -- both hang off the same predicted-trigger
 // walk, so the engine pointers have exactly one owner.

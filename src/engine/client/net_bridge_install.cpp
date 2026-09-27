@@ -13,6 +13,7 @@
 #include "engine/client/net_bridge_internal.h"
 #include "core/bridge_stats.h"
 #include "engine/client/bridge_join_auth.h"
+#include "engine/client/demo_bridge.h"
 #include "engine/client/bridge_connect_password.h"
 #include "engine/sys_integrity.h"
 #include "rtech/pak/pak_lobby_world.h"
@@ -48,6 +49,7 @@
 #include "game/client/c_baseentity.h"
 #include "game/client/mantle_boost.h"
 #include "game/client/pred_authority.h"
+#include "game/client/melee_activity_trace.h"
 #include "game/shared/heap_canary.h"
 #include "vscript/languages/squirrel_re/vsquirrel.h"
 #include "vscript/vsquirrel_s21.h"
@@ -319,6 +321,16 @@ CNetChan* S21Bridge_GetActiveChan(void)
 	return s_bridgeChan;
 }
 
+bool S21Bridge_NativeConnectPending(void)
+{
+	return InterlockedCompareExchange(&s_needNativeConnected, 0, 0) != 0;
+}
+
+const char* S21Bridge_ConnMapName(void)
+{
+	return g_bridgeConnMapName;
+}
+
 // Bare map name from CONNACCEPT. CClientState+0x1BC is later overlapped at +0x1C4;
 // ziprail.ent keys off this captured string, not the stomped field.
 char g_bridgeConnMapName[64] = {};
@@ -356,6 +368,36 @@ static uintptr_t S21Bridge_ClientStatePtr(void)
 uintptr_t Bridge_ClientStatePtr(void)
 {
 	return s_clientStatePtr;
+}
+
+int S21Bridge_GetClientSignonState(void)
+{
+	const uintptr_t cl = S21Bridge_ClientStatePtr();
+	if (!cl)
+		return -1;
+	__try
+	{
+		return *reinterpret_cast<const int*>(cl + 0xAC); // m_nSignonState
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return -1;
+	}
+}
+
+bool S21Bridge_HasNativeChan(void)
+{
+	const uintptr_t cl = S21Bridge_ClientStatePtr();
+	if (!cl)
+		return false;
+	__try
+	{
+		return *reinterpret_cast<const uintptr_t*>(cl + 0x60) != 0; // CNetChan*
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return false;
+	}
 }
 
 // S21 never reaches native CONNECTED from the rewritten 0x04 alone. Drive
@@ -2884,6 +2926,9 @@ static void __fastcall Hook_HostStateFrame(__int64 a1, double a2, float a3)
 // Same pump at SDK init. Single-attach: skip HostStateFrame if this wins.
 static PFN_HostStateFrame s_origHostStateFrameEarly = nullptr;
 static bool               s_bHostStateEarlyHooked   = false;
+// Hook_HostFrame attaches on the first DT decode; until then the demo pump
+// rides this frame so -replay and menu playback work from a cold boot.
+static bool               s_bHostFrameHooked        = false;
 
 static void __fastcall Hook_HostStateFrameEarly(__int64 a1, double a2, float a3)
 {
@@ -2894,6 +2939,19 @@ static void __fastcall Hook_HostStateFrameEarly(__int64 a1, double a2, float a3)
 	RCON_LauncherClient_Think();
 	RCONClient()->RunFrame();
 	CDiscordPresence::Update();
+
+	if (!s_bHostFrameHooked)
+	{
+		// The CONNECTED drive lives in the apply pipe, which otherwise attaches on the
+		// first DT decode; a connect started before the lobby decodes anything needs it now.
+		if (InterlockedCompareExchange(&s_needNativeConnected, 0, 0) != 0)
+		{
+			Warning(eDLL_T::CLIENT, "[EARLY-PIPE] CONNECTED queued before any decode -- installing apply pipe\n");
+			Bridge_InstallApplyPipeHooks();
+		}
+		DemoRecord_OnHostFrame();
+		DemoPlay_OnHostFrame();
+	}
 
 	if (s_origHostStateFrameEarly)
 		s_origHostStateFrameEarly(a1, a2, a3);
@@ -2911,26 +2969,27 @@ void Bridge_InstallEarlyPipeHooks(void)
 		SDK_Log("[EARLY-PIPE] HostStateFrame resolve failed; lazy path stays armed\n");
 		return;
 	}
-	if (DetourTransactionBegin() != NO_ERROR)
-	{
-		s_origHostStateFrameEarly = nullptr;
-		SDK_Log("[EARLY-PIPE] DetourTransactionBegin failed\n");
-		return;
-	}
-	DetourUpdateThread(GetCurrentThread());
+	// Called from VNetDecodeDiagS21::Detour, which already runs inside the
+	// registry's transaction; a nested Begin fails, so join that one instead.
+	const bool bOwnTxn = DetourTransactionBegin() == NO_ERROR;
+	if (bOwnTxn)
+		DetourUpdateThread(GetCurrentThread());
 	const LONG r = DetourAttach(reinterpret_cast<PVOID*>(&s_origHostStateFrameEarly),
 	                            reinterpret_cast<PVOID>(&Hook_HostStateFrameEarly));
 	if (r == NO_ERROR)
 	{
-		DetourTransactionCommit();
+		if (bOwnTxn)
+			DetourTransactionCommit();
 		s_bHostStateEarlyHooked = true;
-		SDK_Log("[EARLY-PIPE] HostStateFrame RCON pump armed pre-connect\n");
+		Warning(eDLL_T::CLIENT, "[EARLY-PIPE] HostStateFrame pump armed pre-connect (%s transaction)\n",
+			bOwnTxn ? "own" : "registry");
 	}
 	else
 	{
-		DetourTransactionAbort();
+		if (bOwnTxn)
+			DetourTransactionAbort();
 		s_origHostStateFrameEarly = nullptr;
-		SDK_Log("[EARLY-PIPE] HostStateFrame attach failed err=%ld\n", r);
+		Warning(eDLL_T::CLIENT, "[EARLY-PIPE] HostStateFrame attach failed err=%ld\n", r);
 	}
 }
 
@@ -2953,6 +3012,10 @@ static ConVar bridge_gts_force("bridge_gts_force", "1", FCVAR_RELEASE,
 static float __fastcall Hook_GetGameTimescale(void* thisptr)
 {
 	const float r = s_origGetGameTimescale ? s_origGetGameTimescale(thisptr) : 1.0f;
+
+	float flDemo = 1.0f;
+	if (DemoPlay_TimescaleOverride(&flDemo))
+		return flDemo;
 
 	// 0 / NaN / huge is decode garbage (marked-map) and would starve cmds.
 	// (0, 0.05] is a deliberate freeze on the wire -- pass it through so the
@@ -3453,6 +3516,7 @@ static char __fastcall Hook_CS_SetSignonState(__int64 a1, int newState, int spaw
 		: 0;
 
 	HeapCanary::Checkpoint(phaseOut);
+	DemoRecord_OnSignonState(newState);
 
 	// CBaseClient::SetSignonState never runs on this client; C2S NEW..FULL
 	// has to be queued from the CClientState hook that actually fires.
@@ -3585,7 +3649,7 @@ static ConVar bridge_ack_fix("bridge_ack_fix", "1", FCVAR_RELEASE,
 
 static __int64 __fastcall Hook_PredFinalize(__int64 a1)
 {
-	const bool wantFix = bridge_ack_fix.GetBool();
+	const bool wantFix = bridge_ack_fix.GetBool() && !Demo_IsPlaying();
 	int ackBefore = 0;
 	if (wantFix && a1)
 	{
@@ -4102,6 +4166,9 @@ static bool AnimWireSkip_IsClientAuthored(uintptr_t ent)
 {
 	if (!bridge_anim_wire_skip.GetBool() || !ent)
 		return false;
+	// A replay runs no prediction, so the wire is the only animation source.
+	if (Demo_IsPlaying())
+		return false;
 	if (ent != BridgeLocalPlayer())
 		return false;
 
@@ -4188,6 +4255,10 @@ static __int64 __fastcall Hook_OverlayInterpFields(uintptr_t ent, float curTime,
 // PlayerRunCommand_Prediction: log FULL/LITE/SKIPPED, always call orig.
 static __int64 __fastcall Hook_PlayerRunCmdPred(__int64 a1, __int64 a2, __int64 a3, __int64* a4)
 {
+	// A demo carries no usercmds for the pov pawn; it moves by interpolation.
+	if (Demo_IsPlaying())
+		return 0;
+
 	// Re-anchor duck timer (player+0x242C) to command K-1. command_number at cmd+0x00.
 	struct DuckRemRing { uint32_t nCmd; int nRem; };
 	static DuckRemRing s_duckRing[256] = {};
@@ -4468,7 +4539,8 @@ static void __fastcall Hook_PlayerMoveClient(__int64 thisptr)
 	__try {
 		if (s_origPlayerMoveClient)
 			s_origPlayerMoveClient(thisptr);
-		NoClipSim_Run(thisptr);
+		if (!Demo_IsPlaying())
+			NoClipSim_Run(thisptr);
 	} __except (EXCEPTION_EXECUTE_HANDLER) {
 		static uint32_t s_nFaults = 0;
 		if (++s_nFaults <= 8)
@@ -4481,8 +4553,13 @@ static double __fastcall Hook_HostFrame(double a1, float a2)
 	if (bridge_gtsfix.GetBool())
 		InstallGameTimescaleFix();
 
+	DemoRecord_OnHostFrame();
+	DemoPlay_OnHostFrame();
+
 	const double r = s_origHostFrame ? s_origHostFrame(a1, a2) : 0.0;
+	DemoPlay_LockView();
 	ClockDrift_FlushPending();
+	MeleeActivityTrace_OnFrame();
 	return r;
 }
 
@@ -6381,6 +6458,9 @@ S21PlaylistOverride_t s_playlistOverrides[S21BR_PLO_MAX_ENTRIES];
 // rewritten, so a racing reader sees an old entry or no entry -- never a torn one.
 volatile long s_nPlaylistOverrides = 0;
 
+// Bumped whenever the table is rewritten; read-time verdicts are cached per generation.
+volatile long s_nPlaylistOverridesGen = 0;
+
 static ConVar bridge_playlist_overrides("bridge_playlist_overrides", "1", FCVAR_RELEASE,
 	"Apply the server's runtime playlist var overrides (svc_PlaylistOverrides). "
 	"0 = ignore them and always read the local playlist file value.");
@@ -6391,7 +6471,55 @@ static void S21Bridge_ClearPlaylistOverrides(void)
 		return;
 
 	s_nPlaylistOverrides = 0;
+	InterlockedIncrement(&s_nPlaylistOverridesGen);
 	SDK_Log("[BRIDGE-PLO] override table cleared\n");
+}
+
+// An entry off the allowlist applies only when the current playlist declares it
+// as a host setting and the value fits the declaration. Verdicts are cached per
+// (table generation, playlist) because scripts read playlist vars every frame.
+static long s_ploVerdictGen = -1;
+static char s_szPloVerdictPlaylist[128];
+static signed char s_ploVerdict[S21BR_PLO_MAX_ENTRIES];
+static SRWLOCK s_ploVerdictLock = SRWLOCK_INIT;
+
+static bool S21Bridge_PlaylistOverrideAllowed(const long index, const char* pszPlaylist)
+{
+	const S21PlaylistOverride_t& entry = s_playlistOverrides[index];
+	if (entry.m_bAllowlisted)
+		return true;
+
+	AcquireSRWLockExclusive(&s_ploVerdictLock);
+
+	const long gen = s_nPlaylistOverridesGen;
+	if (gen != s_ploVerdictGen || V_strcmp(pszPlaylist, s_szPloVerdictPlaylist) != 0)
+	{
+		s_ploVerdictGen = gen;
+		V_strncpy(s_szPloVerdictPlaylist, pszPlaylist, sizeof(s_szPloVerdictPlaylist));
+		memset(s_ploVerdict, -1, sizeof(s_ploVerdict));
+	}
+
+	if (s_ploVerdict[index] < 0)
+	{
+		const char* const pszDecl = Playlists_FindSettingDecl(pszPlaylist, entry.m_szName);
+		char szReason[128] = "";
+		const bool bOk = pszDecl && Playlists_ValidateSetting(pszDecl, entry.m_szValue, szReason, sizeof(szReason));
+		s_ploVerdict[index] = bOk ? 1 : 0;
+
+		if (bOk)
+			SDK_Log("[BRIDGE-PLO] host setting '%s' = '%s' applied (playlist '%s')\n",
+				entry.m_szName, entry.m_szValue, pszPlaylist);
+		else if (pszDecl)
+			Warning(eDLL_T::CLIENT, "[BRIDGE-PLO] host setting '%s' = '%s' ignored: %s\n",
+				entry.m_szName, entry.m_szValue, szReason);
+		else if (pszPlaylist[0])
+			Warning(eDLL_T::CLIENT, "[BRIDGE-PLO] override '%s' ignored: not a setting of playlist '%s' "
+				"and not in bridge_playlist_override_allow\n", entry.m_szName, pszPlaylist);
+	}
+
+	const bool bAllowed = s_ploVerdict[index] == 1;
+	ReleaseSRWLockExclusive(&s_ploVerdictLock);
+	return bAllowed;
 }
 
 // Case-insensitive, mirroring the dedi's own override lookup.
@@ -6400,11 +6528,18 @@ static const char* S21Bridge_FindPlaylistOverride(const char* pszVar)
 	if (!pszVar || !pszVar[0] || !bridge_playlist_overrides.GetBool())
 		return nullptr;
 
+	// Declarations always come from the local playlist file.
+	if (Playlists_IsSettingDeclName(pszVar))
+		return nullptr;
+
 	const long count = s_nPlaylistOverrides;
 	for (long i = 0; i < count && i < S21BR_PLO_MAX_ENTRIES; i++)
 	{
-		if (_stricmp(s_playlistOverrides[i].m_szName, pszVar) == 0)
-			return s_playlistOverrides[i].m_szValue;
+		if (_stricmp(s_playlistOverrides[i].m_szName, pszVar) != 0)
+			continue;
+		if (!S21Bridge_PlaylistOverrideAllowed(i, Playlists_GetCurrentName()))
+			return nullptr;
+		return s_playlistOverrides[i].m_szValue;
 	}
 	return nullptr;
 }
@@ -6614,6 +6749,7 @@ void Bridge_InstallApplyPipeHooks(void)
 		return;
 	}
 	DetourTransactionCommit();
+	s_bHostFrameHooked = s_origHostFrame != nullptr;
 
 	const int nSkippedHook = (!s_origClProcessFrame) + (!s_origTransitionEntity) + (!s_origPropApplyLoop)
 		+ (!s_origClProcessSnapshotWT) + (!s_origClWriteMoveCmds) + (!s_origParseDeltaHeader)
@@ -7660,6 +7796,12 @@ static int WSAAPI Hook_sendto(SOCKET s, const char* buf, int len, int flags,
 	if (to && tolen > 0)
 		Bridge_NoteEngineServerSendto(to, tolen);
 
+	// While a demo plays the engine is connected to nobody: its own connect
+	// retries and netchan sends to the virtual server stay in the process.
+	if (Demo_IsPlaying() && to && tolen > 0
+		&& (Bridge_SockaddrIsLoopback(to) || Bridge_IsBridgeGamePort(Bridge_SockaddrPortHost(to))))
+		return len;
+
 	// Relay NA_IP sendto(loopback:gameport) through the bridge socket to s_bridgeDest.
 	if (s_bridgeActive && s_bridgeSocket != INVALID_SOCKET && to && tolen > 0)
 	{
@@ -7700,9 +7842,7 @@ static int WSAAPI Hook_sendto(SOCKET s, const char* buf, int len, int flags,
 			else
 			{
 				// OOB or tiny packet -- forward as-is
-				sent = s_origSendto(s_bridgeSocket, buf, len, 0,
-					reinterpret_cast<const sockaddr*>(&s_bridgeDest),
-					sizeof(s_bridgeDest));
+				sent = S21Bridge_TxRaw(buf, len);
 			}
 
 			static long long s_rewriteCount = 0;
@@ -8159,7 +8299,8 @@ static bool S21Bridge_StartHandshake()
     if (s_bridgeActive || s_hsStage != BridgeHsStage::Idle)
         return false;
 
-    if (!IsOriginDisabled() && !EbisuSDK_IsConnectIdentityReady())
+    const bool bDemo = Demo_IsPlaying();
+    if (!bDemo && !IsOriginDisabled() && !EbisuSDK_IsConnectIdentityReady())
     {
         SDK_Log("[NET-OBS] HANDSHAKE hold: Origin identity not ready\n");
         return false;
@@ -8172,6 +8313,21 @@ static bool S21Bridge_StartHandshake()
     MantleBoostClient_OnSessionReset();
     s_challengeSock = INVALID_SOCKET;
     InterlockedExchange(&s_dest04Injected, 0);
+
+    // Virtual connect: the player answers the handshake from the demo file.
+    if (bDemo)
+    {
+        if (!DemoPlay_OnStartHandshake())
+            return false;
+        sockaddr_in6 demoDest;
+        S21Bridge_ResolveDest(demoDest);
+        s_bridgeSocket = INVALID_SOCKET;
+        s_bridgeDest = demoDest;
+        s_hsStage = BridgeHsStage::ChallengeSent;
+        s_hsStageDeadline = GetTickCount64() + 15000;
+        Msg(eDLL_T::ENGINE, "[DEMO] virtual connect started\n");
+        return true;
+    }
 
     SOCKET s4 = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
     if (s4 == INVALID_SOCKET)
@@ -8243,7 +8399,6 @@ void S21Bridge_OnConnAccept(const char* mapName, const char* gameMode)
         mapName ? mapName : "(null)", gameMode ? gameMode : "(null)");
     Msg(eDLL_T::ENGINE, "[BRIDGE] CONNACCEPT map='%s' -- queuing CONNECTED\n",
         mapName && mapName[0] ? mapName : "?");
-
     // Write map name into CClientState. +0x17C m_szLevelFileName, +0x1BC m_szLevelBaseName.
     // g_pClientState is null here; the live object is the DX11/DX12 singleton.
     if (!s_clientStatePtr)
@@ -8285,15 +8440,13 @@ void S21Bridge_OnConnAccept(const char* mapName, const char* gameMode)
         initPkt, sizeof(initPkt), ++s_c2sSeqCounter, 0);
     if (initLen > 0 && s_bridgeSocket != INVALID_SOCKET && s_origSendto)
     {
-        const int initSent = s_origSendto(s_bridgeSocket,
-            reinterpret_cast<const char*>(initPkt), initLen, 0,
-            reinterpret_cast<const sockaddr*>(&s_bridgeDest), sizeof(s_bridgeDest));
+        const int initSent = S21Bridge_TxRaw(initPkt, initLen);
         Msg(eDLL_T::ENGINE,
             "[BRIDGE] CONNECTED c2s len=%d sent=%d seq=%u sock=%d\n",
             initLen, initSent, s_c2sSeqCounter,
             s_bridgeSocket != INVALID_SOCKET ? 1 : 0);
     }
-    else
+    else if (!Demo_IsPlaying())
     {
         Warning(eDLL_T::ENGINE,
             "[BRIDGE] CONNECTED c2s FAILED len=%d sock=%d sendto=%p\n",
@@ -8306,9 +8459,7 @@ void S21Bridge_OnConnAccept(const char* mapName, const char* gameMode)
         initPkt, sizeof(initPkt), ++s_c2sSeqCounter, 0);
     if (initLen > 0 && s_bridgeSocket != INVALID_SOCKET && s_origSendto)
     {
-        const int uiSent = s_origSendto(s_bridgeSocket,
-            reinterpret_cast<const char*>(initPkt), initLen, 0,
-            reinterpret_cast<const sockaddr*>(&s_bridgeDest), sizeof(s_bridgeDest));
+        const int uiSent = S21Bridge_TxRaw(initPkt, initLen);
         Msg(eDLL_T::ENGINE,
             "[BRIDGE] USERINFO c2s len=%d sent=%d seq=%u\n",
             initLen, uiSent, s_c2sSeqCounter);
@@ -8420,6 +8571,7 @@ void S21Bridge_RememberChallengeMap(const char* pszMap)
 
 static void S21Bridge_OnSessionEnded(const char* reason)
 {
+	DemoPlay_OnSessionEnded();
 	Bridge_NotifyConnectSessionEnded();
 	s_connAcceptDone = false;
 	PakLobby_OnSessionReset();
@@ -8451,6 +8603,49 @@ static void S21Bridge_ResetForNewConnect(void)
 	if (s_hsStage != BridgeHsStage::Idle || s_bridgeActive
 		|| s_bridgeSocket != INVALID_SOCKET)
 		S21Bridge_OnSessionEnded("new connect");
+}
+
+int S21Bridge_TxRaw(const void* pBuf, const int nLen)
+{
+	if (Demo_IsPlaying())
+		return nLen;
+	if (!pBuf || nLen <= 0 || !s_origSendto || s_bridgeSocket == INVALID_SOCKET)
+		return -1;
+	return s_origSendto(s_bridgeSocket, static_cast<const char*>(pBuf), nLen, 0,
+		reinterpret_cast<const sockaddr*>(&s_bridgeDest), sizeof(s_bridgeDest));
+}
+
+// Receive-side state that would reject re-delivered data after a demo rewind.
+void S21Bridge_ResetForDemoSeek(void)
+{
+	S21Bridge_ResetReliableRecv("demo seek");
+	S21Bridge_ResetSplitReassembly();
+	S21Bridge_FlushS2CScriptRemote("demo seek");
+	S21Bridge_ResetClockAckState();
+	S21Bridge_S2CScriptRemote_ResetAppliedTick();
+}
+
+void S21Bridge_StampChanAlive(void)
+{
+	S21Bridge_StampNetChanReceived();
+}
+
+float S21Bridge_IntervalPerTick(void)
+{
+	const uintptr_t a = NetObs_IntervalPerTickAddr();
+	float fl = 0.0f;
+	if (a)
+	{
+		__try { fl = *reinterpret_cast<const float*>(a); }
+		__except (EXCEPTION_EXECUTE_HANDLER) { fl = 0.0f; }
+	}
+	return (fl > 0.001f && fl < 1.0f) ? fl : 0.05f;
+}
+
+uint16_t S21Bridge_GamePort(void)
+{
+	const uint16_t port = Bridge_ReadHostPortConvar();
+	return port ? port : 37015;
 }
 
 void S21Bridge_OnConnReject(const char* reason)
@@ -9333,10 +9528,7 @@ void S21Bridge_SendDataBlockAck()
 	// triggers the "complete all" fast path on the server regardless)
 	ackBuf[pos++] = 0x00;
 
-	const int ackResult = s_origSendto(s_bridgeSocket,
-		reinterpret_cast<const char*>(ackBuf), pos, 0,
-		reinterpret_cast<const sockaddr*>(&s_bridgeDest),
-		sizeof(s_bridgeDest));
+	const int ackResult = S21Bridge_TxRaw(ackBuf, pos);
 	const int ackErr = (ackResult <= 0) ? WSAGetLastError() : 0;
 
 	SDK_Log("[BRIDGE-DB] sent ACK: transferId=%d(+1=%d) transferNr=%d sendto=%d wsa=%d\n",
@@ -9345,6 +9537,9 @@ void S21Bridge_SendDataBlockAck()
 
 void S21Bridge_OnDataBlockComplete(const uint8_t* rawBuf, int rawSize)
 {
+	DemoRecord_OnDataBlock(rawBuf, rawSize);
+	const long nFullBefore = S21Bridge_FullSnapshotCount();
+
 	SDK_Log("[BRIDGE-DB] TRANSFER #%d COMPLETE: %d blocks, %d bytes total\n",
 		s_dbTransferCount + 1, s_dbTotalBlocks, s_dbTransferSize);
 
@@ -9376,6 +9571,7 @@ void S21Bridge_OnDataBlockComplete(const uint8_t* rawBuf, int rawSize)
 		{
 			SDK_Log("[BRIDGE-DB] ERROR: LZ4 decompression failed (ret=%d), compressedSize=%d\n",
 				decompSize, compressedSize);
+			DemoRecord_OnDataBlockEnd(false);
 			s_dbComplete = true;
 			s_dbTransferCount++;
 			return;
@@ -9510,6 +9706,11 @@ void S21Bridge_OnDataBlockComplete(const uint8_t* rawBuf, int rawSize)
 	{
 		SDK_Log("[BRIDGE-DB] WARNING: no CNetChan found, cannot inject signon data\n");
 	}
+
+	const bool bFullBlock = S21Bridge_FullSnapshotCount() != nFullBefore;
+	DemoRecord_OnDataBlockEnd(bFullBlock);
+	if (Demo_IsPlaying() && bFullBlock)
+		DemoPlay_OnFullSnapshotBlock();
 
 	s_dbComplete = true;
 	s_dbTransferCount++;

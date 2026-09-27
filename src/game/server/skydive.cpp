@@ -11,6 +11,7 @@
 #include "tier1/cvar.h"
 #include "skydive.h"
 #include "trigger_updraft.h"
+#include "skyward.h"
 #include "baseentity.h"
 #include "game/shared/usercmd.h"
 #include "game/shared/edict_dirty.h"
@@ -378,6 +379,8 @@ static int64_t Hook_CGameMovement__FullTossMove(int64_t movement)
 		}
 	}
 
+	SkywardBridge_PreTossMove(movement);
+
 	CPlayer* const pPrevStepPlayer = s_pMoveStepPlayer;
 	s_pMoveStepPlayer = player;
 	const int64_t result = v_CGameMovement__FullTossMove(movement);
@@ -386,6 +389,7 @@ static int64_t Hook_CGameMovement__FullTossMove(int64_t movement)
 	if (player)
 		SkydiveBridge_UpdraftEndArms(player, flOriginZBefore);
 
+	SkywardBridge_PostTossMove(movement);
 	return result;
 }
 

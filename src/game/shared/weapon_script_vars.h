@@ -20,8 +20,16 @@ class CSquirrelVM;
 void WeaponScriptVars_RegisterWeaponFuncs(ScriptClassDescriptor_t* weaponStruct);
 void WeaponScriptVars_RegisterEntityFuncs(ScriptClassDescriptor_t* entityStruct);
 void WeaponScriptVars_RegisterWeaponTypeDisableFuncs(ScriptClassDescriptor_t* entityStruct);
+// Server refcounted weapon-type disable, the natives behind DisableWeaponTypes / EnableWeaponTypes.
+void WeaponScriptVars_DisableWeaponTypes(void* pEntity, uint32_t flags);
+void WeaponScriptVars_EnableWeaponTypes(void* pEntity, uint32_t flags);
+// WPT_* masks: the server keeps S3 bit order, the S21 client reads its own.
+uint32_t WeaponScriptVars_WeaponTypesToS21(uint32_t s3Flags);
+uint32_t WeaponScriptVars_WeaponTypesFromS21(uint32_t s21Flags);
 void WeaponScriptVars_RegisterWPTConstants(CSquirrelVM* s);
 void WeaponScriptVars_RegisterS21EWeaponVarAliases(CSquirrelVM* s);
+// Native settings slot backing an S21-only weapon key, or nullptr.
+const char* WeaponScriptVars_GetReservedSlot(const char* s21Key);
 float WeaponScriptVars_GetScriptFloat0(void* pWeapon);
 void WeaponScriptVars_SetScriptFloat0(void* pWeapon, float value);
 void WeaponScriptVars_LevelShutdown();

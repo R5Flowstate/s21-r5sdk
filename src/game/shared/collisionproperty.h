@@ -114,6 +114,7 @@ public:
 	// movement hull-sweep traces with (set from the per-pose hull cache).
 	inline const Vector3D& Diag_Mins(void) const { return m_vecMins; }
 	inline const Vector3D& Diag_Maxs(void) const { return m_vecMaxs; }
+	inline char Diag_SolidType(void) const { return m_nSolidType; }
 
 	// Entity-local. Both are networked, so the owning entity must be dirty-marked
 	// for the change to reach a client.

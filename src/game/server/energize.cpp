@@ -181,15 +181,11 @@ static constexpr ptrdiff_t kWpnOffWeaponActivity = 0x121C;
 // char __fastcall SetIdealWeaponActivity(CWeaponX* this, unsigned activity)
 typedef char (__fastcall* SetIdealWeaponActivity_t)(void* pWeapon, unsigned int activity);
 static SetIdealWeaponActivity_t v_SetIdealWeaponActivity = nullptr;
-static bool s_setIdealResolved = false;
 
-static void Energize_ResolveSetIdealWeaponActivity(void)
+// Must resolve in GetFun: translocation detours this function, and a scan after
+// attach sees the jmp instead of the prologue. Calls go through that hook.
+void VEnergize::GetFun(void) const
 {
-	if (s_setIdealResolved)
-		return;
-	s_setIdealResolved = true;
-
-	// Unique prologue (offhand_activation_patches / r5apex_ds)
 	// mov [rsp+8],rbx; mov [rsp+10h],rdi; push rbp; mov rbp,rsp;
 	// sub rsp,70h; cmp qword ptr [rcx+0FD8h],0
 	Module_FindPattern(g_GameDll,
@@ -197,20 +193,20 @@ static void Energize_ResolveSetIdealWeaponActivity(void)
 		"48 83 B9 D8 0F 00 00 00")
 		.GetPtr(v_SetIdealWeaponActivity);
 
-	if (v_SetIdealWeaponActivity)
-		Msg(eDLL_T::SERVER, "[Energize] SetIdealWeaponActivity resolved @ %p\n",
-			reinterpret_cast<void*>(v_SetIdealWeaponActivity));
-	else
+	if (!v_SetIdealWeaponActivity)
 		Warning(eDLL_T::SERVER,
-			"[Energize] SetIdealWeaponActivity pattern unresolved -- charge anim "
-			"falls back to StartCustomActivity only\n");
+			"[Energize] SetIdealWeaponActivity pattern unresolved -- the charge "
+			"anim cannot play\n");
+}
+
+void VEnergize::GetAdr(void) const
+{
+	LogFunAdr("CWeaponX::SetIdealWeaponActivity (energize)", v_SetIdealWeaponActivity);
 }
 
 static bool Energize_PlayChargeAnim(void* pPlayer, void* pWeapon)
 {
 	const int actId = FindActivityByName("ACT_VM_ENERGIZE");
-
-	Energize_ResolveSetIdealWeaponActivity();
 
 	int seqBefore = -2, idealBefore = -2, weapBefore = -2;
 	int seqAfter  = -2, idealAfter  = -2, weapAfter  = -2;
@@ -914,7 +910,6 @@ static void Energize_ReleaseChargePose(void* pWeapon)
 	if (!sdk_energize_cancel_reset_anim.GetBool() || !pWeapon)
 		return;
 
-	Energize_ResolveSetIdealWeaponActivity();
 	if (!v_SetIdealWeaponActivity)
 		return;
 

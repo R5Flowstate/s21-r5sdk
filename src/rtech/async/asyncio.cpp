@@ -55,6 +55,14 @@ int FS_OpenAsyncFile(const char* const filePath, const int logChannel, size_t* c
         if (V_IsAbsolutePath(fileToLoad))
             return FS_ASYNC_FILE_INVALID; // Never look into mods for absolute paths.
 
+        char rel[MAX_PATH];
+        if (V_strlen(fileToLoad) >= static_cast<int>(sizeof(rel)))
+            return FS_ASYNC_FILE_INVALID;
+        V_strncpy(rel, fileToLoad, sizeof(rel));
+        V_FixSlashes(rel, '/');
+        if (!ModSystem_IsSafeRelativePath(rel))
+            return FS_ASYNC_FILE_INVALID;
+
         ModSystem()->LockModList();
         bool found = false;
 

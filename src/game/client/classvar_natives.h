@@ -29,6 +29,8 @@ struct ClassVarField_t
 
 int ClassVar_EnumFields(ClassVarField_t* pOut, int nMax);
 uintptr_t ClassVar_FieldAddress(const ClassVarField_t& field);
+// poseSettings row the secondary table writes: 0 stand, 1 crouch; -1 without a player.
+int ClassVar_LocalPoseIndex(void);
 uint32_t ClassVar_SettingsRebuildSerial(void);
 uintptr_t ClassVar_LocalBlock(void);
 const char* ClassVar_FormatValue(uintptr_t nAddr, uint16_t nType, char* pszBuf, size_t nBufLen);

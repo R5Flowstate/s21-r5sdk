@@ -74,8 +74,10 @@ void JetDrive_Begin(CPlayer* player, float speed, float accel,
 	const Vector3D& targetPos, CBaseEntity* targetEnt, const Vector3D& targetEntOffset, float timeOut);
 
 // Per-tick mover. ctx is CGameMovement (player +8, mv +16). Writes S3
-// CMoveData::m_vecVelocity at +304. Called from FullWalkMove after orig.
-void JetDrive_AccelFromMoveCtx(void* ctx);
+// CMoveData::m_vecVelocity at +304. Runs inside FullWalkMove after the first
+// half-gravity + CheckVelocity and before Jump/WalkMove/AirMove, the same slot
+// the client's own mover predicts from; dt is that half-gravity frame time.
+void JetDrive_AccelInMove(void* ctx, float dt);
 void JetDrive_Accel(CPlayer* player, void* mv, float dt);
 
 void JetDrive_End(CPlayer* player);
@@ -86,18 +88,10 @@ void JetDrive_EnableDoubleJump(CPlayer* player, const Vector3D& launchVelocity,
 bool JetDrive_IsActive(CPlayer* player);
 bool JetDrive_IsInDecelWindow(CPlayer* player);
 
-// S21 keeps companion_launch up for the whole drive.
-bool JetDrive_ShouldHoldOffhand(void* pWeapon);
-bool JetDrive_NoteOffhandHolster(void* pWeapon);
-void JetDrive_TickHolds(void* pPlayer);
-
-// Whistle stays the 1p host for the whole drive. Block guns/melee.
-bool JetDrive_ShouldBlockSetActiveWeapon(void* pPlayer, void* pWeapon);
-
-// True: caller must not apply newState (keep current). Bind ptpov as a side effect.
-bool JetDrive_FilterWeaponState(void* pWeapon, unsigned int newState);
-// True: caller must not apply this ideal activity (idle/sprint/holster while locked).
-bool JetDrive_FilterIdealActivity(void* pWeapon, unsigned int activity);
+// The jet_driving viewmodel activity modifier: drive live or anim linger.
+bool JetDrive_IsJetDriving(const void* pPlayer);
+// Flags the player's viewmodel modifiers changed on a jet_driving edge.
+void JetDrive_PreRunCommand(void* pPlayer);
 
 struct ScriptClassDescriptor_t;
 void JetDrive_RegisterScriptFunctions(ScriptClassDescriptor_t* playerStruct);

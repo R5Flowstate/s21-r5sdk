@@ -27,9 +27,8 @@
 // srv==0 -> false "had errors" -> the rebase copies originalData (0) over the client's LIVE state
 // -> the duck transition timer dies mid-transition (viewOffset snaps 60->32 instantly while the
 // real server lerps over ~250ms), jump/land state resets -> the felt crouch/jump corrections.
-// Measured (pred_diff.log 40MB tail): srv==0 on 100% of samples for exactly these five fields --
-// m_currentFrameLocalPlayer.m_duckTransitionRemainderMsec (497/497), m_prevJumpPressTime
-// (1353/1353), m_lastSprintPressTime (460/460), m_touchedGroundSinceLastGlide (178/178),
+// Measured (pred_diff.log 40MB tail): srv==0 on 100% of samples for
+// m_currentFrameLocalPlayer.m_duckTransitionRemainderMsec (497/497), m_lastSprintPressTime (460/460),
 // m_ziplineReattachCooldownTime (6/6). FIX: pre-PNR, copy the PREDICTED frame's value over the
 // originalData (server-baseline) slot for exactly these fields -> the compare sees equal (no
 // false error) AND the restore writes the predicted value back (no stomp). The client owns these
@@ -514,6 +513,14 @@ float PredNative_CurTime(void)
 	return *reinterpret_cast<const float*>(globals + 0x10);   // CGlobalVarsBase::curtime
 }
 
+float PredNative_FrameTime(void)
+{
+	const uintptr_t globals = PredNative_Globals();
+	if (!globals)
+		return 0.f;
+	return *reinterpret_cast<const float*>(globals + 0x30);   // the step the glide flight model integrates
+}
+
 float PredNative_LatestPredictedTime(void)
 {
 	const uintptr_t globals = PredNative_Globals();
@@ -721,10 +728,8 @@ static const PredAuthEntry_t s_authTable[] =
 	//-------------------------------------------------------------------
 	// CLIENT_TIMING, scope ANY (migrated verbatim from s_unfedNames)
 	//-------------------------------------------------------------------
-	{ "m_prevJumpPressTime", PredAuthClass_t::CLIENT_TIMING, AUTH_SCOPE_ANY, nullptr, nullptr, 0,
-		"jump press timestamp: S21-only, unfed (srv==0 1353/1353 measured); client-derived from its own usercmds." },
 	{ "m_jumpPressTime", PredAuthClass_t::CLIENT_TIMING, AUTH_SCOPE_ANY, nullptr, nullptr, 0,
-		"jump press timestamp pair with m_prevJumpPressTime; same unfed contract." },
+		"jump press timestamp; client-derived from its own usercmds." },
 	{ "m_lastSprintPressTime", PredAuthClass_t::CLIENT_TIMING, AUTH_SCOPE_ANY, nullptr, nullptr, 0,
 		"sprint press timestamp: S21-only, unfed (srv==0 460/460 measured)." },
 	{ "m_sprintStartedTime", PredAuthClass_t::CLIENT_TIMING, AUTH_SCOPE_ANY, nullptr, &sdk_pred_sprint_mask, 0,
@@ -733,8 +738,6 @@ static const PredAuthEntry_t s_authTable[] =
 		"dedi networks it (DT_LocalPlayerExclusive, server-half sprint FSM authors the member); masked while the wire value reads 0 -- run bridge_bind_census to get the pairing verdict." },
 	{ "m_stickySprintStartTime", PredAuthClass_t::CLIENT_TIMING, AUTH_SCOPE_ANY, nullptr, &sdk_pred_sprint_mask, 0,
 		"dedi networks it (DT_LocalPlayerExclusive, server-half sticky-sprint FSM authors the member); masked while the wire value reads 0 -- run bridge_bind_census to get the pairing verdict." },
-	{ "m_touchedGroundSinceLastGlide", PredAuthClass_t::CLIENT_TIMING, AUTH_SCOPE_ANY, nullptr, nullptr, 0,
-		"S21-only glide bookkeeping; server value is unfed." },
 	{ "m_wallrunLatestFloorHeight", PredAuthClass_t::CLIENT_TIMING, AUTH_SCOPE_ANY, nullptr, nullptr, 0,
 		"wallrun floor-height bookkeeping: S21-only, unfed." },
 	{ "m_wallClimbSetUp", PredAuthClass_t::CLIENT_TIMING, AUTH_SCOPE_ANY, nullptr, &bridge_wallclimb_setup_client, 0,

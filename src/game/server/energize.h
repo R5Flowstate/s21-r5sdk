@@ -23,7 +23,20 @@ void EnergizeBridge_Think(void* pPlayer, void* pUserCmd);
 
 // Wire accessor: appended slots alias live m_modVars. False if this weapon has no FSM entry.
 bool EnergizeBridge_WireGet(void* pWeapon, int* pState, float* pStartTime, float* pEndTime);
-#endif
+
+#include "thirdparty/detours/include/idetour.h"
+
+///////////////////////////////////////////////////////////////////////////////
+class VEnergize : public IDetour
+{
+	virtual void GetAdr(void) const;
+	virtual void GetFun(void) const;
+	virtual void GetVar(void) const { }
+	virtual void GetCon(void) const { }
+	virtual void Detour(const bool bAttach) const { }
+};
+///////////////////////////////////////////////////////////////////////////////
+#endif // !CLIENT_DLL
 
 // Clears all per-instance/per-class caches. Call on level shutdown (mirrors
 // WeaponHeat_LevelShutdown / OffhandSlotsExt_LevelShutdown).

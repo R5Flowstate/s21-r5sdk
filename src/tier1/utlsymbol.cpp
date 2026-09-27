@@ -469,7 +469,7 @@ bool CUtlFilenameSymbolTable::String( const FileNameHandle_t& handle, char *buf,
 	}
 
 	Q_strncpy( buf, path, buflen );
-	Q_strncat( buf, fn, buflen );
+	V_strcat_sized( buf, fn, buflen );
 
 	return true;
 }

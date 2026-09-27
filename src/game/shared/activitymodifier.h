@@ -18,6 +18,8 @@ inline int         g_nActivityModifierCount;
 
 CUtlSymbol  RegisterCustomActivityModifier(const char* modifierName);
 CUtlSymbol  FindActivityModifier(const char* modifierName);
+// Symbol for any modifier name, adding it to the engine table when new.
+CUtlSymbol  InternActivityModifier(const char* modifierName);
 bool        IsActivityModifierSystemInitialized();
 const char* GetActivityModifierName(int index);
 CUtlSymbol  GetActivityModifierSymbol(int index);

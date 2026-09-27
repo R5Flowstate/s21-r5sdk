@@ -337,60 +337,6 @@ static SQRESULT Script_DediUpdateLastTimeDamaged(HSQUIRRELVM v)
 }
 
 //=============================================================================
-// Skyward stubs (jump towers / Valk ult - no engine support)
-//=============================================================================
-// These are reached from shared script that runs every frame in places (ping,
-// tracking vision), so each announces itself once and then stays quiet.
-static void Skydive_AnnounceStubOnce(bool& bAnnounced, const char* const pszName)
-{
-	if (bAnnounced)
-		return;
-
-	bAnnounced = true;
-	DevMsg(eDLL_T::SERVER, "[SKYDIVE-STUB] %s has no engine backing -- always false\n", pszName);
-}
-
-static SQRESULT Script_Player_IsSkywardLaunching(HSQUIRRELVM v)
-{
-	static bool s_bAnnounced = false;
-	Skydive_AnnounceStubOnce(s_bAnnounced, "Player_IsSkywardLaunching");
-	sq_pushbool(v, false);
-	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-}
-
-static SQRESULT Script_Player_IsSkywardFollowing(HSQUIRRELVM v)
-{
-	static bool s_bAnnounced = false;
-	Skydive_AnnounceStubOnce(s_bAnnounced, "Player_IsSkywardFollowing");
-	sq_pushbool(v, false);
-	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-}
-
-static SQRESULT Script_Player_IsSkywardDiving(HSQUIRRELVM v)
-{
-	static bool s_bAnnounced = false;
-	Skydive_AnnounceStubOnce(s_bAnnounced, "Player_IsSkywardDiving");
-	sq_pushbool(v, false);
-	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-}
-
-static SQRESULT Script_Skydive_IsFromUpdraft(HSQUIRRELVM v)
-{
-	static bool s_bAnnounced = false;
-	Skydive_AnnounceStubOnce(s_bAnnounced, "Skydive_IsFromUpdraft");
-	sq_pushbool(v, false);
-	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-}
-
-static SQRESULT Script_Skydive_IsFromSkywardLaunch(HSQUIRRELVM v)
-{
-	static bool s_bAnnounced = false;
-	Skydive_AnnounceStubOnce(s_bAnnounced, "Skydive_IsFromSkywardLaunch");
-	sq_pushbool(v, false);
-	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-}
-
-//=============================================================================
 // Connection quality. Index 0 (best) to 5 (worst / not connected yet).
 //=============================================================================
 static SQRESULT Script_GetConnectionQualityIndex(HSQUIRRELVM v)
@@ -985,31 +931,6 @@ void Script_RegisterPlayerScriptFunctions(ScriptClassDescriptor_t* playerStruct)
 		"Skydive_GetPlayerYaw", "Script_Skydive_GetPlayerYaw",
 		"Returns the skydive yaw the engine is holding for this player", "float", "", false,
 		Script_Skydive_GetPlayerYaw);
-
-	playerStruct->AddFunction(
-		"Player_IsSkywardLaunching", "Script_Player_IsSkywardLaunching",
-		"Returns true if the player is skyward launching", "bool", "", false,
-		Script_Player_IsSkywardLaunching);
-
-	playerStruct->AddFunction(
-		"Player_IsSkywardFollowing", "Script_Player_IsSkywardFollowing",
-		"Returns true if the player is following a skyward launch", "bool", "", false,
-		Script_Player_IsSkywardFollowing);
-
-	playerStruct->AddFunction(
-		"Player_IsSkywardDiving", "Script_Player_IsSkywardDiving",
-		"Returns true if the player is skyward diving", "bool", "", false,
-		Script_Player_IsSkywardDiving);
-
-	playerStruct->AddFunction(
-		"Skydive_IsFromUpdraft", "Script_Skydive_IsFromUpdraft",
-		"Returns true if skydive was triggered by an updraft", "bool", "", false,
-		Script_Skydive_IsFromUpdraft);
-
-	playerStruct->AddFunction(
-		"Skydive_IsFromSkywardLaunch", "Script_Skydive_IsFromSkywardLaunch",
-		"Returns true if skydive was triggered by a skyward launch", "bool", "", false,
-		Script_Skydive_IsFromSkywardLaunch);
 }
 
 void Script_RegisterDedicatedPlayerScriptFunctions(ScriptClassDescriptor_t* playerStruct)

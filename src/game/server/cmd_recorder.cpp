@@ -18,7 +18,9 @@
 #include "game/server/player.h"
 #include "game/server/vscript_server.h"
 #include "game/server/bot_cmd.h"
+#include "engine/shared/demo_reader.h"
 #include "cmd_recorder.h"
+#include <new>
 
 static ConVar cmdrec_max_recordings("cmdrec_max_recordings", "24", FCVAR_RELEASE,
 	"Recorded input streams held in memory at once.", true, 1.f, true, 64.f);
@@ -238,6 +240,136 @@ void CmdRecorder_Free(int nId)
 	CmdRecorder_Release(rec);
 }
 
+//-----------------------------------------------------------------------------
+// Builds a recording from one pov's USERCMD chunks of a server demo (or a drill
+// cut by r5dem_to_cmdrec.py) so the Lab recorder can replay a demo moment.
+// Seconds are relative to the pov's first full snapshot, or to its first
+// command when the file has no packets.
+//-----------------------------------------------------------------------------
+int CmdRecorder_LoadDemo(const char* pszName, const int nPov, const float flStartSec, const float flEndSec)
+{
+	CmdRecorder_EnsureInit();
+
+	ConVar* const pDir = g_pCVar ? g_pCVar->FindVar("sv_demo_dir") : nullptr;
+	const char* const pszRoot = (pDir && pDir->GetString()) ? pDir->GetString() : "platform/demos";
+
+	char szPath[260];
+	if (!R5Dem_IsValidName(pszName) || !Demo_FindFile(pszRoot, pszName, szPath, sizeof(szPath)))
+	{
+		Warning(eDLL_T::SERVER, "[CMDREC] no demo named '%s' under %s\n", pszName ? pszName : "", pszRoot);
+		return -1;
+	}
+
+	CDemoReader reader;
+	char szErr[160];
+	if (!reader.Open(szPath, szErr, sizeof(szErr)))
+	{
+		Warning(eDLL_T::SERVER, "[CMDREC] %s: %s\n", szPath, szErr);
+		return -1;
+	}
+	if (nPov < 0 || nPov >= static_cast<int>(reader.GetHeader().povCount))
+	{
+		Warning(eDLL_T::SERVER, "[CMDREC] %s: pov %d out of range\n", pszName, nPov);
+		return -1;
+	}
+
+	const float flTick = reader.GetHeader().tickIntervalUs ? reader.GetHeader().tickIntervalUs / 1000000.0f : 0.05f;
+	uint32_t nBase = reader.GetFirstFullTick(nPov);
+
+	struct Loaded_s { R5DemUserCmd_s cmd; };
+	std::vector<Loaded_s> cmds;
+	R5DemUserCmdPrefix_s firstPrefix;
+	bool bHavePrefix = false;
+	std::vector<uint8_t> payload;
+	for (const DemoChunkRef_s& c : reader.GetChunks())
+	{
+		if (c.hdr.type != static_cast<uint8_t>(R5DemChunk_t::USERCMD) || c.hdr.pov != nPov)
+			continue;
+		if (!reader.ReadPayload(c, payload) || payload.size() < sizeof(R5DemUserCmdPrefix_s))
+			continue;
+		R5DemUserCmdPrefix_s pre;
+		memcpy(&pre, payload.data(), sizeof(pre));
+		const size_t nAvail = (payload.size() - sizeof(pre)) / sizeof(R5DemUserCmd_s);
+		const size_t n = pre.count < nAvail ? pre.count : nAvail;
+		for (size_t i = 0; i < n; ++i)
+		{
+			Loaded_s l;
+			memcpy(&l.cmd, payload.data() + sizeof(pre) + i * sizeof(R5DemUserCmd_s), sizeof(R5DemUserCmd_s));
+			if (nBase == UINT32_MAX)
+				nBase = l.cmd.tickCount;
+			const float t = (static_cast<int64_t>(l.cmd.tickCount) - static_cast<int64_t>(nBase)) * flTick;
+			if (t < flStartSec || (flEndSec > flStartSec && t > flEndSec))
+				continue;
+			if (!bHavePrefix)
+			{
+				firstPrefix = pre;
+				bHavePrefix = true;
+			}
+			if (cmds.size() < static_cast<size_t>(cmdrec_max_cmds.GetInt()))
+				cmds.push_back(l);
+		}
+	}
+	if (static_cast<int>(cmds.size()) < CMDREC_MIN_CMDS)
+	{
+		Warning(eDLL_T::SERVER, "[CMDREC] %s pov %d: only %zu commands in that range\n", pszName, nPov, cmds.size());
+		return -1;
+	}
+
+	int nUsed = 0;
+	int nFree = -1;
+	for (int i = 0; i < CMDREC_TABLE_MAX; ++i)
+	{
+		if (s_recordings[i].m_bUsed)
+			++nUsed;
+		else if (nFree < 0)
+			nFree = i;
+	}
+	if (nFree < 0 || nUsed >= cmdrec_max_recordings.GetInt())
+	{
+		Warning(eDLL_T::SERVER, "[CMDREC] table full (%d), demo input not loaded\n", nUsed);
+		return -1;
+	}
+
+	CmdRecording_s* const rec = &s_recordings[nFree];
+	memset(rec, 0, sizeof(*rec));
+	if (!CmdRecorder_Reserve(rec, static_cast<int>(cmds.size())))
+	{
+		memset(rec, 0, sizeof(*rec));
+		return -1;
+	}
+	rec->m_bUsed = true;
+	rec->m_nOwnerSlot = -1;
+	rec->m_vecStartOrigin = Vector3D(firstPrefix.origin[0], firstPrefix.origin[1], firstPrefix.origin[2]);
+	rec->m_angStartAngles = QAngle(firstPrefix.angles[0], firstPrefix.angles[1], firstPrefix.angles[2]);
+
+	float flTime = 0.0f;
+	for (const Loaded_s& l : cmds)
+	{
+		CUserCmd* const dst = new (&rec->m_pCmds[rec->m_nCount++]) CUserCmd();
+		const float ft = (l.cmd.frameTime == l.cmd.frameTime && l.cmd.frameTime > 0.0f && l.cmd.frameTime < 0.25f)
+			? l.cmd.frameTime : flTick;
+		dst->command_number = static_cast<int32_t>(l.cmd.commandNumber);
+		dst->tick_count = static_cast<int32_t>(l.cmd.tickCount);
+		dst->command_time = flTime;
+		dst->viewangles.x = l.cmd.pitch;
+		dst->viewangles.y = l.cmd.yaw;
+		dst->forwardmove = l.cmd.forwardmove;
+		dst->sidemove = l.cmd.sidemove;
+		dst->upmove = l.cmd.upmove;
+		dst->buttons = static_cast<int32_t>(l.cmd.buttons);
+		dst->weaponindex = l.cmd.weaponSelectSlot;
+		dst->impulse = l.cmd.impulse;
+		dst->frametime = ft;
+		flTime += ft;
+	}
+	rec->m_flDuration = flTime;
+
+	if (cmdrec_diag.GetBool())
+		Msg(eDLL_T::SERVER, "[CMDREC] loaded id=%d from demo '%s' pov %d: %d cmds %.2fs\n",
+			nFree, pszName, nPov, rec->m_nCount, rec->m_flDuration);
+	return nFree;
+}
+
 void CmdRecorder_OnPlayerGone(int nSlot)
 {
 	if (!s_bInited || nSlot < 0 || nSlot >= MAX_PLAYERS)
@@ -331,6 +463,20 @@ SQRESULT ServerScript_CmdRec_GetStartOrigin(HSQUIRRELVM v)
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
+SQRESULT ServerScript_CmdRec_LoadDemo(HSQUIRRELVM v)
+{
+	const SQChar* pszName = nullptr;
+	SQInteger nPov = 0;
+	SQFloat flStart = 0.0f, flEnd = 0.0f;
+	sq_getstring(v, 2, &pszName);
+	sq_getinteger(v, 3, &nPov);
+	sq_getfloat(v, 4, &flStart);
+	sq_getfloat(v, 5, &flEnd);
+	const bool bArgsOk = pszName && nPov >= 0 && nPov < R5DEM_MAX_POVS && flStart == flStart && flEnd == flEnd;
+	sq_pushinteger(v, bArgsOk ? CmdRecorder_LoadDemo(pszName, static_cast<int>(nPov), flStart, flEnd) : -1);
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
 SQRESULT ServerScript_CmdRec_GetStartAngles(HSQUIRRELVM v)
 {
 	const CmdRecording_s* const rec = CmdRec_ArgRecording(v);
@@ -365,4 +511,5 @@ void CmdRecorder_RegisterGlobalFuncs(CSquirrelVM* pVM)
 	DEFINE_SERVER_SCRIPTFUNC_NAMED(pVM, CmdRec_Free, "Free a recorded input stream and stop any bot playing it.", "void", "int recordingId", false);
 	DEFINE_SERVER_SCRIPTFUNC_NAMED(pVM, CmdRec_GetStartOrigin, "World origin the recording started at.", "vector", "int recordingId", false);
 	DEFINE_SERVER_SCRIPTFUNC_NAMED(pVM, CmdRec_GetStartAngles, "Eye angles the recording started at.", "vector", "int recordingId", false);
+	DEFINE_SERVER_SCRIPTFUNC_NAMED(pVM, CmdRec_LoadDemo, "Load one pov's recorded input from a server demo between two times (end <= start = to the end). Returns recording id or -1.", "int", "string demoName, int povId, float startSeconds, float endSeconds", false);
 }

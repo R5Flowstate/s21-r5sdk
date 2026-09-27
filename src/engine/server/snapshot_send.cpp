@@ -15,6 +15,8 @@
 #include "engine/tick_budget.h"
 #include "snapshot_diag.h"
 #include "snapshot_send.h"
+#include "snapshot_ring.h"
+#include "demo_record_sv.h"
 #include "tier0/memvalidate.h"
 
 #include <cstdint>
@@ -629,7 +631,20 @@ activateEnd: ;
 		QueryPerformanceCounter(&engStart);
 		QueryPerformanceFrequency(&engFreq);
 	}
+	const bool bDemoTap = !isFake && DemoSv_AnyActive();
+	if (bDemoTap)
+	{
+		bool bMiss = bBaselineMiss;
+		if (clientSlot != 0 && entryDeltaAck >= 0)
+		{
+			int nOldest = -1, nNewest = -1;
+			bMiss = !SnapshotRing_HasTick(entryDeltaAck, &nOldest, &nNewest);
+		}
+		DemoSv_OnSnapshotBegin(clientSlot, a3 == -1 || lastSnapTick == -1 || bMiss);
+	}
 	snapResult = v_CClient_SendSnapshot(a1, a2, a3, a4);
+	if (bDemoTap)
+		DemoSv_OnSnapshotEnd(clientSlot);
 
 	if (clientSlot == 0 && !isFake && sdk_snap_tx_diag.GetBool())
 	{

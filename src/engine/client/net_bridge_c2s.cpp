@@ -8,6 +8,7 @@
 #include "engine/client/net_bridge_internal.h"
 #include "core/bridge_stats.h"
 #include "engine/client/bridge_join_auth.h"
+#include "engine/client/demo_bridge.h"
 #include "engine/client/bridge_connect_password.h"
 #include "engine/sys_integrity.h"
 #include "engine/mdl_precache_client_grow.h"
@@ -222,6 +223,17 @@ static ConVar bridge_c2s_stringcmd_resend_ms("bridge_c2s_stringcmd_resend_ms", "
 	"Spacing in milliseconds between redundant sends.", true, 10.f, true, 1000.f);
 static ConVar bridge_c2s_setconvar("bridge_c2s_setconvar", "1", FCVAR_RELEASE,
 	"Relay runtime NET_SetConVar S21 t=5 -> S3 t=4. 1=ON (userinfo keys must exist in the connect-time blob). 0=connect-time snapshot only.");
+static constexpr int kUserInfoMirrorMax = 96;
+static constexpr int kUserInfoMirrorValueMax = 260; // S3 NET_SetConVar value buffer
+struct UserInfoMirror_s
+{
+	const char* pszName;
+	char szValue[kUserInfoMirrorValueMax];
+};
+static UserInfoMirror_s s_userInfoMirror[kUserInfoMirrorMax];
+static int s_nUserInfoMirror = 0;
+static void S21Bridge_UserInfoMirrorNote(const char* pszName, const char* pszValue);
+
 static ConVar bridge_c2s_setconvar_redundancy("bridge_c2s_setconvar_redundancy", "1", FCVAR_RELEASE,
 	"Resend each runtime NET_SetConVar relay once after 50ms (idempotent on the dedi); 0 = single-shot.");
 static ConVar bridge_c2s_misc("bridge_c2s_misc", "1", FCVAR_RELEASE,
@@ -272,7 +284,7 @@ static int s_unrelTickB0  = -1;  // newest clc_ClientTick slice (freshest ack)
 static int s_unrelTickB1  = -1;
 
 // Unrelayed-move accounting. Counters always run; only the emission is gated.
-static ConVar bridge_c2s_move_drop_log("bridge_c2s_move_drop_log", "1",
+static ConVar bridge_c2s_move_drop_log("bridge_c2s_move_drop_log", "0",
 	FCVAR_DEVELOPMENTONLY,
 	"[C2S-MOVE] announce clc_Move batches the relay could not place on the wire. "
 	"A non-zero drop count is lost or late player input.");
@@ -448,6 +460,135 @@ static inline void EmitTernaryU32(bf_write& w, uint32_t cur, uint32_t prev) {
 
 } // namespace S21BridgeCmd
 
+static ConVar bridge_c2s_opl_log("bridge_c2s_opl_log", "0", FCVAR_DEVELOPMENTONLY,
+	"Log the hologram's object placement (usercmd #28 bits plus the weapon's stored pose) per hold.");
+
+// C_WeaponX object-placement block (S21).
+static constexpr uintptr_t kWeapOplHasValidSpot = 0x2EF4;
+static constexpr uintptr_t kWeapOplOrigin = 0x2EF8;
+static constexpr uintptr_t kWeapOplAngles = 0x2F04;
+static constexpr uintptr_t kWeapOplSpecialOrigin = 0x2F34;
+static constexpr uintptr_t kWeapOplSpecialAngles = 0x2F40;
+static constexpr uintptr_t kWeapOplSpecialResult = 0x2F4C;
+
+struct S21BridgeOplPose
+{
+	bool hasValidSpot;
+	float origin[3];
+	float angles[3];
+	float exitOrigin[3];
+	float exitAngles[3];
+	int result;
+};
+
+static bool S21Bridge_ReadHologramPose(const uint32_t weaponHandle, S21BridgeOplPose& out)
+{
+	const char* const pWeapon = reinterpret_cast<const char*>(PredNative_ResolveEHandle(weaponHandle));
+	if (!pWeapon)
+		return false;
+
+	out.hasValidSpot = *reinterpret_cast<const uint8_t*>(pWeapon + kWeapOplHasValidSpot) != 0;
+	memcpy(out.origin, pWeapon + kWeapOplOrigin, sizeof(out.origin));
+	memcpy(out.angles, pWeapon + kWeapOplAngles, sizeof(out.angles));
+	memcpy(out.exitOrigin, pWeapon + kWeapOplSpecialOrigin, sizeof(out.exitOrigin));
+	memcpy(out.exitAngles, pWeapon + kWeapOplSpecialAngles, sizeof(out.exitAngles));
+	out.result = *reinterpret_cast<const int*>(pWeapon + kWeapOplSpecialResult);
+	return true;
+}
+
+static void S21Bridge_LogObjectPlacementCmd(const uint32_t commandNumber, const uint32_t weaponHandle,
+	const bool bValid, const bool bLkg, const float* pose)
+{
+	static uint32_t s_nLastCmd = 0;
+	static int s_nPrevState = -1;
+	static uint32_t s_nLastValidCmd = 0;
+	static bool s_bHavePose = false;
+	static S21BridgeOplPose s_lastPose = {};
+
+	// Backup cmds re-walk older numbers.
+	if (!bridge_c2s_opl_log.GetBool() || commandNumber <= s_nLastCmd)
+		return;
+	s_nLastCmd = commandNumber;
+
+	if (bValid)
+	{
+		s_bHavePose = S21Bridge_ReadHologramPose(weaponHandle, s_lastPose);
+		s_nLastValidCmd = commandNumber;
+	}
+
+	const int state = (bValid ? 1 : 0) | (bLkg ? 2 : 0);
+	if (state == s_nPrevState)
+		return;
+
+	if (!bValid && (s_nPrevState & 1) && s_bHavePose)
+	{
+		const S21BridgeOplPose& h = s_lastPose;
+		Msg(eDLL_T::ENGINE,
+			"[C2S-OPL] hold-end lastValidCmd=%u result=%d entrance=<%.1f %.1f %.1f> exit=<%.1f %.1f %.1f> exitAng=<%.1f %.1f %.1f>\n",
+			s_nLastValidCmd, h.result, h.origin[0], h.origin[1], h.origin[2],
+			h.exitOrigin[0], h.exitOrigin[1], h.exitOrigin[2],
+			h.exitAngles[0], h.exitAngles[1], h.exitAngles[2]);
+	}
+	s_nPrevState = state;
+
+	if (bLkg)
+		Msg(eDLL_T::ENGINE, "[C2S-OPL] cmd=%u valid=1 lkg=1 start=<%.1f %.1f %.1f> eyeAng=<%.1f %.1f %.1f>\n",
+			commandNumber, pose[0], pose[1], pose[2], pose[3], pose[4], pose[5]);
+	else
+		Msg(eDLL_T::ENGINE, "[C2S-OPL] cmd=%u valid=%d lkg=0\n", commandNumber, bValid ? 1 : 0);
+}
+
+// The dedi's converted collision can disagree with this client's, so the
+// hologram's entrance/exit rides each S3 cmd, flagged by the cmd's +0x18C bit.
+// Captured on first transcode so backup cmds resend the same pose.
+static ConVar sv_bridge_opl_pose_wire("sv_bridge_opl_pose_wire", "0", FCVAR_RELEASE | FCVAR_REPLICATED,
+	"Set by the server: it reads the object-placement pose trailer on usercmds.");
+
+struct S21BridgeOplCmdPose
+{
+	uint32_t commandNumber;
+	bool present;
+	float pose[12];
+};
+
+static S21BridgeOplCmdPose s_oplCmdPose[64];
+static bool s_bOplTrailerFollows = false;
+static bool s_bParsedOplValid = false;
+static uint32_t s_nParsedOplWeapon = 0xFFFFFFFFu;
+
+static const S21BridgeOplCmdPose& S21Bridge_OplPoseForCmd(const uint32_t commandNumber)
+{
+	S21BridgeOplCmdPose& rec = s_oplCmdPose[commandNumber & 63u];
+	if (rec.commandNumber == commandNumber)
+		return rec;
+
+	rec.commandNumber = commandNumber;
+	rec.present = false;
+	S21BridgeOplPose pose;
+	if (s_bParsedOplValid && S21Bridge_ReadHologramPose(s_nParsedOplWeapon, pose) && pose.hasValidSpot)
+	{
+		memcpy(&rec.pose[0], pose.origin, sizeof(pose.origin));
+		memcpy(&rec.pose[3], pose.angles, sizeof(pose.angles));
+		memcpy(&rec.pose[6], pose.exitOrigin, sizeof(pose.exitOrigin));
+		memcpy(&rec.pose[9], pose.exitAngles, sizeof(pose.exitAngles));
+		rec.present = true;
+		for (int k = 0; k < 12 && rec.present; ++k)
+			rec.present = isfinite(rec.pose[k]) != 0;
+	}
+	return rec;
+}
+
+static void S21Bridge_EmitOplPoseTrailer(bf_write& w, const uint32_t commandNumber)
+{
+	const S21BridgeOplCmdPose& rec = S21Bridge_OplPoseForCmd(commandNumber);
+	w.WriteOneBit(rec.present ? 1 : 0);
+	if (!rec.present)
+		return;
+
+	for (int k = 0; k < 12; ++k)
+		w.WriteFloat(rec.pose[k]);
+}
+
 // Parse one S21 usercmd body into typed `cur`. Returns false on overflow or
 // unsupported feature (bulletTraceTestData=1 with its 600-byte payload).
 static bool S21Bridge_ParseS21Cmd(bf_read& r, S21BridgeCmd::State& cur,
@@ -556,13 +697,22 @@ static bool S21Bridge_ParseS21Cmd(bf_read& r, S21BridgeCmd::State& cur,
 	// commandObjectPlacement (S21 #28) -- DROP.
 	// Success path is handle-only. Pose floats exist only on last-known-good
 	{
+		bool oplValid = false;
+		bool oplLkg = false;
+		uint32_t oplWeapon = 0xFFFFFFFFu;
+		float oplPose[6] = {};
 		if (r.ReadOneBit()) {
-			(void)r.ReadUBitLong(32);
+			oplValid = true;
+			oplWeapon = r.ReadUBitLong(32);
 			if (r.ReadOneBit()) {
-				for (int k = 0; k < 6; ++k) (void)r.ReadUBitLong(32);
+				oplLkg = true;
+				for (int k = 0; k < 6; ++k) oplPose[k] = r.ReadFloat();
 				(void)r.ReadUBitLong(32);
 			}
 		}
+		s_bParsedOplValid = oplValid;
+		s_nParsedOplWeapon = oplWeapon;
+		S21Bridge_LogObjectPlacementCmd(cur.commandNumber, oplWeapon, oplValid, oplLkg, oplPose);
 	}
 	S21BR_DIAG("after_objPlace(#28)");
 	// Ping commands (S21 #31-34) -- S21 writes 4 longs per ping using 31s+sign
@@ -918,8 +1068,9 @@ static bool S21Bridge_EmitS3Cmd(bf_write& w, const S21BridgeCmd::State& cur,
 		}
 		// H (+0x18B) -- 1-bit always = skydiveUnfollow
 		w.WriteOneBit(cur.skydiveUnfollow ? 1 : 0);
-		// I (+0x18C) -- 1-bit always, S3-only bool with no S21 source; 0.
-		w.WriteOneBit(0);
+		// I (+0x18C) -- 1-bit always, S3-only bool with no S21 source. Set only
+		// to flag the object-placement pose trailer that follows this cmd.
+		w.WriteOneBit(s_bOplTrailerFollows ? 1 : 0);
 	}
 	else
 	{
@@ -944,7 +1095,7 @@ static bool S21Bridge_EmitS3Cmd(bf_write& w, const S21BridgeCmd::State& cur,
 			w.WriteOneBit(0);
 		}
 		w.WriteOneBit(0);
-		w.WriteOneBit(0);
+		w.WriteOneBit(s_bOplTrailerFollows ? 1 : 0);
 	}
 	// J (+0x1C8) -- ternary (baseSnapshotTickCount)
 	EmitTernaryU32(w, cur.baseSnapshotTickCount, prev.baseSnapshotTickCount);
@@ -1062,11 +1213,24 @@ static bool S21Bridge_TransformOneUsercmd(bf_read& r, bf_write& w)
 		}
 	}
 
+	s_bOplTrailerFollows = sv_bridge_opl_pose_wire.GetBool();
 	if (!S21Bridge_EmitS3Cmd(w, cur, s_bridgeC2sPrevCmd)) {
 		static long long s_emitFailLog = 0;
 		if (++s_emitFailLog <= 5)
 			Warning(eDLL_T::ENGINE, "[BRIDGE-OUT] S3 emit overflow; dropping cmd\n");
 		return false;
+	}
+	if (s_bOplTrailerFollows)
+	{
+		static bool s_bLogged = false;
+		if (!s_bLogged)
+		{
+			s_bLogged = true;
+			Msg(eDLL_T::ENGINE, "[C2S-OPL] placement pose trailer active from cmd %u\n", cur.commandNumber);
+		}
+		S21Bridge_EmitOplPoseTrailer(w, cur.commandNumber);
+		if (w.IsOverflowed())
+			return false;
 	}
 	s_bridgeC2sPrevCmd = cur;
 
@@ -1112,16 +1276,40 @@ static bool S21Bridge_WriteFilteredSetConVar(bf_write& dst, bf_read& r, const in
 	if (nCount < 0 || nCount > 255)
 		return false;
 
-	char szName[260];
-	char szValue[260];
+	// The client batches every changed userinfo convar in one message. An entry
+	// the S3 cvar_t cannot hold (260-byte name/value) is skipped on its own so
+	// the rest of the batch still lands.
+	static char s_szName[4096];
+	static char s_szValue[4096];
+	constexpr int kS3CvarLen = 260;
+
+	const auto readEntry = [&](bool& bKeep) -> bool
+	{
+		int nNameLen = 0;
+		int nValueLen = 0;
+		if (!r.ReadString(s_szName, sizeof(s_szName), false, &nNameLen)
+			|| !r.ReadString(s_szValue, sizeof(s_szValue), false, &nValueLen))
+			return false;
+		bKeep = V_stricmp(s_szName, "sdk_mods") != 0 && nNameLen > 0
+			&& nNameLen < kS3CvarLen && nValueLen < kS3CvarLen;
+		return true;
+	};
+
 	int nKeep = 0;
 	for (int i = 0; i < nCount; ++i)
 	{
-		if (!r.ReadString(szName, sizeof(szName)) || !r.ReadString(szValue, sizeof(szValue)))
+		bool bKeep = false;
+		if (!readEntry(bKeep))
 			return false;
-		if (V_stricmp(szName, "sdk_mods") == 0)
-			continue;
-		++nKeep;
+		if (bKeep)
+			++nKeep;
+		else if (V_stricmp(s_szName, "sdk_mods") != 0)
+		{
+			static int s_nSkipLog = 0;
+			if (++s_nSkipLog <= 8)
+				Warning(eDLL_T::ENGINE, "[BRIDGE-C2S] net_SetConVar relay skipped '%.64s' (%d-byte value, S3 holds %d)\n",
+					s_szName, static_cast<int>(strlen(s_szValue)), kS3CvarLen - 1);
+		}
 	}
 
 	if (nKeep == 0)
@@ -1138,12 +1326,13 @@ static bool S21Bridge_WriteFilteredSetConVar(bf_write& dst, bf_read& r, const in
 	dst.WriteByte(nKeep);
 	for (int i = 0; i < nCount; ++i)
 	{
-		if (!r.ReadString(szName, sizeof(szName)) || !r.ReadString(szValue, sizeof(szValue)))
+		bool bKeep = false;
+		if (!readEntry(bKeep))
 			return false;
-		if (V_stricmp(szName, "sdk_mods") == 0)
+		if (!bKeep)
 			continue;
-		dst.WriteString(szName);
-		dst.WriteString(szValue);
+		dst.WriteString(s_szName);
+		dst.WriteString(s_szValue);
 	}
 
 	return true;
@@ -1317,7 +1506,7 @@ static void S21Bridge_RelayUnrelMsg(const uint8_t* uData, int uBytes,
 			{
 				static long long s_scvFilt = 0;
 				if (++s_scvFilt <= 8)
-					Warning(eDLL_T::ENGINE, "[BRIDGE-C2S] dropped malformed net_SetConVar relay\n");
+					Warning(eDLL_T::ENGINE, "[BRIDGE-C2S] dropped malformed net_SetConVar relay (%d body bits)\n", bodyBits);
 				goto unlock_out;
 			}
 			if (bridge_c2s_setconvar_redundancy.GetBool())
@@ -1556,7 +1745,7 @@ int S21Bridge_BuildS3Packet(uint8_t* outBuf, int outBufSize,
 			// that goes unanswered while not one S2C packet has arrived since
 			const int nDeadMs = bridge_signon_dead_ms.GetInt();
 			const long nPsoNow = g_pPsoCreateCount ? *g_pPsoCreateCount : 0;
-			if (!s_signonEchoDeadWarned && nDeadMs > 0
+			if (!s_signonEchoDeadWarned && nDeadMs > 0 && !Demo_IsPlaying()
 				&& s_bridgeInSeqNr == s_signonEchoArmedInSeq
 				&& (echoNow - s_signonEchoArmedMs) >= (ULONGLONG)nDeadMs
 				&& nPsoNow <= s_signonEchoArmedPso)
@@ -1673,6 +1862,8 @@ int S21Bridge_BuildS3Packet(uint8_t* outBuf, int outBufSize,
 			}
 			send.WriteString(s_userInfoKV[i][0]); // name
 			send.WriteString(value);              // LIVE value (fallback: hardcoded default)
+			if (value != szMods)
+				S21Bridge_UserInfoMirrorNote(s_userInfoKV[i][0], value);
 		}
 
 		--s_userInfoSendsLeft;
@@ -1827,10 +2018,7 @@ bool S21Bridge_FlushC2SNow(const char* reason)
 		return false;
 	}
 
-	const int sent = s_origSendto(s_bridgeSocket,
-		reinterpret_cast<const char*>(s3pkt), s3len, 0,
-		reinterpret_cast<const sockaddr*>(&s_bridgeDest),
-		sizeof(s_bridgeDest));
+	const int sent = S21Bridge_TxRaw(s3pkt, s3len);
 	if (sbArm)
 		QueryPerformanceCounter(&sbQSend);
 
@@ -1863,10 +2051,7 @@ bool S21Bridge_FlushC2SNow(const char* reason)
 			retrySeq, s_bridgeInSeqNr);
 		if (retryLen > 0)
 		{
-			const int retrySent = s_origSendto(s_bridgeSocket,
-				reinterpret_cast<const char*>(s3pkt), retryLen, 0,
-				reinterpret_cast<const sockaddr*>(&s_bridgeDest),
-				sizeof(s_bridgeDest));
+			const int retrySent = S21Bridge_TxRaw(s3pkt, retryLen);
 			if (retrySent > 0)
 				s_outBytesAcc += retrySent + 28;
 		}
@@ -2057,6 +2242,82 @@ static void S21Bridge_PumpStringCmdResends(void)
 	}
 }
 
+//-----------------------------------------------------------------------------
+// Userinfo the dedi holds, as last sent. The engine's own change message can be
+// lost (a script sets the value before the relay is armed, or while it is
+// signing on), and the S3 server then keeps the connect-time value forever.
+// In game, any live value that drifted from this copy is sent again.
+//-----------------------------------------------------------------------------
+static void S21Bridge_UserInfoMirrorNote(const char* pszName, const char* pszValue)
+{
+	for (int i = 0; i < s_nUserInfoMirror; ++i)
+	{
+		if (!V_strcmp(s_userInfoMirror[i].pszName, pszName))
+		{
+			V_strncpy(s_userInfoMirror[i].szValue, pszValue, sizeof(s_userInfoMirror[i].szValue));
+			return;
+		}
+	}
+	if (s_nUserInfoMirror >= kUserInfoMirrorMax)
+		return;
+
+	UserInfoMirror_s& e = s_userInfoMirror[s_nUserInfoMirror++];
+	e.pszName = pszName;
+	V_strncpy(e.szValue, pszValue, sizeof(e.szValue));
+}
+
+static void S21Bridge_PumpUserInfoMirror(void)
+{
+	static ULONGLONG s_nextMs = 0;
+	const ULONGLONG now = GetTickCount64();
+	if (!bridge_c2s_setconvar.GetBool() || !g_pCVar || now < s_nextMs)
+		return;
+	s_nextMs = now + 250;
+
+	int changed[kUserInfoMirrorMax];
+	int nChanged = 0;
+	for (int i = 0; i < s_nUserInfoMirror; ++i)
+	{
+		ConVar* const pVar = g_pCVar->FindVar(s_userInfoMirror[i].pszName);
+		const char* const pszLive = pVar ? pVar->GetString() : nullptr;
+		if (!pszLive || !pszLive[0] || V_strlen(pszLive) >= kUserInfoMirrorValueMax
+			|| !V_strcmp(pszLive, s_userInfoMirror[i].szValue))
+			continue;
+		changed[nChanged++] = i;
+	}
+	if (!nChanged)
+		return;
+
+	AcquireSRWLockExclusive(&s_c2sTxLock);
+	int nBits = 7 + 8;
+	for (int k = 0; k < nChanged; ++k)
+	{
+		const UserInfoMirror_s& e = s_userInfoMirror[changed[k]];
+		nBits += 8 * (V_strlen(e.pszName) + 1 + V_strlen(g_pCVar->FindVar(e.pszName)->GetString()) + 1);
+	}
+	if (s_c2sPend.GetNumBitsLeft() < nBits + 8)
+	{
+		ReleaseSRWLockExclusive(&s_c2sTxLock);
+		return;
+	}
+
+	s_c2sPend.WriteUBitLong(4, NETMSG_TYPE_BITS); // NET_SetConVar (S3 type 4)
+	s_c2sPend.WriteByte(nChanged);
+	for (int k = 0; k < nChanged; ++k)
+	{
+		UserInfoMirror_s& e = s_userInfoMirror[changed[k]];
+		const char* const pszLive = g_pCVar->FindVar(e.pszName)->GetString();
+		s_c2sPend.WriteString(e.pszName);
+		s_c2sPend.WriteString(pszLive);
+		// Short values only: some userinfo keys carry tokens.
+		const bool bShort = V_strlen(pszLive) <= 8 && V_strlen(e.szValue) <= 8;
+		DevMsg(eDLL_T::ENGINE, "[BRIDGE-C2S] userinfo resync '%s' '%s' -> '%s'\n", e.pszName,
+			bShort ? e.szValue : "...", bShort ? pszLive : "...");
+		V_strncpy(e.szValue, pszLive, sizeof(e.szValue));
+	}
+	ReleaseSRWLockExclusive(&s_c2sTxLock);
+}
+
 static void S21Bridge_PumpSetConVarResends(void)
 {
 	if (!bridge_c2s_setconvar_redundancy.GetBool())
@@ -2090,7 +2351,7 @@ int S21Bridge_Hook_SendDatagram(CNetChan* pChan, bf_write* pMsg)
 
 	// === C2S input capture (runs BEFORE the original, which flushes+resets the streams) ===
 	// m_StreamUnreliable, in an active frame, is expected to be exactly
-	if (s_bridgeActive && (s_bridgeChan == nullptr || pChan == s_bridgeChan))
+	if (s_bridgeActive && !Demo_IsPlaying() && (s_bridgeChan == nullptr || pChan == s_bridgeChan))
 	{
 		// Heartbeat UNGATED (stage-1 close): logs rate/choked so a run
 		// shows whether the engine's own rate holds without choking (it does now
@@ -2295,6 +2556,7 @@ int S21Bridge_Hook_SendDatagram(CNetChan* pChan, bf_write* pMsg)
 		{
 			S21Bridge_PumpStringCmdResends();
 			S21Bridge_PumpSetConVarResends();
+			S21Bridge_PumpUserInfoMirror();
 		}
 
 		// Ship the just-queued Move+ClientTick at SendDatagram cadence, not the S2C-driven self-clock.

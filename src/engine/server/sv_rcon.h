@@ -57,7 +57,7 @@ public:
 	bool IsInitialized(void) const;
 
 	int GetAuthenticatedCount(void) const;
-	void CloseAllSockets() { m_Socket.CloseAllAcceptedSockets(); }
+	void CloseAllSockets(void);
 
 private:
 	int                      m_nConnIndex;
@@ -68,6 +68,7 @@ private:
 	CUtlVector<int>          m_vecDeferredDisconnects; // Indices queued while the frame walk holds vector references
 	bool                     m_bInFrameWalk = false;
 	std::unordered_set<IPv6Wrapper_s, IPv6Hasher_s> m_BannedList;
+	std::unordered_map<IPv6Wrapper_s, int, IPv6Hasher_s> m_FailedAuthByAdr; // Survives reconnects.
 	uint8_t                  m_PasswordHash[RCON_SHA512_HASH_SIZE];
 	netadr_t                 m_WhiteListAddress;
 };
@@ -134,7 +135,7 @@ public:
 	bool HasAuthenticatedLoopbackSession(void);
 
 	int GetAuthenticatedCount(void) const;
-	void CloseAllSockets() { m_Socket.CloseAllAcceptedSockets(); }
+	void CloseAllSockets(void);
 
 private:
 	int                      m_nConnIndex;
@@ -145,6 +146,7 @@ private:
 	CUtlVector<int>          m_vecDeferredDisconnects; // Indices queued while the frame walk holds vector references
 	bool                     m_bInFrameWalk = false;
 	std::unordered_set<IPv6Wrapper_s, IPv6Hasher_s> m_BannedList;
+	std::unordered_map<IPv6Wrapper_s, int, IPv6Hasher_s> m_FailedAuthByAdr; // Survives reconnects.
 	uint8_t                  m_PasswordHash[RCON_SHA512_HASH_SIZE];
 	netadr_t                 m_WhiteListAddress;
 };

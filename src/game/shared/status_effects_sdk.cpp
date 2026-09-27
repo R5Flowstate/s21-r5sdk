@@ -194,8 +194,7 @@ static float GetStatusEffectTotalSeverity(void* entity, int effectType, float cu
 	for (int i = 0; i < arrays.timedCount; i++)
 	{
 		const int comboVars = arrays.timed[i].seComboVars;
-		// S3 storage: type at bits[31:25].
-		if (((comboVars >> 25) & 0x7F) == effectType)
+		if (StatusEffect_ComboType(comboVars) == effectType)
 		{
 			totalSeverity += GetSeverityForTimedItem(&arrays.timed[i], curTime);
 		}
@@ -204,7 +203,7 @@ static float GetStatusEffectTotalSeverity(void* entity, int effectType, float cu
 	for (int i = 0; i < arrays.endlessCount; i++)
 	{
 		const int comboVars = arrays.endless[i].seComboVars;
-		if (comboVars != 0 && ((comboVars >> 25) & 0x7F) == effectType)
+		if (comboVars != 0 && StatusEffect_ComboType(comboVars) == effectType)
 		{
 			const float severity = static_cast<float>(
 				static_cast<unsigned char>(comboVars >> 7)) / 255.0f;

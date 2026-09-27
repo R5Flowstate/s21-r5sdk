@@ -447,8 +447,8 @@ int64 CBitRead::ReadLongLong()
 	// Read the two DWORDs according to network endian
 	const short endianIndex = 0x0100;
 	byte* idx = (byte*)&endianIndex;
-	pLongs[*idx++] = ReadUBitLong(sizeof(long) << 3);
-	pLongs[*idx] = ReadUBitLong(sizeof(long) << 3);
+	pLongs[*idx++] = ReadUBitLong(sizeof(int32) << 3);
+	pLongs[*idx] = ReadUBitLong(sizeof(int32) << 3);
 
 	return retval;
 }
@@ -514,6 +514,13 @@ uint64 CBitRead::ReadVarInt64()
 //-----------------------------------------------------------------------------
 void CBitRead::ReadBits(void* pOutData, int nBits)
 {
+	if (nBits <= 0)
+	{
+		if (nBits < 0)
+			SetOverflowFlag();
+		return;
+	}
+
 	unsigned char* pOut = (unsigned char*)pOutData;
 	int nBitsLeft = nBits;
 
@@ -555,6 +562,12 @@ void CBitRead::ReadBits(void* pOutData, int nBits)
 //-----------------------------------------------------------------------------
 bool CBitRead::ReadBytes(void* pOut, int nBytes)
 {
+	if (nBytes < 0 || nBytes > (INT_MAX >> 3))
+	{
+		SetOverflowFlag();
+		return false;
+	}
+
 	ReadBits(pOut, nBytes << 3);
 	return !IsOverflowed();
 }
@@ -761,7 +774,7 @@ void CBitWrite::WriteUBitLong(unsigned int curData, int numbits, bool bCheckRang
 #endif
 
 	// Bounds checking..
-	if ((m_iCurBit + numbits) > m_nDataBits)
+	if (static_cast<unsigned int>(numbits) > 32u || (m_iCurBit + numbits) > m_nDataBits)
 	{
 		m_iCurBit = m_nDataBits;
 		SetOverflowFlag();
@@ -858,7 +871,7 @@ bool CBitWrite::WriteBits(const void* pInData, int nBits)
 	int nBitsLeft = nBits;
 
 	// Bounds checking..
-	if ((m_iCurBit + nBits) > m_nDataBits)
+	if (nBits < 0 || nBits > m_nDataBits - m_iCurBit)
 	{
 		SetOverflowFlag();
 		CallErrorHandler(BITBUFERROR_BUFFER_OVERRUN, GetDebugName());
@@ -1428,7 +1441,7 @@ void CBitWrite::WriteWord(int val)
 //-----------------------------------------------------------------------------
 void CBitWrite::WriteLong(long val)
 {
-	WriteSBitLong(val, sizeof(long) << 3);
+	WriteSBitLong(val, sizeof(int32) << 3);
 }
 
 //-----------------------------------------------------------------------------
@@ -1439,8 +1452,8 @@ void CBitWrite::WriteLongLong(int64 val)
 	// Insert the two DWORDS according to network endian
 	const short endianIndex = 0x0100;
 	byte* idx = (byte*)&endianIndex;
-	WriteUBitLong(pLongs[*idx++], sizeof(long) << 3);
-	WriteUBitLong(pLongs[*idx], sizeof(long) << 3);
+	WriteUBitLong(pLongs[*idx++], sizeof(int32) << 3);
+	WriteUBitLong(pLongs[*idx], sizeof(int32) << 3);
 }
 
 //-----------------------------------------------------------------------------
@@ -1455,6 +1468,12 @@ void CBitWrite::WriteFloat(float val)
 //-----------------------------------------------------------------------------
 bool CBitWrite::WriteBytes(const void* pBuf, int nBytes)
 {
+	if (nBytes < 0 || nBytes > (INT_MAX >> 3))
+	{
+		SetOverflowFlag();
+		return false;
+	}
+
 	return WriteBits(pBuf, nBytes << 3);
 }
 

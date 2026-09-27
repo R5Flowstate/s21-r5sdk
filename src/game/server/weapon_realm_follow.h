@@ -23,4 +23,8 @@ class VWeaponRealmFollow : public IDetour
 // Adopts the owner's live realms mask onto the weapon being activated.
 void WeaponRealmFollow_StampActiveWeapon(void* const player, const __int64 weaponEnt);
 
+// Engine realm setter (dirties the edict, recurses move children). No-op
+// while the pattern is unresolved.
+void WeaponRealmFollow_SetRealmsBitMask(const __int64 ent, const uint64_t mask);
+
 #endif // WEAPON_REALM_FOLLOW_H

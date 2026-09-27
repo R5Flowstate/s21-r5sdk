@@ -1080,8 +1080,10 @@ static void DebugOverlay_AddTextOverlay(const Vector3D& pos, const int lineOffse
 
     VectorCopy(pos, newOverlay->origin);
 
-    newOverlay->textLen = textLen;
-    newOverlay->textBuf = new char[textLen + 1];
+    // Callers pass vsnprintf's return, which is the untruncated length.
+    const ssize_t textLenReal = static_cast<ssize_t>(strnlen(text, static_cast<size_t>(textLen)));
+    newOverlay->textLen = textLenReal;
+    newOverlay->textBuf = new char[textLenReal + 1];
 
     if (!newOverlay->textBuf)
     {
@@ -1089,7 +1091,7 @@ static void DebugOverlay_AddTextOverlay(const Vector3D& pos, const int lineOffse
         return;
     }
 
-    Q_strncpy(newOverlay->textBuf, text, textLen + 1);
+    Q_strncpy(newOverlay->textBuf, text, textLenReal + 1);
 
     newOverlay->bUseOrigin = true;
     newOverlay->lineOffset = lineOffset;
@@ -1223,8 +1225,10 @@ static void DebugOverlay_AddScreenTextOverlay(const float flXpos, const float fl
 
     newOverlay->screenPos.Init(flXpos, flYpos);
 
-    newOverlay->textLen = textLen;
-    newOverlay->textBuf = new char[textLen + 1];
+    // Callers pass vsnprintf's return, which is the untruncated length.
+    const ssize_t textLenReal = static_cast<ssize_t>(strnlen(text, static_cast<size_t>(textLen)));
+    newOverlay->textLen = textLenReal;
+    newOverlay->textBuf = new char[textLenReal + 1];
 
     if (!newOverlay->textBuf)
     {
@@ -1232,7 +1236,7 @@ static void DebugOverlay_AddScreenTextOverlay(const float flXpos, const float fl
         return;
     }
 
-    Q_strncpy(newOverlay->textBuf, text, textLen + 1);
+    Q_strncpy(newOverlay->textBuf, text, textLenReal + 1);
 
     newOverlay->bUseOrigin = false;
     newOverlay->lineOffset = lineOffset;

@@ -25,6 +25,8 @@
 #include <vector>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
+#include <algorithm>
 
 //-----------------------------------------------------------------------------
 // Engine LocalizationAsset / LocalizationLookup_s (S21, size 0x38 / 0x10).
@@ -472,6 +474,7 @@ static bool ParseLoclText(const char* text, std::vector<LocEntry>& entries, std:
 	byHash.reserve(32000);
 	int nHex = 0, nHuman = 0;
 
+	int nPairs = 0;
 	while (*p)
 	{
 		skipNoise();
@@ -482,6 +485,13 @@ static bool ParseLoclText(const char* text, std::vector<LocEntry>& entries, std:
 		}
 		if (!*p)
 			break;
+
+		// Stock tables hold ~30k keys; mod files reach this parser too.
+		if (++nPairs > 200000)
+		{
+			Warning(eDLL_T::ENGINE, "[LOC-DISK] more than 200000 entries; rest of file ignored\n");
+			break;
+		}
 
 		std::string keyRaw, valRaw;
 		if (!parseQuoted(keyRaw))
@@ -814,6 +824,12 @@ static void AppendModLocEntries(std::vector<LocEntry>& entries)
 	if (!ModSystem()->IsEnabled())
 		return;
 
+	// The per-file parse cap does not bound a mod's many files or many mods together;
+	// the stock tables hold ~30k keys, so these budgets are far above any real mod.
+	constexpr size_t kModLocEntryBudget = 50000;
+	constexpr size_t kAllModsLocEntryBudget = 200000;
+	size_t nAllModsAccepted = 0;
+
 	ModSystem()->LockModList();
 	FOR_EACH_VEC(ModSystem()->GetModList(), i)
 	{
@@ -821,6 +837,7 @@ static void AppendModLocEntries(std::vector<LocEntry>& entries)
 		if (!mod || !mod->IsEnabled())
 			continue;
 
+		size_t nModAccepted = 0;
 		FOR_EACH_VEC(mod->localizationFiles, j)
 		{
 			const CUtlString& stored = mod->localizationFiles.Element(j);
@@ -854,6 +871,62 @@ static void AppendModLocEntries(std::vector<LocEntry>& entries)
 				continue;
 			}
 
+			// Hex keys carry no name, so they pass only as the hash of a declared override.
+			std::unordered_set<uint64_t> declaredHashes;
+			FOR_EACH_VEC(mod->localizationOverrides, k)
+			{
+				const uint64_t nHash = LocHashName64(mod->localizationOverrides[k].String());
+				if (nHash)
+					declaredHashes.insert(nHash);
+			}
+
+			// The table is keyed by hash alone, so a namespaced name must not land on another token's hash.
+			std::unordered_map<uint64_t, const std::string*> existingNames;
+			existingNames.reserve(entries.size());
+			for (const LocEntry& existing : entries)
+				existingNames.emplace(existing.hash, &existing.keyName);
+
+			int nRefused = 0;
+			std::vector<LocEntry> accepted;
+			accepted.reserve(modEntries.size());
+			for (LocEntry& e : modEntries)
+			{
+				bool bAllowed = IsHexHashKey(e.keyName)
+					? declaredHashes.count(e.hash) != 0
+					: mod->MayDefineLocKey(e.keyName.c_str());
+				if (bAllowed && !IsHexHashKey(e.keyName) && !declaredHashes.count(e.hash))
+				{
+					const auto it = existingNames.find(e.hash);
+					if (it != existingNames.end() && V_stricmp(it->second->c_str(), e.keyName.c_str()) != 0)
+						bAllowed = false;
+				}
+				if (bAllowed)
+					accepted.push_back(std::move(e));
+				else
+					++nRefused;
+			}
+
+			if (nRefused)
+			{
+				Warning(eDLL_T::ENGINE,
+					"[MOD-LOC] '%s' tried to define %d key(s) outside its namespace and declared overrides; ignored\n",
+					mod->id.String(), nRefused);
+			}
+
+			modEntries.swap(accepted);
+
+			const size_t nRoom = (std::min)(kModLocEntryBudget - nModAccepted, kAllModsLocEntryBudget - nAllModsAccepted);
+			if (modEntries.size() > nRoom)
+			{
+				Warning(eDLL_T::ENGINE,
+					"[MOD-LOC] '%s' exceeds the localization entry budget; %zu entries from '%s' dropped\n",
+					mod->id.String(), modEntries.size() - nRoom, stored.String());
+				modEntries.resize(nRoom);
+			}
+			nModAccepted += modEntries.size();
+			nAllModsAccepted += modEntries.size();
+			if (modEntries.empty())
+				continue;
 			Loc_MergeLastWins(entries, modEntries);
 			Msg(eDLL_T::ENGINE,
 				"[MOD-LOC] merged '%s' from '%s' (hex=%d human=%d, total=%zu)\n",
@@ -919,8 +992,8 @@ static void PrintSupportedLanguages(void)
 	for (size_t i = 0; i < SDK_ARRAYSIZE(g_LanguageNames); ++i)
 	{
 		if (i)
-			V_strncat(buf, " ", sizeof(buf));
-		V_strncat(buf, g_LanguageNames[i], sizeof(buf));
+			V_strcat_sized(buf, " ", sizeof(buf));
+		V_strcat_sized(buf, g_LanguageNames[i], sizeof(buf));
 	}
 	Msg(eDLL_T::ENGINE, "[LOC-DISK] supported: %s\n", buf);
 }

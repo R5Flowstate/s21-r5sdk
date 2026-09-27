@@ -348,7 +348,7 @@ void V_binarytohex(const byte* in, size_t inputbytes, char* out, size_t outsize)
 	{
 		unsigned char c = in[i];
 		V_snprintf(doublet, sizeof(doublet), "%02x", c);
-		V_strncat(out, doublet, outsize);
+		V_strcat_sized(out, doublet, outsize);
 	}
 }
 
@@ -1061,13 +1061,13 @@ V_MakeAbsolutePath(char* pOut, size_t outLen, const char* pPath, const char* pSt
 			if (pStartingDir)
 			{
 				V_AppendSlash(pOut, outLen);
-				V_strncat(pOut, pStartingDir, outLen/*, COPY_ALL_CHARACTERS*/);
+				V_strcat_sized(pOut, pStartingDir, outLen/*, COPY_ALL_CHARACTERS*/);
 			}
 		}
 
 		// Concatenate the paths.
 		V_AppendSlash(pOut, outLen);
-		V_strncat(pOut, pPath, outLen/*, COPY_ALL_CHARACTERS*/);
+		V_strcat_sized(pOut, pPath, outLen/*, COPY_ALL_CHARACTERS*/);
 	}
 
 	if (!V_NormalizePath(pOut, CORRECT_PATH_SEPARATOR))
@@ -1300,7 +1300,7 @@ void V_ComposeFileName(const char* path, const char* filename, char* dest, size_
 	V_strncpy(dest, path, destSize);
 	V_FixSlashes(dest);
 	V_AppendSlash(dest, destSize);
-	V_strncat(dest, filename, destSize/*, COPY_ALL_CHARACTERS*/);
+	V_strcat_sized(dest, filename, destSize/*, COPY_ALL_CHARACTERS*/);
 	V_FixSlashes(dest);
 }
 

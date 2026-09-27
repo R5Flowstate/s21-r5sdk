@@ -18,6 +18,41 @@ static constexpr double CVLAB_SEND_INTERVAL = 0.05;
 static constexpr const char* CVLAB_PROFILE_DIR = "platform/cfg/movementlab";
 static constexpr int CVLAB_PROFILE_MAX_ROWS = 512;
 
+struct ClassVarPreset_t
+{
+	const char* pszKey;
+	const char* pszValue;
+};
+
+// Titanfall 2 single-player pilot: its settings table defaults under pilot_base + pilot_solo.
+// The first six are stand-pose fields; -1 is the engine's own fallback to acceleration.
+static constexpr ClassVarPreset_t s_TitanfallPilot[] =
+{
+	{ "speed", "162.5" }, { "sprintspeed", "243" }, { "acceleration", "2500" },
+	{ "deceleration", "-1" }, { "lowSpeed", "-1" }, { "lowAcceleration", "-1" },
+	{ "sprintAcceleration", "-1" }, { "sprintDeceleration", "-1" },
+	{ "doubleJump", "1" }, { "wallrun", "1" }, { "climbEnabled", "0" },
+	{ "gravityScale", "0.75" }, { "jumpHeight", "60" }, { "stepHeight", "18" },
+	{ "airSpeed", "60" }, { "airAcceleration", "500" },
+	{ "superjumpMinHeight", "60" }, { "superjumpMaxHeight", "60" },
+	{ "superjumpHorzSpeed", "180" }, { "superjumpLimit", "1" },
+	{ "wallrun_timeLimit", "1.75" }, { "wallrun_hangTimeLimit", "4" },
+	{ "wallrunAccelerateHorizontal", "1400" }, { "wallrunAccelerateVertical", "360" },
+	{ "wallrunMaxSpeedHorizontal", "340" }, { "wallrunMaxSpeedVertical", "225" },
+	{ "wallrunMaxSpeedHorizontalBackward", "50" }, { "wallrunSameWallAllowed", "1" },
+	{ "wallrunJumpOutwardSpeed", "205" }, { "wallrunJumpUpSpeed", "230" },
+	{ "wallrunJumpInputDirSpeed", "75" },
+	{ "slideAccel", "50" }, { "slideDecel", "50" }, { "slideVelocityDecay", "0.7" },
+	{ "slideRequiredStartSpeed", "200" }, { "slideSpeedBoost", "150" },
+	{ "slideSpeedBoostCap", "400" }, { "slideJumpHeight", "50" },
+	{ "slideMaxJumpSpeed", "350" }, { "slideStopSpeed", "125" },
+	{ "slideMaxStopSpeed", "350" }, { "slideWantToStopDecel", "400" },
+	{ "sprintStartDelay", "0.2" }, { "sprintStartDuration", "0.8" },
+	{ "sprintStartFastDuration", "0.2" }, { "sprintEndDuration", "0.15" },
+	{ "mantleAngleScale", "1" }, { "speedScaleSide", "1" }, { "speedScaleBack", "1" },
+	{ "pitchMaxUp", "85" }, { "pitchMaxDown", "89" },
+};
+
 CClassVarLab::CClassVarLab()
 {
 	m_nSerial = 0;
@@ -468,6 +503,20 @@ void CClassVarLab::Draw(void)
 		Queue("dodgeSpeed", "600");
 		Queue("dodgeDuration", "0.6");
 	}
+	ImGui::SameLine();
+	const bool bStanding = ClassVar_LocalPoseIndex() == 0;
+	if (ImGui::Button("Titanfall 2 Movement"))
+	{
+		if (bStanding)
+		{
+			for (const ClassVarPreset_t& preset : s_TitanfallPilot)
+				Queue(preset.pszKey, preset.pszValue);
+		}
+		else
+			Warning(eDLL_T::CLIENT, "[CVLAB] Titanfall 2 Movement: stand up first -- speed and acceleration write the current stance\n");
+	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Exact Titanfall 2 pilot movement: wallrun, double jump, air control, slide.\nApply while standing. Reset All restores the legend's values.");
 	ImGui::SameLine();
 	if (ImGui::Button("Reset All"))
 	{

@@ -29,11 +29,19 @@ static ConVar sdk_pak_load_flowstate("sdk_pak_load_flowstate", "1", FCVAR_RELEAS
 static ConVar sdk_pak_load_s30("sdk_pak_load_s30", "1", FCVAR_RELEASE,
 	"Enqueue sdk_s30.rpak (S30 effects, Axle, akimbo, Ash, mantle air) after common_mp. 0 = skip (launch-arg A/B).");
 
+static ConVar sdk_pak_override_retail("sdk_pak_override_retail", "1", FCVAR_RELEASE,
+	"sdk_s30.rpak outranks the retail paks on same-guid assets (replaced character, ability and "
+	"setfile settings). 0 = the retail copy loaded first keeps the guid.");
+
 static ConVar sdk_pak_load_mod_paks("sdk_pak_load_mod_paks", "1", FCVAR_RELEASE,
 	"Enqueue each enabled mod's paks/Win64/preload.rson list after common_mp.");
 
 static ConVar sdk_pak_unload_sdk_paks_on_shutdown("sdk_pak_unload_sdk_paks_on_shutdown", "1", FCVAR_RELEASE,
 	"Unload SDK-enqueued paks before the engine unloads its precache groups.");
+
+static ConVar sdk_pak_stream_missing_tolerant("sdk_pak_stream_missing_tolerant", "0", FCVAR_RELEASE,
+	"Survive a missing mandatory .starpak, not just .opt.starpak. Textures then render "
+	"from the permanent mips held in the rpak. 1 = required for a stripped pak set.");
 
 struct SdkPakRecord_S21
 {
@@ -85,6 +93,43 @@ static const char* GetPakNameForSlot(int slot)
 		slotBase + static_cast<size_t>(slot) * kS21_PakSlotStride +
 		kS21_PakSlot_Name);
 	return *pName;
+}
+
+// Pak_InitAsyncLoad sets every pak's slot priority to 2 and a tie keeps the first owner,
+// so a replaced stock asset in an SDK pak only takes the guid from a strictly higher
+// slot. Raised after that write, before the pak's assets are tracked.
+static bool s_overridePrioritySlot[kS21_PakSlotCount];
+
+static unsigned __int64* Pak_SlotPriority_S21(const size_t slot)
+{
+	return reinterpret_cast<unsigned __int64*>(
+		Pak_GetSlotBase_S21() + slot * kS21_PakSlotStride + kS21_PakSlot_Priority);
+}
+
+static void Pak_ClearOverridePriority_S21(const unsigned int handle)
+{
+	const size_t slot = handle & (kS21_PakSlotCount - 1);
+	if (!s_overridePrioritySlot[slot] || !EnsurePakSlotTableOk())
+		return;
+	s_overridePrioritySlot[slot] = false;
+	*Pak_SlotPriority_S21(slot) = 0;
+}
+
+static void Pak_RaiseOverridePriority_S21(const char* name, int handle)
+{
+	if (!sdk_pak_override_retail.GetBool() || !EnsurePakSlotTableOk())
+		return;
+
+	const size_t slot = static_cast<size_t>(handle) & (kS21_PakSlotCount - 1);
+	unsigned __int64* const pPriority = Pak_SlotPriority_S21(slot);
+	if (*pPriority <= kS21_PakLoadedPriority)
+	{
+		*pPriority = kS21_PakLoadedPriority + 1;
+		s_overridePrioritySlot[slot] = true;
+	}
+
+	Msg(eDLL_T::RTECH, "[PAK-OVERRIDE] '%s' slot %zu priority %llu -- same-guid assets replace the retail copy\n",
+		name, slot, *pPriority);
 }
 
 // Exact basename match for script-asset rpaks (no prefix).
@@ -358,7 +403,9 @@ static void Pak_EnqueueNamedList_S21(const char* const* names, size_t count, con
 
  const int handle = pfnFull(name, 1 /*priority*/, allocSlot, 8 /*c4*/, 0 /*trackFeature*/);
 		if (handle != -1)
+		{
 			Pak_RecordSdkHandle_S21(name, handle);
+		}
 		if (handle == -1)
 		{
 			Warning(eDLL_T::RTECH,
@@ -879,8 +926,36 @@ static bool VerifyPakOnDisk(const char* slotName)
 	snprintf(engineLookup, sizeof(engineLookup),
 			 "paks\\Win64\\%s", checkName);
 	const DWORD attrs = GetFileAttributesA(engineLookup);
-	return attrs != INVALID_FILE_ATTRIBUTES &&
-		(attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
+	if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0)
+		return true;
+
+	// The file layer also serves an enabled mod's paks/Win64 by basename.
+	if (!ModSystem()->IsEnabled())
+		return false;
+
+	bool bFound = false;
+	ModSystem()->LockModList();
+	FOR_EACH_VEC(ModSystem()->GetResolvedModList(), i)
+	{
+		const CModSystem::ModInstance_t* const mod = ModSystem()->GetResolvedModList()[i];
+		if (!mod || !mod->IsEnabled())
+			continue;
+
+		char modLookup[MAX_PATH];
+		if (_snprintf_s(modLookup, sizeof(modLookup), _TRUNCATE, "%spaks/Win64/%s",
+			mod->GetBasePath().String(), checkName) < 0)
+			continue;
+		V_FixSlashes(modLookup);
+
+		const DWORD modAttrs = GetFileAttributesA(modLookup);
+		if (modAttrs != INVALID_FILE_ATTRIBUTES && (modAttrs & FILE_ATTRIBUTE_DIRECTORY) == 0)
+		{
+			bFound = true;
+			break;
+		}
+	}
+	ModSystem()->UnlockModList();
+	return bFound;
 }
 
 // ODL/skin paks are polled (fake LOADED on miss). Map/engine paks use the pump (do not fake).
@@ -979,6 +1054,9 @@ static char __fastcall Hook_Pak_InitAsyncLoad_S21(__int64 pakHnd)
 		Msg(eDLL_T::RTECH, "pak loaded. '%s'\n",
 			name ? name : "(unknown)");
 
+		if (name && _stricmp(name, "sdk_s30.rpak") == 0)
+			Pak_RaiseOverridePriority_S21(name, static_cast<int>(pakHnd));
+
 		// After common_mp LOADED, probe the canary. A miss does not latch.
 		if (name && _stricmp(name, "common_mp.rpak") == 0)
 			s_sawCommonMpLoaded = true;
@@ -1015,6 +1093,7 @@ static void __fastcall Hook_Pak_UnloadAsyncByHandle_S21(unsigned int handle, int
 	Msg(eDLL_T::RTECH, "pak unload requested. '%s' (wait=%d)\n",
 		name ? name : "(unknown)", wait);
 	v_Pak_UnloadAsyncByHandle_S21(handle, wait);
+	Pak_ClearOverridePriority_S21(handle);
 }
 
 static void Pak_UnloadSdkPaks_S21()
@@ -1033,12 +1112,14 @@ static void Pak_UnloadSdkPaks_S21()
 		{
 			Msg(eDLL_T::RTECH, "[SDK-PAK-UNLOAD] skip '%s' (handle 0x%X, slot handle 0x%X, status %s)\n",
 				r.name, r.handle & 0xFFFFFF, slotHandle & 0xFFFFFF, Pak_StatusToString_S21(status));
+			Pak_ClearOverridePriority_S21((unsigned int)r.handle);
 			continue;
 		}
 
 		Msg(eDLL_T::RTECH, "[SDK-PAK-UNLOAD] unloading '%s' (handle 0x%X, status %s)\n",
 			r.name, r.handle & 0xFFFFFF, Pak_StatusToString_S21(status));
 		v_Pak_UnloadAsyncByHandle_S21((unsigned int)r.handle, 1);
+		Pak_ClearOverridePriority_S21((unsigned int)r.handle);
 	}
 	s_sdkPakRecordCount = 0;
 }
@@ -1109,10 +1190,15 @@ static void __fastcall Hook_FatalErrorLogger_S21(char severity, const char* fmt,
 	// Sev=5: neuter missing .opt.starpak HD streams and allowlisted caller VAs only.
 	if (severity == 5)
 	{
-		const bool missingOptStarpak =
-			msg[0] &&
-			strstr(msg, "Error opening streaming file") != nullptr &&
-			strstr(msg, ".opt.starpak") != nullptr;
+		// .opt.starpak carries HD mips only, so its absence is always survivable;
+		// a mandatory .starpak costs the mid mips and needs the lever.
+		const bool missingStream =
+			msg[0] && strstr(msg, "Error opening streaming file") != nullptr;
+		const bool missingStarpak =
+			missingStream &&
+			(strstr(msg, ".opt.starpak") != nullptr ||
+			 (sdk_pak_stream_missing_tolerant.GetBool() &&
+			  strstr(msg, ".starpak") != nullptr));
 
 		// Streaming-file open fatal caller.
 		const uintptr_t fatalCaller = NetObs_Sym(NetObsSym_t::PakStreamFatalCaller);
@@ -1122,7 +1208,7 @@ static void __fastcall Hook_FatalErrorLogger_S21(char severity, const char* fmt,
 		constexpr size_t kPakFatalAllowlistCount =
 			sizeof(kPakFatalAllowlist) / sizeof(kPakFatalAllowlist[0]);
 
-		bool allow = missingOptStarpak;
+		bool allow = missingStarpak;
 		unsigned long long matchedVa = 0;
 		if (!allow)
 		{
@@ -1144,8 +1230,8 @@ static void __fastcall Hook_FatalErrorLogger_S21(char severity, const char* fmt,
 			if (n <= 64 || (n % 512) == 0)
 				Warning(eDLL_T::RTECH,
 					"[PAK-FATAL-NEUTER] #%ld suppressed engine TerminateProcess(sev=5) "
-					"caller_va=0x%llX matched_va=0x%llX opt_starpak=%d -- msg=\"%.160s\"\n",
-					n, callerVa, matchedVa, missingOptStarpak ? 1 : 0, msg);
+					"caller_va=0x%llX matched_va=0x%llX starpak=%d -- msg=\"%.160s\"\n",
+					n, callerVa, matchedVa, missingStarpak ? 1 : 0, msg);
 			return;
 		}
 
@@ -1296,104 +1382,67 @@ static bool ConsistencyObs_GuidLive(uintptr_t hashBase, unsigned __int64 guid)
 }
 
 // Name the referencing asset and each missing guidDesc before the anonymous consistency fatal.
+// Reads the same descriptor and page memory the engine check reads next, with no extra bounds:
+// the engine trusts them, and a stricter bound only rejects valid references.
+static ConVar sdk_pak_consistency_trace("sdk_pak_consistency_trace", "0", FCVAR_DEVELOPMENTONLY,
+	"Also log consistency-check walks, skips and references to guids that are tracked but not live yet.");
+
 static __int64 __fastcall Hook_PakConsistencyCheck_S21(__int64 a1, __int64 a2)
 {
 	if (a1 && a2)
 	{
-		const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
-		if (base)
+		const bool bTrace = sdk_pak_consistency_trace.GetBool();
+		const uintptr_t hashBase = S21Pak_AssetGuidHashBase();
+		const unsigned __int64 assetGuid = *reinterpret_cast<const unsigned __int64*>(a2);
+		const unsigned __int16 refCount  = *reinterpret_cast<const unsigned __int16*>(a2 + 64);
+		const unsigned int     startIdx  = *reinterpret_cast<const unsigned int*>(a2 + 56);
+		const uintptr_t pageArray = *reinterpret_cast<const uintptr_t*>(a1 + kS21Pak_MemPageBuffersOffset);
+		const uintptr_t gdBase = *reinterpret_cast<const uintptr_t*>(a1 + kS21Pak_PageDescriptorsOffset);
+
+		// Keyed on the pak slot, not the struct pointer: slots are reused.
+		const int pakSlot = *reinterpret_cast<const int*>(a1 + 0x582C) & 0x1FF;
+		const char* const pakName = GetPakNameForSlot(pakSlot);
+
+		if (refCount && hashBase && pageArray && gdBase)
 		{
-			const uintptr_t hashBase = S21Pak_AssetGuidHashBase();
-			const unsigned __int64 assetGuid = *reinterpret_cast<const unsigned __int64*>(a2);
-			const unsigned __int16 refCount  = *reinterpret_cast<const unsigned __int16*>(a2 + 64);
-			const unsigned int     startIdx  = *reinterpret_cast<const unsigned int*>(a2 + 56);
-			const uint32_t pageCount = Pak_S21GetPageCount(reinterpret_cast<const void*>(a1));
-			const uint32_t guidDescCount = Pak_S21GetGuidDescCount(reinterpret_cast<const void*>(a1));
-			const uintptr_t pageArray = *reinterpret_cast<const uintptr_t*>(a1 + kS21Pak_MemPageBuffersOffset);
-
-			// Keyed on the pak slot, not the struct pointer: slots are reused, so a
-			// pointer key silences every later pak in the same slot.
-			const int pakSlot = *reinterpret_cast<const int*>(a1 + 0x582C) & 0x1FF;
-			const char* const pakName = GetPakNameForSlot(pakSlot);
-			auto logSkip = [&](const char* reason)
+			if (bTrace)
 			{
-				static int s_lastSlot = -1;
-				static unsigned __int64 s_lastAsset = 0;
-				if (pakSlot == s_lastSlot && assetGuid == s_lastAsset)
-					return;
-				s_lastSlot = pakSlot;
-				s_lastAsset = assetGuid;
-				Warning(eDLL_T::RTECH, "[CONSISTENCY-OBS] pak '%s' asset 0x%016llX: skipped walk: %s (refs %u start %u descs %u pages %u)\n",
-					pakName ? pakName : "?", assetGuid, reason, (unsigned)refCount, startIdx, guidDescCount, pageCount);
-			};
-
-			unsigned int walkCount = refCount;
-			if (walkCount > 4096)
-			{
-				logSkip("refCount cap");
-				walkCount = 4096;
-			}
-
-			const uint64_t rangeEnd = static_cast<uint64_t>(startIdx) + refCount;
-			if (!pageCount || !guidDescCount || !pageArray
-				|| rangeEnd > guidDescCount)
-			{
-				logSkip(!pageCount ? "pageCount"
-					: !guidDescCount ? "guidDesc count"
-					: !pageArray ? "page buffers"
-					: "guidDesc range");
-			}
-			else
-			{
-				const uintptr_t gdBase = *reinterpret_cast<const uintptr_t*>(a1 + kS21Pak_PageDescriptorsOffset);
-				if (!gdBase)
+				static int s_walkedSlot = -1;
+				if (pakSlot != s_walkedSlot)
 				{
-					logSkip("guidDesc ptr");
+					s_walkedSlot = pakSlot;
+					Msg(eDLL_T::RTECH, "[CONSISTENCY-OBS] walking refs for pak '%s' (first asset 0x%016llX, %u refs)\n",
+						pakName ? pakName : "?", assetGuid, (unsigned)refCount);
 				}
-				else
+			}
+
+			const uintptr_t gdArray = gdBase + 8ull * startIdx;
+			for (unsigned int i = 0; i < refCount; ++i)
+			{
+				const uintptr_t entry = gdArray + 8ull * i;
+				const unsigned int pageIdx = *reinterpret_cast<const unsigned int*>(entry);
+				const unsigned int pageOff = *reinterpret_cast<const unsigned int*>(entry + 4);
+				const uintptr_t pagePtr = *reinterpret_cast<const uintptr_t*>(pageArray + 8ull * pageIdx);
+				if (!pagePtr)
+					continue;
+				const unsigned __int64 refGuid =
+					*reinterpret_cast<const unsigned __int64*>(pagePtr + pageOff);
+
+				// Only a guid absent from the hash is fatal; a tracked one with no data yet
+				// (an on-demand model before its root pak loads) is patched to null.
+				const bool inHash = ConsistencyObs_GuidResolves(hashBase, refGuid);
+				if (inHash && (!bTrace || ConsistencyObs_GuidLive(hashBase, refGuid)))
+					continue;
+
+				Warning(eDLL_T::RTECH,
+					"[CONSISTENCY-OBS] pak '%s' asset 0x%016llX references %s guid 0x%016llX (ref %u/%u)\n",
+					pakName ? pakName : "?", assetGuid, inHash ? "NOT-LIVE" : "MISSING", refGuid, i, (unsigned)refCount);
+				if (!inHash)
 				{
-					static int s_walkedSlot = -1;
-					if (pakSlot != s_walkedSlot)
-					{
-						s_walkedSlot = pakSlot;
-						Warning(eDLL_T::RTECH, "[CONSISTENCY-OBS] walking refs for pak '%s' (first asset 0x%016llX, %u refs)\n",
-							pakName ? pakName : "?", assetGuid, (unsigned)refCount);
-					}
-					const uintptr_t gdArray = gdBase + 8ull * startIdx;
-					for (unsigned int i = 0; i < walkCount; ++i)
-					{
-						const uintptr_t entry = gdArray + 8ull * i;
-						const unsigned int pageIdx = *reinterpret_cast<const unsigned int*>(entry);
-						const unsigned int pageOff = *reinterpret_cast<const unsigned int*>(entry + 4);
-						if (pageIdx >= pageCount)
-						{
-							logSkip("pageIdx");
-							continue;
-						}
-						const uint32_t pageSize = Pak_S21GetPageDataSize(reinterpret_cast<const void*>(a1), pageIdx);
-						if (static_cast<uint64_t>(pageOff) + 8ull > pageSize)
-						{
-							logSkip("pageOff");
-							continue;
-						}
-						const uintptr_t pagePtr = *reinterpret_cast<const uintptr_t*>(pageArray + 8ull * pageIdx);
-						if (!pagePtr) continue;
-						const unsigned __int64 refGuid =
-							*reinterpret_cast<const unsigned __int64*>(pagePtr + pageOff);
-						// The engine also needs the tracked asset's live pointer: an on-demand
-						// model sits in the hash with NULL data until its root pak loads.
-						const bool inHash = ConsistencyObs_GuidResolves(hashBase, refGuid);
-						if (!inHash || !ConsistencyObs_GuidLive(hashBase, refGuid))
-						{
-							Warning(eDLL_T::RTECH,
-								"[CONSISTENCY-OBS] asset 0x%016llX references %s guid 0x%016llX (ref %u/%u)\n",
-								assetGuid, inHash ? "NOT-LIVE" : "MISSING", refGuid, i, (unsigned)refCount);
-							BridgeTrace_Log(
-								"[CONSISTENCY-OBS] asset 0x%016llX references %s guid 0x%016llX (ref %u/%u)\n",
-								assetGuid, inHash ? "NOT-LIVE" : "MISSING", refGuid, i, (unsigned)refCount);
-							BridgeTrace_Flush();
-						}
-					}
+					BridgeTrace_Log(
+						"[CONSISTENCY-OBS] pak '%s' asset 0x%016llX references MISSING guid 0x%016llX (ref %u/%u)\n",
+						pakName ? pakName : "?", assetGuid, refGuid, i, (unsigned)refCount);
+					BridgeTrace_Flush();
 				}
 			}
 		}

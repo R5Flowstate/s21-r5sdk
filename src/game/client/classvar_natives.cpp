@@ -301,7 +301,7 @@ struct ClassVarSticky_s
 	char value[64];
 };
 
-static constexpr int CLASSVAR_STICKY_MAX = 32;
+static constexpr int CLASSVAR_STICKY_MAX = 128;
 
 static ClassVarSticky_s s_stickyVars[CLASSVAR_STICKY_MAX];
 static int s_nStickyCount = 0;
@@ -528,6 +528,23 @@ uintptr_t ClassVar_FieldAddress(const ClassVarField_t& field)
 	if (field.bSecondary)
 		return ClientScript_ClassVarSecondaryBase(nPlayer, nBlock) + (field.nOffset & 0xFFFFFF);
 	return nBlock + (field.nOffset & 0xFFFFFF);
+}
+
+int ClassVar_LocalPoseIndex(void)
+{
+	ClientScript_ResolveClassVar();
+
+	if (!s_bClassVarUsable)
+		return -1;
+
+	void* const pPlayer = ClientScript_LocalPlayer();
+	if (!pPlayer)
+		return -1;
+
+	const uintptr_t nPlayer = reinterpret_cast<uintptr_t>(pPlayer);
+	if (*reinterpret_cast<int32_t*>(nPlayer + CPLAYER_OFF_BLOCK_COUNT) > 0)
+		return (*reinterpret_cast<uint8_t*>(nPlayer + CPLAYER_OFF_BLOCK_SELECTOR) >> 1) & 1;
+	return 2;
 }
 
 uint32_t ClassVar_SettingsRebuildSerial(void)

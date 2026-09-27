@@ -26,6 +26,12 @@ inline void (*C_Player__PlayerMelee_ClearActiveAttackState)(void* player) = null
 // C_Player::Lunge_ClearTarget -- the lunge exit.
 inline void (*C_Player__Lunge_ClearTarget)(void* player) = nullptr;
 
+// Per-frame sample of the traced melee viewmodel (host frame).
+void MeleeActivityTrace_OnFrame(void);
+
+// C_WeaponX::GetWeaponViewmodel -- the owner's viewmodel for this weapon.
+inline void* (*C_WeaponX__GetWeaponViewmodel)(void* weapon) = nullptr;
+
 ///////////////////////////////////////////////////////////////////////////////
 class VMeleeActivityTrace : public IDetour
 {
@@ -36,6 +42,7 @@ class VMeleeActivityTrace : public IDetour
 		LogFunAdr("C_Player::PlayerMelee_EndAttack", C_Player__PlayerMelee_EndAttack);
 		LogFunAdr("C_Player::PlayerMelee_ClearActiveAttackState", C_Player__PlayerMelee_ClearActiveAttackState);
 		LogFunAdr("C_Player::Lunge_ClearTarget", C_Player__Lunge_ClearTarget);
+		LogFunAdr("C_WeaponX::GetWeaponViewmodel", C_WeaponX__GetWeaponViewmodel);
 	}
 	virtual void GetFun(void) const;
 	virtual void GetVar(void) const { }

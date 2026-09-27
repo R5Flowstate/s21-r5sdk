@@ -188,6 +188,18 @@ static void FpsMax_BindShipped(void)
 			fps_absolute_max->SetValue(10000.f);
 	}
 
+	// Nonzero clamps the frame target to 60 fps while the lobby/character select state is up.
+	ConVar* const pLobbyCap = g_pCVar->FindVar("lobby_cap_fps");
+	if (pLobbyCap)
+	{
+		pLobbyCap->RemoveFlags(FCVAR_DEVELOPMENTONLY);
+		pLobbyCap->AddFlags(FCVAR_RELEASE);
+		pLobbyCap->SetDefault("0");
+		pLobbyCap->SetValue(0);
+	}
+	else
+		Warning(eDLL_T::CLIENT, "[FPS-CAP] 'lobby_cap_fps' not registered -- lobby stays capped at 60\n");
+
 	FpsMax_ApplyUnlocked(nullptr);
 }
 

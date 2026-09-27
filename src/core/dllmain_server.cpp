@@ -102,6 +102,7 @@ void SDK_Init()
 	PEB64* pEnv = CModule::GetProcessEnvironmentBlock();
 
 	g_GameDll.InitFromBase(pEnv->ImageBaseAddress);
+	g_GameDll.CapturePristineCode(); // before any hook or patch
 	g_SDKDll.InitFromBase((QWORD)s_hModuleHandle);
 
 	Tier0_Init();

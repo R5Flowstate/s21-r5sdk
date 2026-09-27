@@ -254,7 +254,10 @@ static void DeathField_ApplyParams(int index, float x, float y, float z,
 	df.radiusEnd   = radiusEnd;
 	df.timeStart   = timeStart;
 	df.timeEnd     = timeEnd;
-	DeathField_EnsurePlayersInDefaultRealm();
+	// Only ring 0 lives in DEFAULT. A realm-scoped ring spawns its own mover in its
+	// realm; stamping DEFAULT here would merge every fighter into the lobby realm.
+	if (index == 0)
+		DeathField_EnsurePlayersInDefaultRealm();
 	DeathField_Commit(index);
 }
 
@@ -503,11 +506,10 @@ void DeathField_OnEntitySpawned(void* entity)
 	const uint32_t hibFlags = *reinterpret_cast<uint32_t*>(pEnt + 0x234);
 	const uint16_t edictFlagsBefore = DeathField_ReadEdictFlags(edictIdx);
 
+	// The realm mask is left as script set it: a mover outside DEFAULT belongs to a
+	// realm-scoped mode and must stay invisible to the lobby.
 	uint64_t* const pMask = reinterpret_cast<uint64_t*>(pEnt + DF_ENT_OFF_REALMSBITMASK);
 	const uint64_t before = *pMask;
-
-	if ((before & DF_REALM_BIT_DEFAULT) == 0)
-		*pMask = before | DF_REALM_BIT_DEFAULT;
 
 	// Script native writes +0xEC. DispatchSpawn / UpdateTransmitState honor +0xF0/+0xF4.
 	*reinterpret_cast<uint32_t*>(pEnt + 0xEC) = 4;

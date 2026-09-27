@@ -10,6 +10,7 @@
 #include "core/bridge_stats.h"
 #include "engine/client/bridge_join_auth.h"
 #include "engine/client/bridge_connect_password.h"
+#include "engine/shared/host_proof.h"
 #include "engine/sys_integrity.h"
 #include "rtech/pak/pak_lobby_world.h"
 #include "engine/mdl_precache_client_grow.h"
@@ -69,6 +70,7 @@ extern CGlobalVarsBase* gpGlobals;
 // C4244 stays enabled.
 #pragma warning(disable: 4456 4459)
 #include "engine/client/net_bridge_split.h"
+#include "engine/client/demo_bridge.h"
 
 
 static std::string S21Bridge_GetConnectPersona()
@@ -860,12 +862,26 @@ static ConVar bridge_ack_xlate("bridge_ack_xlate", "1", FCVAR_RELEASE,
 	"S21 bridge: translate the dedi's bridge-space C2S ack into the engine's own outgoing "
 	"sequence space before stamping m_nOutSequenceNrAck. Default 1.");
 
+static ConVar bridge_drop_stale_seq("bridge_drop_stale_seq", "1", FCVAR_RELEASE,
+	"S21 bridge: drop S2C datagrams whose sequence is not newer than the last one "
+	"processed (replayed or duplicated packets). Default 1.");
+
 
 // svc_Snapshot re-encode counters (written by Hook_ProcessPacket's svc_Snapshot path)
 static volatile LONG s_snapReencodeTotal = 0;
 static volatile LONG s_snapReencodeDelta = 0;
 static volatile LONG s_snapReencodeFull  = 0;
+static volatile LONG s_snapLastTick      = 0;
 
+uint32_t S21Bridge_LastSnapshotTick(void)
+{
+	return static_cast<uint32_t>(s_snapLastTick);
+}
+
+long S21Bridge_FullSnapshotCount(void)
+{
+	return s_snapReencodeFull;
+}
 
 
 // FILE-SCOPE scratch: the message pump uses __try/__except; a function-local
@@ -1070,6 +1086,37 @@ static int S21Bridge_CrashFilter(EXCEPTION_POINTERS* ep)
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
+// Reads the host proof of a dedi on this machine. Only ever sent to a loopback
+// peer, so the key never leaves the machine that published it.
+static bool S21Bridge_ReadHostProof(char (&szProof)[HOST_PROOF_HEX_LEN + 1])
+{
+    szProof[0] = '\0';
+
+    static const uint8_t kV4MapPrefix[12] = { 0,0,0,0,0,0,0,0,0,0,0xFF,0xFF };
+    const uint8_t* const pAddr = s_bridgeDest.sin6_addr.u.Byte;
+    const bool bV4Loopback = memcmp(pAddr, kV4MapPrefix, sizeof(kV4MapPrefix)) == 0 && pAddr[12] == 127;
+    if (!bV4Loopback && !IN6_IS_ADDR_LOOPBACK(&s_bridgeDest.sin6_addr))
+        return false;
+
+    char szName[64];
+    V_snprintf(szName, sizeof(szName), HOST_PROOF_MAPPING_FMT, (int)ntohs(s_bridgeDest.sin6_port));
+
+    HANDLE hMap = OpenFileMappingA(FILE_MAP_READ, FALSE, szName);
+    if (!hMap)
+        return false;
+
+    const char* const pView = static_cast<const char*>(MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, HOST_PROOF_HEX_LEN + 1));
+    if (pView)
+    {
+        memcpy(szProof, pView, HOST_PROOF_HEX_LEN);
+        szProof[HOST_PROOF_HEX_LEN] = '\0';
+        UnmapViewOfFile(pView);
+    }
+    CloseHandle(hMap);
+
+    return V_strlen(szProof) == HOST_PROOF_HEX_LEN;
+}
+
 // Stage 1 -> 2. Called from PollReceive on S2C_CHALLENGE (ffffffff 49).
 // Builds the S3 C2S_CONNECT bitstream and sends it. Pre-activates the bridge
 // so the server's follow-up netchan packets flow through the normal drain.
@@ -1175,7 +1222,9 @@ static void S21Bridge_OnS2CChallenge(uint32_t challenge)
     bsWriteU32(74565);                  // marker (0x12345)
     // plugin/ConVar list: nucleus pair required for hasAuthString path; token
     // trio so Authenticate can FindKey before the post-CONNACCEPT userinfo dump.
-    bsWriteU8(5);                       // pluginCount
+    char szHostProof[HOST_PROOF_HEX_LEN + 1];
+    const bool bHostProof = S21Bridge_ReadHostProof(szHostProof);
+    bsWriteU8(bHostProof ? 6 : 5);      // pluginCount
     // Per-plugin format (from S3 client)
     // 6 bits: plugin-name-table index (0 = name not in table, full string follows)
     bsWriteBits(0, 6); // plugin-name-table index = 0 -> string follows
@@ -1188,6 +1237,12 @@ static void S21Bridge_OnS2CChallenge(uint32_t challenge)
     bsWriteStr("cl_onlineAuthTokenSignature1"); bsWriteStr(liveCVarStr("cl_onlineAuthTokenSignature1"));
     bsWriteBits(0, 6);
     bsWriteStr("cl_onlineAuthTokenSignature2"); bsWriteStr(liveCVarStr("cl_onlineAuthTokenSignature2"));
+    if (bHostProof)
+    {
+        bsWriteBits(0, 6);
+        bsWriteStr(HOST_PROOF_CONVAR); bsWriteStr(szHostProof);
+        SecureZeroMemory(szHostProof, sizeof(szHostProof));
+    }
 
     if (bsOverflow)
     {
@@ -1237,9 +1292,7 @@ static void S21Bridge_OnS2CChallenge(uint32_t challenge)
         connectPkt[68], connectPkt[69], connectPkt[70], connectPkt[71],
         connectPkt[72], connectPkt[73], connectPkt[74], connectPkt[75]);
 
-    const int sent = sendto(s_bridgeSocket,
-        reinterpret_cast<const char*>(connectPkt), pktLen, 0,
-        reinterpret_cast<const sockaddr*>(&s_bridgeDest), sizeof(s_bridgeDest));
+    const int sent = S21Bridge_TxRaw(connectPkt, pktLen);
 
     SDK_Log("[NET-OBS] HANDSHAKE: sent C2S_CONNECT %d/%d bytes (payload=%d), bridge pre-activated\n",
         sent, pktLen, totalBytes);
@@ -2209,6 +2262,11 @@ static inline uint32_t S21Bridge_S2CQueueDepth(void)
 {
 	return s_s2cDeferTail.load(std::memory_order_acquire) -
 		s_s2cDeferHead.load(std::memory_order_relaxed);
+}
+
+bool S21Bridge_S2CHoldQueueBusy(void)
+{
+	return S21Bridge_S2CQueueDepth() >= BRIDGE_S2C_DEFER_MAX / 2;
 }
 
 // [SEC] Per-second S2C ScriptRemote rate budget (native ~600 queue parity).
@@ -3845,21 +3903,24 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 							"[BRIDGE-PLO] entry %u dropped -- non-printable name/value\n", i);
 						continue;
 					}
-					if (!S21Bridge_NameInCommaList(bridge_playlist_override_allow.GetString(),
-						szName, nameLen))
+					if (Playlists_IsSettingDeclName(szName))
 					{
-						static int s_ploDenyLog = 0;
-						if (++s_ploDenyLog <= 8)
-							Warning(eDLL_T::CLIENT,
-								"[BRIDGE-PLO] override '%s' not on allowlist -- drop\n", szName);
+						Warning(eDLL_T::CLIENT,
+							"[BRIDGE-PLO] override '%s' targets a setting declaration -- drop\n", szName);
 						continue;
 					}
+
+					// Entries off the allowlist are kept and judged at read time against
+					// the current playlist's setting declarations.
+					s_playlistOverrides[accepted].m_bAllowlisted = S21Bridge_NameInCommaList(
+						bridge_playlist_override_allow.GetString(), szName, nameLen);
 
 					memcpy(s_playlistOverrides[accepted].m_szName, szName, nameLen + 1);
 					memcpy(s_playlistOverrides[accepted].m_szValue, szValue, valueLen + 1);
 					accepted++;
 				}
 
+				InterlockedIncrement(&s_nPlaylistOverridesGen);
 				s_nPlaylistOverrides = accepted;
 
 				// The length prefix is authoritative -- honour it even on a clean parse, so
@@ -4855,6 +4916,14 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 
 			// S3 CHANGELEVEL=9; S21 9 is MAYRECONNECT (drops to menu) and CHANGELEVEL is 10.
 			const uint32_t s21SignonState = (signonState == 9) ? 10u : signonState;
+
+			// A demo rewind replays the packets after its full snapshot, and with
+			// them signon rungs this session already walked.
+			if (Demo_IsPlaying() && DemoPlay_InSoftRewind() && s21SignonState <= 8)
+			{
+				S21BR_SkipSignonBody(s21buf);
+				continue;
+			}
 
 			if (s21SignonState == 2 && s_lastSentSignonState > 2)
 			{
@@ -5943,6 +6012,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			const LONG snapN = InterlockedIncrement(&s_snapReencodeTotal);
 			if (isDelta) InterlockedIncrement(&s_snapReencodeDelta);
 			else         InterlockedIncrement(&s_snapReencodeFull);
+			InterlockedExchange(&s_snapLastTick, static_cast<LONG>(sti_tick1));
 
 			static int s_snapLog = 0;
 			if (++s_snapLog <= 20 || (s_snapLog % 500) == 0)
@@ -6241,6 +6311,8 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 								"[BRIDGE-PM] svc_Snapshot Process returned false (#%ld) "
 								"isDelta=%u nLen=%u tick=%u\n",
 								(long)n, isDelta, nLengthBits, sti_tick1);
+						if (Demo_IsPlaying())
+							DemoPlay_OnSnapshotDropped();
 					}
 				}
 				else
@@ -7022,6 +7094,19 @@ void S21Bridge_Hook_ProcessPacket(CNetChan* pChan, netpacket_s* pPacket)
 	if (buf.IsOverflowed())
 		return;
 
+	// A stale or duplicate datagram (on-path replay, UDP duplication) would re-run its
+	// reliable and unreliable messages; drop it like the stock netchan does. Demo seeks
+	// legitimately rewind the sequence.
+	if (bridge_drop_stale_seq.GetBool() && !Demo_IsPlaying() &&
+		S21_NC_InSeqNr(pChan) > 0 && sequence <= S21_NC_InSeqNr(pChan))
+	{
+		static long long s_staleDrop = 0;
+		if (++s_staleDrop <= 8 || (s_staleDrop % 1000) == 0)
+			Warning(eDLL_T::ENGINE, "[SEC][BRIDGE-PP] #%lld stale packet seq=%d <= in=%d -- dropped\n",
+				s_staleDrop, sequence, S21_NC_InSeqNr(pChan));
+		return;
+	}
+
 	const int ppLevel = BridgeBudget_Level();
 	static long s_ppBudgetN = 0;
 	const long ppBN = (ppLevel > 0) ? InterlockedIncrement(&s_ppBudgetN) : 0;
@@ -7101,6 +7186,11 @@ void S21Bridge_Hook_ProcessPacket(CNetChan* pChan, netpacket_s* pPacket)
 		buf.ReadUBitLong(10);
 	}
 
+	const LONG nFullBefore = s_snapReencodeFull;
+	int nReliableEndBit = -1;
+	DemoRecord_OnPacketBegin(reinterpret_cast<const uint8_t*>(buf.GetBasePointer()), pktSize);
+	const bool bDemoPlaying = Demo_IsPlaying();
+
 	// Replicate native CNetChan::ProcessPacket's last_received update.
 	// Native at +: movsd [rbx+20F0h], xmm3
 	{
@@ -7151,6 +7241,8 @@ void S21Bridge_Hook_ProcessPacket(CNetChan* pChan, netpacket_s* pPacket)
 		subChannelOk = S21Bridge_ParseSubChannelData(pChan, buf);
 		if (!subChannelOk)
 			InterlockedIncrement(&s_ppSubchanFailed);
+		else
+			nReliableEndBit = (int)buf.GetNumBitsRead();
 
 		static long long s_subLog = 0;
 		if (++s_subLog <= 10 || (s_subLog % 2000) == 0)
@@ -7163,8 +7255,12 @@ void S21Bridge_Hook_ProcessPacket(CNetChan* pChan, netpacket_s* pPacket)
 		S21_NC_InSeqNr(pChan) = sequence;
 
 	// [ACK-XLATE] stamp m_nOutSequenceNrAck in the ENGINE's sequence space (see the
-	// bridge_ack_xlate banner): translate the dedi's bridge-space ack through the flush
-	if (bridge_ack_xlate.GetBool())
+	// bridge_ack_xlate banner): translate the dedi's bridge-space ack through the flush.
+	// A demo's recorded acks answer a C2S sequence space that does not exist, so
+	// everything the engine "sent" counts as delivered.
+	if (bDemoPlaying)
+		S21_NC_OutSeqNrAck(pChan) = S21_NC_OutSeqNr(pChan);
+	else if (bridge_ack_xlate.GetBool())
 	{
 		const AckXlate_s& x = s_ackXlate[(uint32_t)sequenceAck & 0x3FF];
 		if (x.bridgeSeq == (uint32_t)sequenceAck && x.engineSeq >= 0 &&
@@ -7183,7 +7279,7 @@ void S21Bridge_Hook_ProcessPacket(CNetChan* pChan, netpacket_s* pPacket)
 
 	// === Authoritative flow-stat accounting (netgraph shows REAL numbers) ===
 	// The bridge replaces CNetChan::ProcessPacket, so the engine's per-packet flow
-	if (bridge_net_flow_reconcile.GetBool())
+	if (bridge_net_flow_reconcile.GetBool() && !bDemoPlaying)
 	{
 		if (CNetChan__FlowNewPacket)
 			CNetChan__FlowNewPacket(pChan, /*FLOW_INCOMING*/ 1, sequence, sequenceAck,
@@ -7344,8 +7440,9 @@ void S21Bridge_Hook_ProcessPacket(CNetChan* pChan, netpacket_s* pPacket)
 			BridgeBudget_Ms(ppQ0.QuadPart, ppQ1.QuadPart, ppFreq.QuadPart));
 	}
 
-	return;
-
+	DemoRecord_OnPacketEnd(s_snapReencodeFull != nFullBefore, S21Bridge_LastSnapshotTick(), nReliableEndBit);
+	if (bDemoPlaying)
+		DemoPlay_OnPacketProcessed();
 }
 
 // S21->S3 translation table (for outgoing messages from S21 client, or
@@ -7645,16 +7742,38 @@ static void S21Bridge_SendDataBlockBitmapAck()
 	}
 	pos += (bitPos + 7) >> 3;
 
-	const int ackResult = s_origSendto(s_bridgeSocket,
-		reinterpret_cast<const char*>(ackBuf), pos, 0,
-		reinterpret_cast<const sockaddr*>(&s_bridgeDest),
-		sizeof(s_bridgeDest));
+	const int ackResult = S21Bridge_TxRaw(ackBuf, pos);
 
 	static long long s_bmAckLog = 0;
 	if (++s_bmAckLog <= 8 || (s_bmAckLog % 200) == 0)
 		SDK_Log("[BRIDGE-DB] incr bitmap ACK #%lld: id=%d nr=%d recv=%d/%d bytes=%d send=%d\n",
 			s_bmAckLog, s_dbTransferId, s_dbTransferNr, s_dbBlocksReceived,
 			s_dbTotalBlocks, pos, ackResult);
+}
+
+// Hands a completed (still-compressed) transfer to the MAIN thread. The copy
+// frees the reassembly buffer; Hook_Cbuf_Execute runs OnDataBlockComplete.
+static bool S21Bridge_QueueDataBlockForMainThread(const uint8_t* pData, const int nSize)
+{
+	if (!s_pendingSignonBuf)
+	{
+		s_pendingSignonBuf = static_cast<uint8_t*>(
+			malloc(BRIDGE_DB_SCRATCH_SIZE + HeapCanary::kTailBytes));
+		if (s_pendingSignonBuf)
+			HeapCanary::RegisterTail("bridge-pending-signon",
+				s_pendingSignonBuf, BRIDGE_DB_SCRATCH_SIZE);
+	}
+	if (!s_pendingSignonBuf || !pData || nSize <= 0 || nSize > BRIDGE_DB_SCRATCH_SIZE)
+	{
+		Warning(eDLL_T::ENGINE,
+			"[BRIDGE-DB] pending signon alloc failed -- holding transfer, not inlining\n");
+		return false;
+	}
+
+	memcpy(s_pendingSignonBuf, pData, nSize);
+	s_pendingSignonSize = nSize;
+	s_pendingSignonReady = true;
+	return true;
 }
 
 static bool S21Bridge_Handle0x4F(const uint8_t* data, int dataLen)
@@ -7853,35 +7972,10 @@ static bool S21Bridge_Handle0x4F(const uint8_t* data, int dataLen)
 
 		if (sdk_bridge_defer_signon.GetBool())
 		{
-			// B2: hand the completed (still-compressed) transfer to the MAIN thread.
-			// Copy out of the reassembly buffer so the net thread can keep receiving;
-			// Hook_Cbuf_Execute runs OnDataBlockComplete (engine SetSignonState/SPAWN).
-			if (!s_pendingSignonBuf)
-			{
-				s_pendingSignonBuf = static_cast<uint8_t*>(
-					malloc(BRIDGE_DB_SCRATCH_SIZE + HeapCanary::kTailBytes));
-				if (s_pendingSignonBuf)
-					HeapCanary::RegisterTail("bridge-pending-signon",
-						s_pendingSignonBuf, BRIDGE_DB_SCRATCH_SIZE);
-			}
 			if (s_pendingSignonReady)
-			{
 				return true;
-			}
-			if (s_pendingSignonBuf && s_dbTransferSize > 0 &&
-				s_dbTransferSize <= BRIDGE_DB_SCRATCH_SIZE)
-			{
-				memcpy(s_pendingSignonBuf, s_dbScratchBuffer, s_dbTransferSize);
-				s_pendingSignonSize = s_dbTransferSize;
+			if (S21Bridge_QueueDataBlockForMainThread(s_dbScratchBuffer, s_dbTransferSize))
 				s_dbComplete = true;
-				s_pendingSignonReady = true;
-			}
-			else
-			{
-				Warning(eDLL_T::ENGINE,
-					"[BRIDGE-DB] pending signon alloc failed -- holding transfer, not inlining\n");
-				return true;
-			}
 		}
 		else
 		{
@@ -7890,6 +7984,28 @@ static bool S21Bridge_Handle0x4F(const uint8_t* data, int dataLen)
 	}
 
 	return true; // consumed
+}
+
+bool S21Bridge_SignonHandoffBusy(void)
+{
+	return s_pendingSignonReady;
+}
+
+// A demo delivers the reassembled block exactly as the fragment path would.
+void S21Bridge_DeliverDataBlock(const uint8_t* pData, const int nSize)
+{
+	if (!pData || nSize <= 0 || nSize > BRIDGE_DB_SCRATCH_SIZE)
+		return;
+
+	if (sdk_bridge_defer_signon.GetBool())
+	{
+		if (!s_pendingSignonReady)
+			S21Bridge_QueueDataBlockForMainThread(pData, nSize);
+		return;
+	}
+
+	s_dbTransferSize = nSize;
+	S21Bridge_OnDataBlockComplete(pData, nSize);
 }
 
 static bool S21Bridge_TryConsumeDataBlockOOB(const uint8_t* h, int recvd)
@@ -8023,9 +8139,12 @@ bool S21Bridge_PollReceive(int iSocket, netpacket_s* pInpacket)
 	if (s_bridgeActive && s_hsStage == BridgeHsStage::Idle)
 		S21Bridge_SelfClockC2S();
 
+	// A playing demo is the only source: no socket, no split queue.
+	const bool bDemo = Demo_IsPlaying();
+
 	// Poll the bridge socket for new data (non-blocking).
 	// DRAIN LOOP: read ALL pending packets. DataBlock fragments (0x4F) are
-	if (s_bridgeSocket == INVALID_SOCKET || !s_origRecvfrom)
+	if (!bDemo && (s_bridgeSocket == INVALID_SOCKET || !s_origRecvfrom))
 		return false;
 
 	static char pollBuf[262144]; // Must hold a reassembled split packet
@@ -8037,8 +8156,14 @@ bool S21Bridge_PollReceive(int iSocket, netpacket_s* pInpacket)
 
 	for (int drainIter = 0; drainIter < 512; drainIter++)
 	{
+		if (bDemo)
+		{
+			if (!DemoPlay_NextDatagram(pollBuf, (int)sizeof(pollBuf), &recvd) || recvd <= 0)
+				return false;
+			from = s_bridgeDest;
+		}
 		// First: drain the split packet queue (pushed by Hook_sendto / keepalive).
-		if (S21Bridge_TryDequeueS2C(pollBuf, (int)sizeof(pollBuf), &recvd))
+		else if (S21Bridge_TryDequeueS2C(pollBuf, (int)sizeof(pollBuf), &recvd))
 		{
 			from = s_bridgeDest;
 			InterlockedIncrement(&s_pollFromQueue);

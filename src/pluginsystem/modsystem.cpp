@@ -14,6 +14,7 @@
 #include "engine/cmodel_bsp.h"
 #include "rtech/rson.h"
 #include "localize/localize.h"
+#include "vscript/script_convar_guard.h"
 #include "modsystem.h"
 
 //-----------------------------------------------------------------------------
@@ -25,7 +26,6 @@
 // that product the mod tree is read from the install root directly; the dedi
 // keeps using the engine filesystem.
 //-----------------------------------------------------------------------------
-#if defined(CLIENT_DLL)
 static bool ModSys_AbsPath(const char* const pszRel, char* const pszOut, const size_t nSize)
 {
 	char exePath[MAX_PATH];
@@ -42,6 +42,43 @@ static bool ModSys_AbsPath(const char* const pszRel, char* const pszOut, const s
 	return _snprintf_s(pszOut, nSize, _TRUNCATE, "%s\\%s", exePath, pszRel) > 0;
 }
 
+// Reads through the basic Open/Size/Read block and parses without a filesystem, so
+// #include / #base are not followed and a file can neither recurse nor grow unbounded.
+KeyValues* ModSystem_LoadKeyValuesCapped(const char* const pszPath, const char* const pszPathID,
+	const char* const pszRootName, const ssize_t nMaxBytes)
+{
+	FileHandle_t hFile = FileSystem()->Open(pszPath, "rb", pszPathID);
+	if (!hFile)
+		return NULL;
+
+	const ssize_t nSize = FileSystem()->Size(hFile);
+	if (nSize <= 0 || nSize > nMaxBytes)
+	{
+		FileSystem()->Close(hFile);
+		if (nSize > nMaxBytes)
+			Warning(eDLL_T::MODSYSTEM, "'%s' is %zd bytes (limit %zd); not loaded\n", pszPath, nSize, nMaxBytes);
+		return NULL;
+	}
+
+	std::vector<char> text(static_cast<size_t>(nSize) + 1);
+	const ssize_t nRead = FileSystem()->Read(text.data(), nSize, hFile);
+	FileSystem()->Close(hFile);
+
+	if (nRead <= 0)
+		return NULL;
+	text[static_cast<size_t>(nRead)] = '\0';
+
+	KeyValues* const pKV = new KeyValues(pszRootName);
+	if (!pKV->LoadFromBuffer(pszPath, text.data(), NULL, NULL))
+	{
+		pKV->DeleteThis();
+		return NULL;
+	}
+
+	return pKV;
+}
+
+#if defined(CLIENT_DLL)
 static bool ModSys_FileExists(const char* const pszRel)
 {
 	char abs[MAX_PATH * 2];
@@ -136,7 +173,8 @@ static KeyValues* ModSys_LoadKeyValues(const char* const pszRel)
 static void ModSys_FindManifestsRecursive(CUtlVector<CUtlString>& outList,
 	const char* const pszRelDir, const int nDepth)
 {
-	if (nDepth > MOD_MAX_SCAN_DEPTH || outList.Count() >= MAX_MODS_TO_LOAD)
+	// Only mods/<folder>/mod.vdf can load (depth 1); deeper folders are never worth a walk.
+	if (nDepth > 1 || outList.Count() >= MAX_MODS_TO_LOAD)
 		return;
 
 	char absGlob[MAX_PATH * 2];
@@ -204,13 +242,25 @@ static bool ModSys_WriteFile(const char* const pszRel, CUtlBuffer& buf)
 
 static KeyValues* ModSys_LoadKeyValues(const char* const pszRel)
 {
-	return FileSystem()->LoadKeyValues(IFileSystem::TYPE_COMMON, pszRel, "GAME");
+	return ModSystem_LoadKeyValuesCapped(pszRel, "GAME", "ModSystem", MOD_MAX_MANIFEST_BYTES);
 }
 
+// Only mods/<folder>/mod.vdf can load, so one level is scanned; a deep tree costs nothing.
 static void ModSys_FindManifests(CUtlVector<CUtlString>& outList)
 {
-	RecursiveFindFilesMatchingName(outList,
-		MOD_BASE_DIRECTORY, MOD_SETTINGS_FILE, "GAME", '/');
+	FileFindHandle_t hFind;
+	for (const char* pszFolder = FileSystem()->FindFirstEx(MOD_BASE_DIRECTORY "/*", "GAME", &hFind);
+		pszFolder && outList.Count() < MAX_MODS_TO_LOAD; pszFolder = FileSystem()->FindNext(hFind))
+	{
+		if (pszFolder[0] == '.' || !FileSystem()->FindIsDirectory(hFind))
+			continue;
+
+		CUtlString manifest;
+		manifest.Format("%s/%s/%s", MOD_BASE_DIRECTORY, pszFolder, MOD_SETTINGS_FILE);
+		if (FileSystem()->FileExists(manifest.String(), "GAME"))
+			outList.AddToTail(manifest);
+	}
+	FileSystem()->FindClose(hFind);
 }
 #endif // !CLIENT_DLL
 
@@ -243,6 +293,8 @@ static void ModSystem_EnableChanged_f(IConVar* var, const char* pOldValue, float
 //-----------------------------------------------------------------------------
 static ConVar modsystem_enable("modsystem_enable", "1", FCVAR_DEVELOPMENTONLY, "Enable the modsystem", ModSystem_EnableChanged_f);
 static ConVar modsystem_debug("modsystem_debug", "0", FCVAR_RELEASE, "Debug the modsystem");
+
+static bool ModSystem_ModIDHasValidShape(const char* const pModId);
 
 //-----------------------------------------------------------------------------
 // Purpose: returns the mod state as string
@@ -361,6 +413,7 @@ void CModSystem::Init()
 
 	LockModList();
 
+	CUtlVector<CUtlString> duplicateIds;
 	FOR_EACH_VEC(modFileList, i)
 	{
 		if (i == MAX_MODS_TO_LOAD)
@@ -393,16 +446,42 @@ void CModSystem::Init()
 
 		if (!didInsert)
 		{
-			Error(eDLL_T::ENGINE, NO_ERROR,
-				"Mod \"%s\" has ID \"%s\" that was already used by another mod; skipping...\n",
+			// Neither copy is trusted: the first one found is not necessarily the real one.
+			Warning(eDLL_T::ENGINE,
+				"Mod \"%s\" has ID \"%s\" that was already used by another mod; refusing both...\n",
 				mod->name.String(), mod->id.String());
 
+			duplicateIds.AddToTail(mod->id.Replace('.', '_'));
 			delete mod;
 			continue;
 		}
 
 		mod->idHashHandle = idHandle;
 		m_ModList.AddToTail(mod);
+	}
+
+	FOR_EACH_VEC_BACK(m_ModList, i)
+	{
+		ModInstance_t* const mod = m_ModList[i];
+		const CUtlString normalizedId = mod->id.Replace('.', '_');
+
+		// Same comparison the id map uses: ids that differ only in case are duplicates too.
+		bool bDuplicate = false;
+		FOR_EACH_VEC(duplicateIds, nDup)
+		{
+			if (!V_stricmp(duplicateIds[nDup].String(), normalizedId.String()))
+			{
+				bDuplicate = true;
+				break;
+			}
+		}
+
+		if (!bDuplicate)
+			continue;
+
+		m_ModIdHashMap.Remove(mod->idHashHandle);
+		m_ModList.Remove(i);
+		delete mod;
 	}
 
 	CUtlMap<CUtlString, bool> statusEnabled(UtlStringLessFunc);
@@ -419,6 +498,13 @@ void CModSystem::Init()
 	ApplyRealmFilter();
 	ResolveHardDependencies();
 	SortByDependencies();
+
+	FOR_EACH_VEC(m_ModList, i)
+	{
+		if (m_ModList[i]->IsEnabled())
+			m_ModList[i]->Activate();
+	}
+
 	UnlockModList(); // Unlock after to make sure nothing uses it during init.
 }
 
@@ -559,8 +645,10 @@ void CModSystem::LoadRequiredMods()
 
 	for (KeyValues* pSubKey = pReqList->GetFirstSubKey(); pSubKey != nullptr; pSubKey = pSubKey->GetNextKey())
 	{
+		if (m_RequiredMods.Count() >= MAX_MODS_TO_LOAD)
+			break;
 		const char* id = pSubKey->GetName();
-		if (id && *id)
+		if (ModSystem_ModIDHasValidShape(id))
 			m_RequiredMods.AddToTail(id);
 	}
 }
@@ -581,8 +669,10 @@ void CModSystem::LoadAllowedMods()
 
 	for (KeyValues* pSubKey = pAllowList->GetFirstSubKey(); pSubKey != nullptr; pSubKey = pSubKey->GetNextKey())
 	{
+		if (m_AllowedMods.Count() >= MAX_MODS_TO_LOAD)
+			break;
 		const char* id = pSubKey->GetName();
-		if (id && *id)
+		if (ModSystem_ModIDHasValidShape(id))
 			m_AllowedMods.AddToTail(id);
 	}
 }
@@ -660,9 +750,26 @@ CModSystem::ModInstance_t::ModInstance_t(CModSystem* const _parentClass, const C
 		return;
 	}
 
+	if (!ParseMaps() || !ParseOverrides() || !ParseScriptWraps()
+		|| !VerifyOwnedFiles() || !VerifyScriptWraps())
+	{
+		SetState(eModState::UNLOADED);
+		return;
+	}
+
 	// parse any additional info from mod.vdf
-	ParseConVars();
 	ParseLocalizationFiles();
+
+	SetState(eModState::LOADED);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: registers what an enabled mod contributes to the engine; runs only
+//          once the mod has survived dedup and enable/dependency resolution
+//-----------------------------------------------------------------------------
+void CModSystem::ModInstance_t::Activate()
+{
+	ParseConVars();
 
 	// add mod folder to search paths so files can be easily loaded from here
 	// [rexx]: maybe this isn't ideal as the only way of finding the mod's files,
@@ -677,23 +784,19 @@ CModSystem::ModInstance_t::ModInstance_t(CModSystem* const _parentClass, const C
 	FileSystem()->AddSearchPath(basePath.String(), "GAME", SearchPathAdd_t::PATH_ADD_TO_TAIL);
 	hasSearchPath = true;
 #endif // !CLIENT_DLL
-
-	SetState(eModState::LOADED);
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //-----------------------------------------------------------------------------
 CModSystem::ModInstance_t::~ModInstance_t()
 {
-	if (settingsKV)
-		delete settingsKV;
-
 #if !defined(CLIENT_DLL)
 	if (hasSearchPath)
 		FileSystem()->RemoveSearchPath(basePath.String(), "GAME");
 #endif // !CLIENT_DLL
 
+	// ConVars point into settingsKV strings; unlink them before it goes.
 	FOR_EACH_VEC(conVars, i)
 	{
 		ConVar* const cvar = conVars.Element(i);
@@ -701,6 +804,9 @@ CModSystem::ModInstance_t::~ModInstance_t()
 
 		delete cvar;
 	}
+
+	if (settingsKV)
+		delete settingsKV;
 }
 
 //-----------------------------------------------------------------------------
@@ -890,6 +996,17 @@ bool CModSystem::ModInstance_t::ParseSettings()
 	if (!ModSystem_ValidateModID(id, pSettingsPath))
 		return false;
 
+	nameSpace = id.Replace('.', '_');
+	nameSpace.ToLower();
+
+	if (V_strstr(nameSpace.String(), MOD_NAMESPACE_SEPARATOR))
+	{
+		Error(eDLL_T::ENGINE, NO_ERROR,
+			"Mod settings \"%s\" has ID \"%s\", which reads as '%s' in file names and would be ambiguous; skipping...\n",
+			pSettingsPath, id.String(), MOD_NAMESPACE_SEPARATOR);
+		return false;
+	}
+
 	// "description" "This mod does X and Y using Z"
 	if (!ModSystem_GetSettingsKeyValueString(this, pSettingsPath, "description", description))
 		return false;
@@ -930,9 +1047,18 @@ void CModSystem::ModInstance_t::ParseConVars()
 	if (!pConVars)
 		return;
 
+	int nDeclared = 0;
 	for (KeyValues* pSubKey = pConVars->GetFirstSubKey();
 		pSubKey != nullptr; pSubKey = pSubKey->GetNextKey())
 	{
+		// Each one is a global registration that every later convar lookup walks.
+		if (++nDeclared > MOD_MAX_CONVARS)
+		{
+			Warning(eDLL_T::MODSYSTEM, "[MOD-LOAD] '%s' declares more than %d ConVars; rest ignored\n",
+				id.String(), MOD_MAX_CONVARS);
+			break;
+		}
+
 		const char* pszName = pSubKey->GetName();
 		const char* pszFlagsString = pSubKey->GetString("flags", "NONE");
 		const char* pszHelpString = pSubKey->GetString("helpText");
@@ -965,15 +1091,47 @@ void CModSystem::ModInstance_t::ParseConVars()
 			}
 		}
 
+		// Archived values are written back into cfg files as "name \"value\"" lines.
+		if (strpbrk(pszDefaultValue, "\"\r\n") || strpbrk(pszName, "\"\r\n \t;"))
+		{
+			Warning(eDLL_T::MODSYSTEM, "[MOD-LOAD] '%s' convar '%s' has a quote, separator or line break in its name or default; skipped\n",
+				id.String(), pszName);
+			continue;
+		}
+
 		int flags;
 		if (ConVar_ParseFlagString(pszFlagsString, flags, pszName))
 		{
+			// Mods may not declare convars the server or network can drive.
+			flags &= (FCVAR_ARCHIVE | FCVAR_ARCHIVE_PLAYERPROFILE | FCVAR_RELEASE | FCVAR_CHEAT
+				| FCVAR_HIDDEN | FCVAR_DEVELOPMENTONLY | FCVAR_CLIENTDLL);
+
+			// ConVar::Create treats both archive kinds together as fatal; a mod gets a refusal instead.
+			if ((flags & (FCVAR_ARCHIVE | FCVAR_ARCHIVE_PLAYERPROFILE)) == (FCVAR_ARCHIVE | FCVAR_ARCHIVE_PLAYERPROFILE))
+			{
+				Warning(eDLL_T::MODSYSTEM, "[MOD-LOAD] '%s' convar '%s' sets both ARCHIVE and ARCHIVE_PLAYERPROFILE; skipped\n",
+					id.String(), pszName);
+				continue;
+			}
+
 			// Engine, stub, or another mod already owns this name. The
 			// listing is a create-if-absent fallback, not a second owner.
 			if (g_pCVar->FindCommandBase(pszName) != nullptr)
 				continue;
 
+#if defined(CLIENT_DLL)
+			// The S21 ConVar owns its usage string and delete[]s it; the KV node frees its own copy.
+			char* pszOwnedUsage = nullptr;
+			if (pszUsageString && *pszUsageString)
+			{
+				const size_t nUsageLen = strlen(pszUsageString) + 1;
+				pszOwnedUsage = new char[nUsageLen];
+				memcpy(pszOwnedUsage, pszUsageString, nUsageLen);
+			}
+			ConVar* cvar = new ConVar(pszName, pszDefaultValue, flags, pszHelpString, bMin, fMin, bMax, fMax, nullptr, pszOwnedUsage);
+#else
 			ConVar* cvar = new ConVar(pszName, pszDefaultValue, flags, pszHelpString, bMin, fMin, bMax, fMax, nullptr, pszUsageString);
+#endif
 
 			if (!cvar)
 			{
@@ -1032,9 +1190,95 @@ void CModSystem::ModInstance_t::ParseDependencies()
 			if (bDup)
 				continue;
 
+			if (pOut[nKey]->Count() >= MOD_MAX_DEPENDENCIES)
+			{
+				Warning(eDLL_T::MODSYSTEM, "[MOD-LOAD] '%s' declares more than %d %s; rest dropped\n",
+					id.String(), MOD_MAX_DEPENDENCIES, pszKeys[nKey]);
+				break;
+			}
+
 			pOut[nKey]->AddToTail(pszEntry);
 		}
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: applies one "<convar> <value>" line from a mod's cfg/autoload.
+//          Only convars the mod declared, or player-archived settings, are
+//          accepted; commands, chains and protected/cheat/dev vars are refused.
+//-----------------------------------------------------------------------------
+bool ModSystem_ApplyAutoloadLine(const CModSystem::ModInstance_t* const mod, const char* const pszLine)
+{
+	if (!mod || !pszLine)
+		return false;
+
+	if (strpbrk(pszLine, ";\n\r"))
+		return false;
+
+	const char* pName = pszLine;
+	while (*pName == ' ' || *pName == '\t')
+		++pName;
+
+	if (!*pName || (pName[0] == '/' && pName[1] == '/'))
+		return false;
+
+	const char* pNameEnd = pName;
+	while (*pNameEnd && *pNameEnd != ' ' && *pNameEnd != '\t')
+		++pNameEnd;
+
+	char szName[128];
+	const size_t nNameLen = size_t(pNameEnd - pName);
+	if (nNameLen >= sizeof(szName))
+		return false;
+
+	memcpy(szName, pName, nNameLen);
+	szName[nNameLen] = '\0';
+
+	const char* pValue = pNameEnd;
+	while (*pValue == ' ' || *pValue == '\t')
+		++pValue;
+
+	char szValue[512];
+	V_strncpy(szValue, pValue, sizeof(szValue));
+
+	size_t nValueLen = strlen(szValue);
+	while (nValueLen && (szValue[nValueLen - 1] == ' ' || szValue[nValueLen - 1] == '\t'))
+		szValue[--nValueLen] = '\0';
+
+	const char* pFinal = szValue;
+	if (nValueLen >= 2 && szValue[0] == '"' && szValue[nValueLen - 1] == '"')
+	{
+		szValue[nValueLen - 1] = '\0';
+		pFinal = szValue + 1;
+	}
+
+	if (strchr(pFinal, '"'))
+		return false;
+
+	ConCommandBase* const pBase = g_pCVar->FindCommandBase(szName);
+	if (!pBase || pBase->IsCommand())
+		return false;
+
+	ConVar* const pVar = static_cast<ConVar*>(pBase);
+	const bool bOwned = mod->conVars.Find(pVar) != mod->conVars.InvalidIndex();
+
+	if (!bOwned)
+	{
+		const int nFlags = pVar->GetFlags();
+
+		if (!(nFlags & (FCVAR_ARCHIVE | FCVAR_ARCHIVE_PLAYERPROFILE)))
+			return false;
+
+		if (ScriptConVarGuard_IsWriteLocked(szName))
+			return false;
+
+		if (nFlags & (FCVAR_DEVELOPMENTONLY | FCVAR_CHEAT | FCVAR_PROTECTED | FCVAR_HIDDEN
+			| FCVAR_REPLICATED | FCVAR_SERVER_CAN_EXECUTE))
+			return false;
+	}
+
+	pVar->SetValue(pFinal);
+	return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -1073,6 +1317,726 @@ bool ModSystem_IsSafeRelativePath(const char* const pPath)
 	return true;
 }
 
+// A mod may only ship files it owns: the fixed manifest files, paths carrying its
+// namespace, and the files of maps it declares. The engine falls back to mod
+// folders for any file the base lacks, so anything else could stand in for one.
+static const char* const s_ModFixedFiles[] =
+{
+	"mod.vdf",
+	"manifest.json",
+	"icon.png",
+	"readme.md",
+	"changelog.md",
+	"license",
+	"license.md",
+	"license.txt",
+	"scripts/vscripts/scripts.rson",
+	"paks/win64/preload.rson",
+	"playlists_r5_patch.txt",
+};
+
+// A file carries the namespace as "<namespace>__..."; no shipped name contains
+// the separator, so such a name can never be a game file.
+static bool ModSys_ComponentHasNamespace(const char* const pComp, const size_t nComp,
+	const char* const pNs, const size_t nNs)
+{
+	const size_t nSep = sizeof(MOD_NAMESPACE_SEPARATOR) - 1;
+	return nNs && nComp > nNs + nSep && !memcmp(pComp, pNs, nNs)
+		&& !memcmp(pComp + nNs, MOD_NAMESPACE_SEPARATOR, nSep);
+}
+
+// Component equals the map name, or continues it with '_' or '.'.
+static bool ModSys_ComponentLeadsWithMap(const char* const pComp, const size_t nComp,
+	const char* const pMap, const size_t nMap)
+{
+	if (!nMap || nComp < nMap || memcmp(pComp, pMap, nMap) != 0)
+		return false;
+
+	return nComp == nMap || pComp[nMap] == '_' || pComp[nMap] == '.';
+}
+
+// Map files lead with the map name, VPKs carry it after a prefix
+// ("client_mp_foo.bsp.pak000_dir.vpk").
+static bool ModSys_ComponentEmbedsMap(const char* const pComp, const size_t nComp,
+	const char* const pMap, const size_t nMap)
+{
+	if (ModSys_ComponentLeadsWithMap(pComp, nComp, pMap, nMap))
+		return true;
+
+	for (size_t i = 1; i + nMap < nComp; ++i)
+	{
+		if (pComp[i - 1] != '_' || memcmp(pComp + i, pMap, nMap) != 0)
+			continue;
+		if (pComp[i + nMap] == '_' || pComp[i + nMap] == '.')
+			return true;
+	}
+
+	return false;
+}
+
+// Paths are relative to the working directory, which is where every mod
+// fallback serves files from.
+static bool ModSys_PathExists(const char* const pszRel)
+{
+	return GetFileAttributesA(pszRel) != INVALID_FILE_ATTRIBUTES;
+}
+
+// The game may already own a folder named like the namespace (id "weapons" vs
+// scripts/weapons); files under it are then game paths, not the mod's.
+static bool ModSys_BaseHasDirectory(const char* const pszRel, const size_t nPrefix)
+{
+	char szDir[MAX_PATH];
+	if (nPrefix + 1 > sizeof(szDir))
+		return true;
+
+	memcpy(szDir, pszRel, nPrefix);
+	szDir[nPrefix] = '\0';
+	V_FixSlashes(szDir, '\\');
+
+	char szPlatform[MAX_PATH];
+	V_snprintf(szPlatform, sizeof(szPlatform), "platform\\%s", szDir);
+
+	return ModSys_PathExists(szDir) || ModSys_PathExists(szPlatform);
+}
+
+bool CModSystem::ModInstance_t::OwnsPath(const char* const pszRel) const
+{
+	char rel[MAX_PATH];
+	if (!pszRel || V_strlen(pszRel) >= static_cast<int>(sizeof(rel)))
+		return false;
+
+	V_strncpy(rel, pszRel, sizeof(rel));
+	V_FixSlashes(rel, '/');
+	V_strlower(rel);
+
+	if (!ModSystem_IsSafeRelativePath(rel))
+		return false;
+
+	for (const char* const pFixed : s_ModFixedFiles)
+	{
+		if (!V_strcmp(rel, pFixed))
+			return true;
+	}
+
+	FOR_EACH_VEC(datatableOverrides, i)
+	{
+		char szOverride[MAX_PATH];
+		V_snprintf(szOverride, sizeof(szOverride), "datatable/%s.csv", datatableOverrides[i].String());
+		if (!V_strcmp(rel, szOverride))
+			return true;
+	}
+
+	const char* const pszNs = nameSpace.String();
+	const size_t nNs = static_cast<size_t>(nameSpace.Length());
+
+	const char* p = rel;
+	while (*p)
+	{
+		const char* const pEnd = strchr(p, '/');
+		const size_t nComp = pEnd ? static_cast<size_t>(pEnd - p) : strlen(p);
+
+		if (ModSys_ComponentHasNamespace(p, nComp, pszNs, nNs))
+			return true;
+
+		if (pEnd && nComp == nNs && !memcmp(p, pszNs, nNs)
+			&& !ModSys_BaseHasDirectory(rel, static_cast<size_t>(pEnd - rel)))
+		{
+			return true;
+		}
+
+		FOR_EACH_VEC(maps, i)
+		{
+			if (ModSys_ComponentEmbedsMap(p, nComp, maps[i].String(), maps[i].Length()))
+				return true;
+		}
+
+		if (!pEnd)
+			break;
+		p = pEnd + 1;
+	}
+
+	return false;
+}
+
+// True when the base install already has any file of this map.
+static bool ModSys_BaseShipsMap(const char* const pszMap)
+{
+	char rel[MAX_PATH];
+
+	if (_snprintf_s(rel, sizeof(rel), _TRUNCATE, "maps\\%s.bsp", pszMap) > 0 && ModSys_PathExists(rel))
+		return true;
+	if (_snprintf_s(rel, sizeof(rel), _TRUNCATE, "paks\\Win64\\%s.rpak", pszMap) > 0 && ModSys_PathExists(rel))
+		return true;
+	if (_snprintf_s(rel, sizeof(rel), _TRUNCATE, "vpk\\*%s.bsp.pak000_dir.vpk", pszMap) <= 0)
+		return true; // cannot prove it is new
+
+	WIN32_FIND_DATAA findData;
+	const HANDLE hFind = FindFirstFileA(rel, &findData);
+	if (hFind == INVALID_HANDLE_VALUE)
+		return false;
+
+	FindClose(hFind);
+	return true;
+}
+
+// Strings of our own trust UI (EULA, mod policy, launcher handoff, join auth)
+// must read the same whatever mods are enabled.
+static const char* const s_ProtectedLocPrefixes[] =
+{
+	"SDK_",
+	"BRIDGE_",
+	"EULA",
+};
+
+// Dialog buttons answer the prompts above; swapping them flips the answer.
+static const char* const s_ProtectedLocTokens[] =
+{
+	"YES",
+	"NO",
+	"OK",
+	"CANCEL",
+};
+
+bool ModSystem_IsProtectedLocKey(const char* const pszKey)
+{
+	if (!pszKey)
+		return true;
+
+	const char* const pszName = pszKey[0] == '#' ? pszKey + 1 : pszKey;
+	for (const char* const pszToken : s_ProtectedLocTokens)
+	{
+		if (!V_stricmp(pszName, pszToken))
+			return true;
+	}
+
+	for (const char* const pszPrefix : s_ProtectedLocPrefixes)
+	{
+		if (!V_strnicmp(pszName, pszPrefix, V_strlen(pszPrefix)))
+			return true;
+	}
+
+	return false;
+}
+
+static bool ModSys_IsOverrideName(const char* const pszName, const char* const pszExtraChars, const int nMax)
+{
+	const int nLen = static_cast<int>(V_strlen(pszName));
+	if (nLen < 1 || nLen > nMax)
+		return false;
+
+	for (const char* p = pszName; *p; ++p)
+	{
+		const char c = *p;
+		if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')
+			continue;
+		if (pszExtraChars && strchr(pszExtraChars, c))
+			continue;
+		return false;
+	}
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: parses the stock content a mod declares it replaces:
+//          "DatatableOverrides" { "survival_loot" "1" }
+//          "LocalizationOverrides" { "WPN_R99" "1" }
+//          Declared overrides are what the launcher shows the player.
+//-----------------------------------------------------------------------------
+bool CModSystem::ModInstance_t::ParseOverrides()
+{
+	Assert(settingsKV);
+
+	if (const KeyValues* const pTables = settingsKV->FindKey("DatatableOverrides"))
+	{
+		for (KeyValues* pSubKey = pTables->GetFirstSubKey(); pSubKey; pSubKey = pSubKey->GetNextKey())
+		{
+			CUtlString table = pSubKey->GetName();
+			table.ToLower();
+
+			const char* const pszTable = table.String();
+			const char* const pszSlash = strchr(pszTable, '/');
+			const bool bShape = ModSys_IsOverrideName(pszTable, "/", 96)
+				&& pszTable[0] != '/' && (!pszSlash || (pszSlash[1] && !strchr(pszSlash + 1, '/')));
+
+			if (!bShape || datatableOverrides.Count() >= MOD_MAX_OVERRIDES)
+			{
+				Error(eDLL_T::ENGINE, NO_ERROR,
+					"[MOD-OWN] Mod '%s' has an invalid or excess datatable override '%s'. Refusing the mod\n",
+					id.String(), pSubKey->GetName());
+				return false;
+			}
+
+			datatableOverrides.AddToTail(table);
+		}
+	}
+
+	if (const KeyValues* const pTokens = settingsKV->FindKey("LocalizationOverrides"))
+	{
+		for (KeyValues* pSubKey = pTokens->GetFirstSubKey(); pSubKey; pSubKey = pSubKey->GetNextKey())
+		{
+			const char* const pszRaw = pSubKey->GetName();
+			const char* const pszToken = pszRaw[0] == '#' ? pszRaw + 1 : pszRaw;
+
+			if (!ModSys_IsOverrideName(pszToken, nullptr, 96)
+				|| ModSystem_IsProtectedLocKey(pszToken)
+				|| localizationOverrides.Count() >= MOD_MAX_OVERRIDES)
+			{
+				Error(eDLL_T::ENGINE, NO_ERROR,
+					"[MOD-OWN] Mod '%s' may not override localization token '%s'. Refusing the mod\n",
+					id.String(), pszRaw);
+				return false;
+			}
+
+			localizationOverrides.AddToTail(pszToken);
+		}
+	}
+
+	return true;
+}
+
+// Script surfaces a mod may not wrap: the mod system itself and the SDK's own
+// script API (trust, identity, agent link, launcher handoff).
+static const char* const s_ProtectedWrapPrefixes[] =
+{
+	"ModSystem", "SDK", "Bridge", "Agent", "Launcher", "ScriptConVar", "Eula",
+};
+
+static bool ModSys_IsScriptIdentifier(const char* const pszName)
+{
+	const char c0 = pszName[0];
+	if (!((c0 >= 'a' && c0 <= 'z') || (c0 >= 'A' && c0 <= 'Z') || c0 == '_'))
+		return false;
+	return ModSys_IsOverrideName(pszName, nullptr, 63);
+}
+
+static int ModSys_ParseWrapContexts(const char* const pszList)
+{
+	int nMask = 0;
+	char szList[64];
+	V_strncpy(szList, pszList, sizeof(szList));
+
+	char* pContext = nullptr;
+	for (char* pTok = strtok_s(szList, " ,|", &pContext); pTok; pTok = strtok_s(nullptr, " ,|", &pContext))
+	{
+		if (!V_stricmp(pTok, "SERVER"))
+			nMask |= MOD_WRAP_VM_SERVER;
+		else if (!V_stricmp(pTok, "CLIENT"))
+			nMask |= MOD_WRAP_VM_CLIENT;
+		else if (!V_stricmp(pTok, "UI"))
+			nMask |= MOD_WRAP_VM_UI;
+		else
+			return 0;
+	}
+
+	return nMask;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: parses the base script functions a mod wraps:
+//          "ScriptWraps" { "GiveLoadout" { "Function" "<ns>__GiveLoadout" "VM" "SERVER" "Replace" "0" } }
+//          A wrap receives the next function in the chain as its first
+//          argument; a replace takes the target's own signature.
+//-----------------------------------------------------------------------------
+bool CModSystem::ModInstance_t::ParseScriptWraps()
+{
+	Assert(settingsKV);
+
+	const KeyValues* const pWraps = settingsKV->FindKey("ScriptWraps");
+	if (!pWraps)
+		return true;
+
+	for (KeyValues* pSubKey = pWraps->GetFirstSubKey(); pSubKey; pSubKey = pSubKey->GetNextKey())
+	{
+		const char* const pszTarget = pSubKey->GetName();
+		const char* const pszFunction = pSubKey->GetString("Function", "");
+		const int nContextMask = ModSys_ParseWrapContexts(pSubKey->GetString("VM", "SERVER"));
+
+		bool bProtected = strstr(pszTarget, MOD_NAMESPACE_SEPARATOR) != nullptr;
+		for (const char* const pszPrefix : s_ProtectedWrapPrefixes)
+		{
+			if (!V_strnicmp(pszTarget, pszPrefix, V_strlen(pszPrefix)))
+				bProtected = true;
+		}
+
+		const int nSpace = static_cast<int>(nameSpace.Length());
+		const int nSep = static_cast<int>(sizeof(MOD_NAMESPACE_SEPARATOR) - 1);
+		const bool bOwnedFunction = nSpace > 0 && !V_strnicmp(pszFunction, nameSpace.String(), nSpace)
+			&& !V_strncmp(pszFunction + nSpace, MOD_NAMESPACE_SEPARATOR, nSep)
+			&& pszFunction[nSpace + nSep] != '\0';
+
+		bool bDuplicate = false;
+		FOR_EACH_VEC(scriptWraps, i)
+		{
+			if (!V_strcmp(scriptWraps[i].target.String(), pszTarget) && (scriptWraps[i].contextMask & nContextMask))
+				bDuplicate = true;
+		}
+
+		if (!ModSys_IsScriptIdentifier(pszTarget) || !ModSys_IsScriptIdentifier(pszFunction)
+			|| bProtected || !bOwnedFunction || !nContextMask || bDuplicate
+			|| scriptWraps.Count() >= MOD_MAX_SCRIPT_WRAPS)
+		{
+			Error(eDLL_T::ENGINE, NO_ERROR,
+				"[MOD-WRAP] Mod '%s' has an invalid script wrap '%s' -> '%s' (function must be '%s__*', VM SERVER/CLIENT/UI, target unprotected and wrapped once). Refusing the mod\n",
+				id.String(), pszTarget, pszFunction, nameSpace.String());
+			return false;
+		}
+
+		ScriptWrap_t& wrap = scriptWraps[scriptWraps.AddToTail()];
+		wrap.target = pszTarget;
+		wrap.function = pszFunction;
+		wrap.contextMask = nContextMask;
+		wrap.replace = pSubKey->GetBool("Replace", false);
+	}
+
+	return true;
+}
+
+// One pass over the file: each "function <name>(" definition is matched against
+// the wraps still missing, so the cost is the file size, not wraps x file size.
+static void ModSys_MarkDefinedWraps(const CModSystem::ModInstance_t* const mod, const char* const pszText,
+	CUtlVector<bool>& found, int& nFound)
+{
+	for (const char* p = strstr(pszText, "function"); p && nFound < mod->scriptWraps.Count(); p = strstr(p + 8, "function"))
+	{
+		const char* q = p + 8;
+		if (*q != ' ' && *q != '\t')
+			continue;
+		while (*q == ' ' || *q == '\t')
+			++q;
+
+		const char* const pszName = q;
+		while ((*q >= 'a' && *q <= 'z') || (*q >= 'A' && *q <= 'Z') || (*q >= '0' && *q <= '9') || *q == '_')
+			++q;
+		const size_t nName = static_cast<size_t>(q - pszName);
+		if (!nName)
+			continue;
+
+		while (*q == ' ' || *q == '\t')
+			++q;
+		if (*q != '(')
+			continue;
+
+		FOR_EACH_VEC(mod->scriptWraps, i)
+		{
+			const CUtlString& fn = mod->scriptWraps[i].function;
+			if (!found[i] && static_cast<size_t>(fn.Length()) == nName && !strncmp(fn.String(), pszName, nName))
+			{
+				found[i] = true;
+				nFound++;
+			}
+		}
+	}
+}
+
+static void ModSys_FindWrapFunctions(const CModSystem::ModInstance_t* const mod, const char* const pszRelDir,
+	const int nDepth, CUtlVector<bool>& found, int& nFound)
+{
+	if (nDepth > MOD_MAX_SCAN_DEPTH || nFound == mod->scriptWraps.Count())
+		return;
+
+	char relGlob[MAX_PATH];
+	if (_snprintf_s(relGlob, sizeof(relGlob), _TRUNCATE, "%s\\*", pszRelDir) <= 0)
+		return;
+
+	WIN32_FIND_DATAA findData;
+	const HANDLE hFind = FindFirstFileA(relGlob, &findData);
+	if (hFind == INVALID_HANDLE_VALUE)
+		return;
+
+	do
+	{
+		if (!V_strcmp(findData.cFileName, ".") || !V_strcmp(findData.cFileName, ".."))
+			continue;
+
+		char relChild[MAX_PATH];
+		if (_snprintf_s(relChild, sizeof(relChild), _TRUNCATE, "%s\\%s", pszRelDir, findData.cFileName) <= 0)
+			continue;
+
+		if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+		{
+			ModSys_FindWrapFunctions(mod, relChild, nDepth + 1, found, nFound);
+			continue;
+		}
+
+		const char* const pszExt = V_GetFileExtension(findData.cFileName);
+		if (!pszExt || (V_stricmp(pszExt, "nut") && V_stricmp(pszExt, "gnut")))
+			continue;
+
+		FILE* pFile = NULL;
+		if (fopen_s(&pFile, relChild, "rb") != 0 || !pFile)
+			continue;
+
+		fseek(pFile, 0, SEEK_END);
+		const long nSize = ftell(pFile);
+		fseek(pFile, 0, SEEK_SET);
+
+		if (nSize > 0 && nSize <= MOD_MAX_SCRIPT_BYTES)
+		{
+			CUtlVector<char> text;
+			text.SetCount(static_cast<int>(nSize) + 1);
+			const size_t nRead = fread(text.Base(), 1, static_cast<size_t>(nSize), pFile);
+			text[static_cast<int>(nRead)] = '\0';
+
+			ModSys_MarkDefinedWraps(mod, text.Base(), found, nFound);
+		}
+
+		fclose(pFile);
+	} while (nFound < mod->scriptWraps.Count() && FindNextFileA(hFind, &findData));
+
+	FindClose(hFind);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: every declared wrap names a function the mod's own scripts define;
+//          a dangling name would fail the base script that calls it
+//-----------------------------------------------------------------------------
+bool CModSystem::ModInstance_t::VerifyScriptWraps()
+{
+	if (scriptWraps.IsEmpty())
+		return true;
+
+	char relDir[MAX_PATH];
+	if (_snprintf_s(relDir, sizeof(relDir), _TRUNCATE, "%s%s", basePath.String(), GAME_SCRIPT_PATH) <= 0)
+		return false;
+	V_FixSlashes(relDir, '\\');
+	V_StripTrailingSlash(relDir);
+
+	CUtlVector<bool> found;
+	found.SetCount(scriptWraps.Count());
+	FOR_EACH_VEC(found, i)
+		found[i] = false;
+
+	int nFound = 0;
+	ModSys_FindWrapFunctions(this, relDir, 0, found, nFound);
+
+	FOR_EACH_VEC(scriptWraps, i)
+	{
+		if (!found[i])
+		{
+			Error(eDLL_T::ENGINE, NO_ERROR,
+				"[MOD-WRAP] Mod '%s' wraps '%s' with '%s', which none of its scripts define. Refusing the mod\n",
+				id.String(), scriptWraps[i].target.String(), scriptWraps[i].function.String());
+			return false;
+		}
+	}
+
+	return true;
+}
+
+// A mod defines its own keys (prefixed with its namespace) and the stock tokens
+// it declared; never our own trust UI.
+bool CModSystem::ModInstance_t::MayDefineLocKey(const char* const pszKey) const
+{
+	if (!pszKey || !pszKey[0])
+		return false;
+
+	const char* const pszName = pszKey[0] == '#' ? pszKey + 1 : pszKey;
+	if (ModSystem_IsProtectedLocKey(pszName))
+		return false;
+
+	const int nSpace = static_cast<int>(nameSpace.Length());
+	if (nSpace > 0 && !V_strnicmp(pszName, nameSpace.String(), nSpace)
+		&& !V_strncmp(pszName + nSpace, MOD_NAMESPACE_SEPARATOR, sizeof(MOD_NAMESPACE_SEPARATOR) - 1))
+	{
+		return true;
+	}
+
+	FOR_EACH_VEC(localizationOverrides, i)
+	{
+		if (!V_stricmp(pszName, localizationOverrides[i].String()))
+			return true;
+	}
+
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: parses "Maps" { "mp_name" "1" }; a mod may only add maps the base
+//          install does not ship
+//-----------------------------------------------------------------------------
+bool CModSystem::ModInstance_t::ParseMaps()
+{
+	Assert(settingsKV);
+	const KeyValues* const pMaps = settingsKV->FindKey("Maps");
+
+	if (!pMaps)
+		return true;
+
+	for (KeyValues* pSubKey = pMaps->GetFirstSubKey();
+		pSubKey != nullptr; pSubKey = pSubKey->GetNextKey())
+	{
+		CUtlString mapName = pSubKey->GetName();
+		mapName.ToLower();
+
+		char szPrefix[MAX_PATH];
+		V_snprintf(szPrefix, sizeof(szPrefix), "mp_%s" MOD_NAMESPACE_SEPARATOR, nameSpace.String());
+		const size_t nPrefix = strlen(szPrefix);
+
+		const char* const pszMap = mapName.String();
+		const size_t nLen = static_cast<size_t>(mapName.Length());
+		const bool bShape = nLen > nPrefix && nLen <= 63 && !V_strncmp(pszMap, szPrefix, nPrefix)
+			&& pszMap[strspn(pszMap, "abcdefghijklmnopqrstuvwxyz0123456789_")] == '\0';
+
+		if (!bShape)
+		{
+			Error(eDLL_T::ENGINE, NO_ERROR,
+				"[MOD-OWN] Mod '%s' declares map '%s'; its maps must be named %s<name> (letters, digits, '_', at most 63). Refusing the mod\n",
+				id.String(), pSubKey->GetName(), szPrefix);
+			return false;
+		}
+
+		if (maps.Count() >= MOD_MAX_MAPS)
+		{
+			Error(eDLL_T::ENGINE, NO_ERROR,
+				"[MOD-OWN] Mod '%s' declares more than %d maps. Refusing the mod\n",
+				id.String(), MOD_MAX_MAPS);
+			return false;
+		}
+
+		if (ModSys_BaseShipsMap(pszMap))
+		{
+			Error(eDLL_T::ENGINE, NO_ERROR,
+				"[MOD-OWN] Mod '%s' declares map '%s', which the game already ships. Refusing the mod\n",
+				id.String(), pszMap);
+			return false;
+		}
+
+		maps.AddToTail(mapName);
+	}
+
+	return true;
+}
+
+static bool ModSys_VerifyOwnedTree(const CModSystem::ModInstance_t* const mod, const char* const pszAbsRoot,
+	const char* const pszRelDir, const int nDepth, int& nFiles)
+{
+	if (nDepth > MOD_MAX_SCAN_DEPTH)
+	{
+		Error(eDLL_T::ENGINE, NO_ERROR,
+			"[MOD-OWN] Mod '%s' nests folders deeper than %d at '%s'. Refusing the mod\n",
+			mod->id.String(), MOD_MAX_SCAN_DEPTH, pszRelDir);
+		return false;
+	}
+
+	char absGlob[MAX_PATH * 2];
+	if (_snprintf_s(absGlob, sizeof(absGlob), _TRUNCATE, "%s\\%s%s*",
+		pszAbsRoot, pszRelDir, pszRelDir[0] ? "\\" : "") <= 0)
+	{
+		return false;
+	}
+
+	WIN32_FIND_DATAA findData;
+	const HANDLE hFind = FindFirstFileA(absGlob, &findData);
+	if (hFind == INVALID_HANDLE_VALUE)
+		return true;
+
+	bool bOk = true;
+	do
+	{
+		if (!V_strcmp(findData.cFileName, ".") || !V_strcmp(findData.cFileName, ".."))
+			continue;
+
+		char relChild[MAX_PATH];
+		if (_snprintf_s(relChild, sizeof(relChild), _TRUNCATE, "%s%s%s",
+			pszRelDir, pszRelDir[0] ? "\\" : "", findData.cFileName) <= 0)
+		{
+			bOk = false;
+			break;
+		}
+
+		if (findData.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+		{
+			Error(eDLL_T::ENGINE, NO_ERROR,
+				"[MOD-OWN] Mod '%s' contains a link '%s'. Refusing the mod\n",
+				mod->id.String(), relChild);
+			bOk = false;
+			break;
+		}
+
+		if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+		{
+			// Folders count against the cap too, or an empty tree is an unbounded walk.
+			if (++nFiles > MOD_MAX_OWNED_FILES)
+			{
+				Error(eDLL_T::ENGINE, NO_ERROR,
+					"[MOD-OWN] Mod '%s' has more than %d files and folders. Refusing the mod\n",
+					mod->id.String(), MOD_MAX_OWNED_FILES);
+				bOk = false;
+				break;
+			}
+
+			if (!ModSys_VerifyOwnedTree(mod, pszAbsRoot, relChild, nDepth + 1, nFiles))
+			{
+				bOk = false;
+				break;
+			}
+			continue;
+		}
+
+		if (++nFiles > MOD_MAX_OWNED_FILES)
+		{
+			Error(eDLL_T::ENGINE, NO_ERROR,
+				"[MOD-OWN] Mod '%s' has more than %d files. Refusing the mod\n",
+				mod->id.String(), MOD_MAX_OWNED_FILES);
+			bOk = false;
+			break;
+		}
+
+		if (!mod->OwnsPath(relChild))
+		{
+			Error(eDLL_T::ENGINE, NO_ERROR,
+				"[MOD-OWN] Mod '%s' ships '%s', outside its namespace '%s' and its declared maps. Refusing the mod\n",
+				mod->id.String(), relChild, mod->nameSpace.String());
+			bOk = false;
+			break;
+		}
+
+	} while (FindNextFileA(hFind, &findData));
+
+	FindClose(hFind);
+	return bOk;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: a mod lives directly in mods/<folder>/ and ships only files it owns
+//-----------------------------------------------------------------------------
+bool CModSystem::ModInstance_t::VerifyOwnedFiles()
+{
+	const char* const pszBase = basePath.String();
+	const size_t nPrefix = sizeof(MOD_BASE_DIRECTORY);
+
+	const bool bDirectChild = !V_strnicmp(pszBase, MOD_BASE_DIRECTORY, nPrefix - 1)
+		&& (pszBase[nPrefix - 1] == '/' || pszBase[nPrefix - 1] == '\\')
+		&& pszBase[nPrefix] != '\0'
+		&& strcspn(pszBase + nPrefix, "/\\") == strlen(pszBase + nPrefix) - 1;
+
+	if (!bDirectChild)
+	{
+		Error(eDLL_T::ENGINE, NO_ERROR,
+			"[MOD-OWN] Mod settings at '%s' are not directly inside %s/<folder>/. Refusing the mod\n",
+			pszBase, MOD_BASE_DIRECTORY);
+		return false;
+	}
+
+	char relRoot[MAX_PATH];
+	V_strncpy(relRoot, pszBase, sizeof(relRoot));
+	V_FixSlashes(relRoot, '\\');
+	V_StripTrailingSlash(relRoot);
+
+	const DWORD attr = GetFileAttributesA(relRoot);
+	if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY))
+	{
+		Error(eDLL_T::ENGINE, NO_ERROR,
+			"[MOD-OWN] Mod folder '%s' is not under the working directory the game serves files from. Refusing the mod\n",
+			relRoot);
+		return false;
+	}
+
+	int nFiles = 0;
+	return ModSys_VerifyOwnedTree(this, relRoot, "", 0, nFiles);
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: parses and stores localization file paths in a vector
 //-----------------------------------------------------------------------------
@@ -1084,17 +2048,47 @@ void CModSystem::ModInstance_t::ParseLocalizationFiles()
 	if (!pLocalizationFiles)
 		return;
 
+	int nDeclared = 0;
 	for (KeyValues* pSubKey = pLocalizationFiles->GetFirstSubKey();
 		pSubKey != nullptr; pSubKey = pSubKey->GetNextKey())
 	{
-		if (!ModSystem_IsSafeRelativePath(pSubKey->GetName()))
+		// Refused entries cost an ownership check each, so the declared count is capped too.
+		if (++nDeclared > MOD_MAX_OVERRIDES * 4)
 		{
-			Warning(eDLL_T::ENGINE, "Skipped localization file with unsafe path from mod '%s': '%s'\n",
+			Warning(eDLL_T::ENGINE, "Mod '%s' declares more than %d localization entries; rest skipped\n",
+				name.String(), MOD_MAX_OVERRIDES * 4);
+			break;
+		}
+
+		if (!ModSystem_IsSafeRelativePath(pSubKey->GetName()) || !OwnsPath(pSubKey->GetName()))
+		{
+			Warning(eDLL_T::ENGINE, "Skipped localization file with unsafe or unowned path from mod '%s': '%s'\n",
 				name.String(), pSubKey->GetName());
 			continue;
 		}
 
-		localizationFiles.AddToTail(basePath + pSubKey->GetName());
+		const CUtlString fullPath = basePath + pSubKey->GetName();
+
+		bool bDup = false;
+		FOR_EACH_VEC(localizationFiles, nExist)
+		{
+			if (!V_stricmp(localizationFiles[nExist].String(), fullPath.String()))
+			{
+				bDup = true;
+				break;
+			}
+		}
+		if (bDup)
+			continue;
+
+		if (localizationFiles.Count() >= MOD_MAX_OVERRIDES)
+		{
+			Warning(eDLL_T::ENGINE, "Mod '%s' declares more than %d localization files; rest skipped\n",
+				name.String(), MOD_MAX_OVERRIDES);
+			break;
+		}
+
+		localizationFiles.AddToTail(fullPath);
 	}
 }
 
@@ -1216,16 +2210,21 @@ void CModSystem::ResolveHardDependencies(void)
 	if (nCount <= 0)
 		return;
 
+	// The graph does not change between passes; resolve every edge once (-1 = not installed)
+	// so a disable cascade costs passes x edges, not passes x edges x list scans.
+	std::vector<std::vector<int>> depIndices(static_cast<size_t>(nCount));
+	for (int i = 0; i < nCount && i < MAX_MODS_TO_LOAD; ++i)
+	{
+		FOR_EACH_VEC(m_ModList[i]->dependencies, d)
+			depIndices[static_cast<size_t>(i)].push_back(IndexOfModId(m_ModList[i]->dependencies[d].String()));
+	}
+
 	for (int nPass = 0; nPass < nCount && nPass < MAX_MODS_TO_LOAD; ++nPass)
 	{
 		bool bChanged = false;
 
-		int nSafety = 0;
-		FOR_EACH_VEC(m_ModList, i)
+		for (int i = 0; i < nCount && i < MAX_MODS_TO_LOAD; ++i)
 		{
-			if (++nSafety > MAX_MODS_TO_LOAD)
-				break;
-
 			ModInstance_t* const pMod = m_ModList[i];
 			if (!pMod->IsEnabled())
 				continue;
@@ -1233,8 +2232,8 @@ void CModSystem::ResolveHardDependencies(void)
 			FOR_EACH_VEC(pMod->dependencies, d)
 			{
 				const char* const pszDep = pMod->dependencies[d].String();
-				const ModInstance_t* const pDep = FindModById(pszDep);
-				if (pDep && pDep->IsEnabled())
+				const int nDep = depIndices[static_cast<size_t>(i)][static_cast<size_t>(d)];
+				if (nDep >= 0 && m_ModList[nDep]->IsEnabled())
 					continue;
 
 				Warning(eDLL_T::MODSYSTEM, "[MOD-ORDER] '%s' disabled: missing dependency '%s'\n",

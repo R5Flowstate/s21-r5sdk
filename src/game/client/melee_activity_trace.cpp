@@ -33,7 +33,27 @@ static constexpr ptrdiff_t kPlayerLungeStartTime  = 16648;
 static constexpr ptrdiff_t kPlayerLungeEndTime    = 16652;
 static constexpr ptrdiff_t kPlayerLungeSmoothTime = 16664;
 
+// C_BaseAnimating.
+static constexpr ptrdiff_t kAnimStartTime    = 0xE2C;
+static constexpr ptrdiff_t kAnimStartCycle   = 0xE30;
+static constexpr ptrdiff_t kAnimPlaybackRate = 0xE34;
+static constexpr ptrdiff_t kAnimSequence     = 0xE44;
+static constexpr ptrdiff_t kAnimCycle        = 0xF4;   // m_currentFrame.animCycle
+static constexpr ptrdiff_t kAnimAnchored     = 0x99E;  // cycle from the start anchor, not incremental
+
+// How long past the activity end the viewmodel cycle stays traced, and the
+// per-melee line budget for it.
+static constexpr float kVmTraceTail  = 1.2f;
+static constexpr int   kVmTraceLines = 400;
+
 static bool s_bFirstFire = true;
+static uintptr_t s_pTracedVm = 0;
+static float s_flTracedVmUntil = 0.f;
+static int s_nTracedVmLines = 0;
+static int s_nTracedVmSeq = -1;
+static float s_flTracedVmStart = 0.f;
+static float s_flTracedVmStartCyc = 0.f;
+static float s_flTracedVmRate = 0.f;
 
 static uintptr_t MeleeTrace_Rva(const void* const pRet)
 {
@@ -81,17 +101,74 @@ static char Hook_StartCustomActivity_Internal(void* weapon, uint16_t activity, u
 	const float flEnd = *reinterpret_cast<const float*>(pWeapon + kWeaponCustomEndTime);
 	const float flWt  = PredNative_LatestPredictedTime();
 
+	const uintptr_t pVm = C_WeaponX__GetWeaponViewmodel
+		? reinterpret_cast<uintptr_t>(C_WeaponX__GetWeaponViewmodel(weapon)) : 0;
+	int vmSeq = -1;
+	float vmStart = 0.f, vmStartCyc = 0.f, vmRate = 0.f;
+	if (pVm)
+	{
+		vmSeq      = *reinterpret_cast<const uint16_t*>(pVm + kAnimSequence);
+		vmStart    = *reinterpret_cast<const float*>(pVm + kAnimStartTime);
+		vmStartCyc = *reinterpret_cast<const float*>(pVm + kAnimStartCycle);
+		vmRate     = *reinterpret_cast<const float*>(pVm + kAnimPlaybackRate);
+		if (result)
+		{
+			s_pTracedVm = pVm;
+			s_flTracedVmUntil = flEnd + kVmTraceTail;
+			s_nTracedVmLines = 0;
+			s_nTracedVmSeq = -1;
+		}
+	}
+
 	Warning(eDLL_T::CLIENT,
 		"[MELEE-ACT] client START wpn=%llX ok=%d act=%u flags=%02X seq=%d ideal=%d "
-		"end=%.4f dur=%.4f ct=%.4f wt=%.4f ready=%.4f force=%.3f tb=%d ret=%llX\n",
+		"end=%.4f dur=%.4f ct=%.4f wt=%.4f ready=%.4f force=%.3f tb=%d vm=%llX vmSeq=%d "
+		"vmStart=%.4f vmC0=%.4f vmRate=%.4f seqDur=%.4f ret=%llX\n",
 		static_cast<unsigned long long>(pWeapon & 0xFFFFF), result, activity, flags,
 		*reinterpret_cast<const int16_t*>(pWeapon + kWeaponCustomSequence),
 		*reinterpret_cast<const int16_t*>(pWeapon + kWeaponIdealSequence),
 		flEnd, flEnd - flWt, PredNative_CurTime(), flWt,
 		*reinterpret_cast<const float*>(pWeapon + kWeaponNextReadyTime),
 		forceDuration, usePlayerTimeBase,
+		static_cast<unsigned long long>(pVm & 0xFFFFF), vmSeq, vmStart, vmStartCyc, vmRate,
+		(flEnd - flWt) * vmRate,
 		static_cast<unsigned long long>(MeleeTrace_Rva(_ReturnAddress())));
 	return result;
+}
+
+// Once per client frame: the traced melee viewmodel's anchor (start time,
+// start cycle, rate, sequence) whenever it changes, and the cycle it renders.
+void MeleeActivityTrace_OnFrame(void)
+{
+	if (!s_pTracedVm || !sdk_melee_trace.GetBool())
+		return;
+
+	const float ct = PredNative_CurTime();
+	if (ct > s_flTracedVmUntil || s_nTracedVmLines >= kVmTraceLines)
+	{
+		s_pTracedVm = 0;
+		return;
+	}
+
+	const uintptr_t pVm = s_pTracedVm;
+	const int seq         = *reinterpret_cast<const uint16_t*>(pVm + kAnimSequence);
+	const float start     = *reinterpret_cast<const float*>(pVm + kAnimStartTime);
+	const float startCyc  = *reinterpret_cast<const float*>(pVm + kAnimStartCycle);
+	const float rate      = *reinterpret_cast<const float*>(pVm + kAnimPlaybackRate);
+	const bool bAnchor = seq != s_nTracedVmSeq || start != s_flTracedVmStart
+		|| startCyc != s_flTracedVmStartCyc || rate != s_flTracedVmRate;
+
+	s_nTracedVmSeq = seq;
+	s_flTracedVmStart = start;
+	s_flTracedVmStartCyc = startCyc;
+	s_flTracedVmRate = rate;
+	++s_nTracedVmLines;
+
+	Warning(eDLL_T::CLIENT,
+		"[MELEE-VM] client %s ct=%.4f wt=%.4f seq=%d start=%.4f c0=%.4f rate=%.4f cyc=%.4f anch=%d\n",
+		bAnchor ? "ANCHOR" : "CYCLE", ct, PredNative_LatestPredictedTime(),
+		seq, start, startCyc, rate, *reinterpret_cast<const float*>(pVm + kAnimCycle),
+		*reinterpret_cast<const uint8_t*>(pVm + kAnimAnchored));
 }
 
 static int64_t Hook_OnCustomActivityFinished(void* weapon)
@@ -168,6 +245,13 @@ void VMeleeActivityTrace::GetFun(void) const
 	Module_FindPattern(g_GameDll,
 		"C7 81 DC 40 00 00 FF FF FF FF 33 C0 C6 81 E0 40 00 00 00 F3 0F 10 05")
 		.GetPtr(C_Player__Lunge_ClearTarget);
+
+	Module_FindPattern(g_GameDll,
+		"48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 8B 81 60 15 00 00 48 8B F9 83 F8 FF 0F 84 A9 00 00 00 0F B7 D0")
+		.GetPtr(C_WeaponX__GetWeaponViewmodel);
+
+	if (!C_WeaponX__GetWeaponViewmodel)
+		Warning(eDLL_T::CLIENT, "[MELEE-VM] viewmodel getter unresolved; viewmodel trace disabled\n");
 
 	if (!C_WeaponX__StartCustomActivity_Internal || !C_WeaponX__OnCustomActivityFinished
 		|| !C_Player__PlayerMelee_EndAttack || !C_Player__PlayerMelee_ClearActiveAttackState

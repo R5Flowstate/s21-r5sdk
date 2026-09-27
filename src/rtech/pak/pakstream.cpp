@@ -64,8 +64,24 @@ void Pak_OpenAssociatedStreamingFiles(PakLoadedInfo_s* const loadedInfo, PakLoad
         if (!*streamingFilePath)
             break;
 
+        const size_t nameLen = strnlen(streamingFilePath, fileNamesBufSize - lenRead);
+        const bool bTerminated = nameLen < fileNamesBufSize - lenRead;
+
         // must advance over null character as well for the next read
-        lenRead += strnlen(streamingFilePath, fileNamesBufSize - lenRead) + 1;
+        lenRead += nameLen + 1;
+
+        // The names come from the pak header; they may only name files below the game root.
+        if (!bTerminated || nameLen >= MAX_PATH || V_IsAbsolutePath(streamingFilePath)
+            || streamingFilePath[0] == '\\' || streamingFilePath[0] == '/'
+            || V_strstr(streamingFilePath, "..") || V_strstr(streamingFilePath, ":"))
+        {
+            Warning(eDLL_T::RTECH, "[PAK-STREAM] refused streaming file name in '%s'\n", loadedInfo->fileName);
+            if (!bTerminated)
+                break;
+
+            streamInfo.streamFileNumber[numStreamFiles++] = FS_ASYNC_FILE_INVALID;
+            continue;
+        }
 
         const int fileNumber = FS_OpenAsyncFile(streamingFilePath, loadedInfo->logChannel, nullptr);
 
@@ -74,10 +90,10 @@ void Pak_OpenAssociatedStreamingFiles(PakLoadedInfo_s* const loadedInfo, PakLoad
         // going with FS_ASYNC_FILE_INVALID so the rest of the set can load.
         if (set == STREAMING_SET_MANDATORY && fileNumber == FS_ASYNC_FILE_INVALID)
         {
-            if (V_stristr(streamingFilePath, ".opt.starpak"))
+            if (V_stristr(streamingFilePath, ".opt.starpak") || Pak_IsModSourcedPath(loadedInfo->fileName))
             {
                 Warning(eDLL_T::RTECH,
-                    "[PAK-STREAM] optional HD stream missing (ignored): '%s'\n",
+                    "[PAK-STREAM] stream missing (ignored): '%s'\n",
                     streamingFilePath);
             }
             else

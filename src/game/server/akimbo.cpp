@@ -29,6 +29,7 @@
 #include "game/server/basecombatcharacter.h"
 #include "public/tier1/sdk_parse.h"
 #include "public/game/shared/weapon_types.h"
+#include "weapon_ammo_pool_mod.h"
 
 #include <unordered_map>
 #include <string>
@@ -57,6 +58,8 @@ static constexpr uintptr_t kWeaponPlayerDataOffset = 0x1258; // m_playerData
 static constexpr uintptr_t kWeaponFireModeOffset = 0x2750; // fireMode; 1..5 = offhand
 static constexpr uintptr_t kWeaponActiveHandOffset = 0x2930; // hand stamped by SetActiveWeapon; 1 = alt fires on the zoom buttons
 static constexpr uintptr_t kWeaponStateOffset = 0x1234; // m_weapState
+static constexpr uintptr_t kWeaponInfoOffset = 0x15A8; // WeaponInfo*
+static constexpr uintptr_t kWeaponModValuesOffset = 0x17E0; // modded settings block
 static constexpr uintptr_t kPlayerButtonsOffset = 0x60DC; // m_nButtons, m_afButtonPressed follows
 
 static constexpr uintptr_t kActiveWeaponsOffset = 0x16CC; // activeWeapons[3]
@@ -91,7 +94,6 @@ typedef char (__fastcall* HolsterInternal_t)(__int64 weapon, char fastHolster);
 typedef void (__fastcall* FillClipAmmoFromStock_t)(__int64 weapon, __int64 unused);
 typedef char (__fastcall* WeaponSwitch_t)(void* player, unsigned int hand, __int64 weapon);
 typedef float (__fastcall* WeaponFireInterval_t)(__int64 weapon);
-typedef unsigned int (__fastcall* WeaponActivityModifiers_t)(__int64 weapon, uint16_t* pMods);
 
 static ChargeAndPrimaryAttack_t v_ChargeAndPrimaryAttack = nullptr;
 static DualWieldPartnerRaise_t v_DualWieldPartnerRaise = nullptr;
@@ -103,11 +105,23 @@ static bool Weapon_IsOffhand(const void* pWeapon);
 static FillClipAmmoFromStock_t v_FillClipAmmoFromStock = nullptr;
 static WeaponSwitch_t v_WeaponSwitch = nullptr;
 static WeaponFireInterval_t v_WeaponFireInterval = nullptr;
-static WeaponActivityModifiers_t v_WeaponActivityModifiers = nullptr;
 typedef __int64 (__fastcall* WeaponTranslateActivity_t)(__int64 weapon, unsigned int act);
 static WeaponTranslateActivity_t v_WeaponTranslateActivity = nullptr;
+typedef char (__fastcall* WeaponInfoFindMod_t)(const char* modName, void* pWeaponInfo, unsigned int* pIndex);
+static WeaponInfoFindMod_t v_WeaponInfoFindMod = nullptr;
+typedef void* (__fastcall* WeaponHandViewModel_t)(void* pWeapon);
+static WeaponHandViewModel_t v_WeaponHandViewModel = nullptr;
+typedef void (__fastcall* WeaponApplyModBodygroups_t)(void* pViewModel, void* pWeapon, void* pWeaponInfo, void* pModValues);
+static WeaponApplyModBodygroups_t v_WeaponApplyModBodygroups = nullptr;
 
 static SDKEntityMap<AkimboWeaponState> s_akimboWeaponServer(ESide::Server, "akimbo.wpn");
+
+struct AkimboPlayerState
+{
+	float nextRaiseRetry = 0.0f;
+};
+
+static SDKEntityMap<AkimboPlayerState> s_akimboPlayerServer(ESide::Server, "akimbo.ply");
 
 // Alt-hand attack input. Every site is `mov r,1 ; mov r2,30000h ;
 // cmp [weapon+2930h],r ; cmovz`: hand 1 reads the zoom buttons. The S21
@@ -584,6 +598,48 @@ static bool IsOpticMod(void* pWeapon, const char* modName)
 	return strncmp(modName, "optic_", 6) == 0;
 }
 
+int WeaponMods_FindBit(const void* pWeapon, const char* pszModName)
+{
+	if (!pWeapon || !pszModName || !v_WeaponInfoFindMod)
+		return -1;
+	void* const pInfo = *reinterpret_cast<void* const*>(reinterpret_cast<const uint8_t*>(pWeapon) + kWeaponInfoOffset);
+	if (!pInfo)
+		return -1;
+	unsigned int index = 0;
+	if (!v_WeaponInfoFindMod(pszModName, pInfo, &index) || index >= 32)
+		return -1;
+	return static_cast<int>(index);
+}
+
+static int GetModBitIndex(void* pWeapon, const AkimboWeaponConfig& config, size_t txtIndex)
+{
+	void* const pInfo = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(pWeapon) + kWeaponInfoOffset);
+	if (v_WeaponInfoFindMod && pInfo)
+	{
+		unsigned int index = 0;
+		if (!v_WeaponInfoFindMod(config.modNames[txtIndex].c_str(), pInfo, &index) || index >= 32)
+			return -1;
+		return static_cast<int>(index);
+	}
+	return txtIndex < 32 ? static_cast<int>(txtIndex) : -1;
+}
+
+// Recalc the modded settings (masked) and push the mod bodygroups onto the
+// weapon and its hand viewmodel, as the engine does after a mod change.
+static void ReapplyMods(void* pWeapon)
+{
+	if (!WeaponMods_Recalculate(pWeapon) || !v_WeaponApplyModBodygroups)
+		return;
+
+	uint8_t* const w = reinterpret_cast<uint8_t*>(pWeapon);
+	void* const pInfo = *reinterpret_cast<void**>(w + kWeaponInfoOffset);
+	if (!pInfo)
+		return;
+
+	void* const pViewModel = v_WeaponHandViewModel ? v_WeaponHandViewModel(pWeapon) : nullptr;
+	v_WeaponApplyModBodygroups(pViewModel, pWeapon, pInfo, w + kWeaponModValuesOffset);
+}
+
 static void SetOpticModDisabledOne(void* pWeapon, bool disabled)
 {
 	if (!pWeapon)
@@ -596,10 +652,13 @@ static void SetOpticModDisabledOne(void* pWeapon, bool disabled)
 	uint32_t bits = 0;
 	if (disabled)
 	{
-		for (size_t i = 0; i < config.modNames.size() && i < 32; ++i)
+		for (size_t i = 0; i < config.modNames.size(); ++i)
 		{
-			if (IsOpticMod(pWeapon, config.modNames[i].c_str()))
-				bits |= (1u << i);
+			if (!IsOpticMod(pWeapon, config.modNames[i].c_str()))
+				continue;
+			const int bit = GetModBitIndex(pWeapon, config, i);
+			if (bit >= 0)
+				bits |= (1u << bit);
 		}
 	}
 
@@ -608,6 +667,7 @@ static void SetOpticModDisabledOne(void* pWeapon, bool disabled)
 		return;
 	st.modBitfieldDisabled = bits;
 	MarkEntityEdictDirty(pWeapon);
+	ReapplyMods(pWeapon);
 
 	if (bridge_akimbo_diag.GetBool())
 		Msg(eDLL_T::SERVER, "[Akimbo] optic mods %s weapon=%p bits=0x%08X\n",
@@ -1001,16 +1061,13 @@ static __int64 __fastcall Hook_WeaponTranslateActivity(__int64 weapon, unsigned 
 
 // The engine pushes `althand` for hand 1 but never `dualwield`; the client
 // adds it whenever the owner is OFFHAND or ACTIVE, and every dual clip
-// requires it. Callers hand in a 36-slot buffer.
-static constexpr unsigned int kActivityModifierSlots = 36;
-
-static unsigned int __fastcall Hook_WeaponActivityModifiers(__int64 weapon, uint16_t* pMods)
+// requires it.
+unsigned int AkimboBridge_AppendActivityModifiers(void* pWeapon, uint16_t* pMods,
+	unsigned int count, unsigned int capacity)
 {
-	unsigned int count = v_WeaponActivityModifiers(weapon, pMods);
-	if (!bridge_akimbo.GetBool() || !weapon || !pMods || count >= kActivityModifierSlots)
+	if (!bridge_akimbo.GetBool() || !pWeapon || !pMods || count >= capacity)
 		return count;
 
-	void* const pWeapon = reinterpret_cast<void*>(weapon);
 	if (!AkimboBridge_IsAkimboWeapon(pWeapon))
 		return count;
 	void* const owner = GetOwner(pWeapon);
@@ -1306,6 +1363,42 @@ void AkimboBridge_OnSetActiveWeapon(void* pPlayer, unsigned int hand, void* pWea
 	AkimboBridge_UpdateState(pPlayer);
 }
 
+// The engine refuses the partner raise while weapons are disabled and nothing
+// raises it once they come back (a kit given before the spawn re-enables
+// weapons). The pair belongs up whenever the main is settled and enabled.
+static constexpr float kPartnerRaiseRetryInterval = 0.5f;
+
+static void RaiseMissingPartner(void* pPlayer)
+{
+	if (GetActive(pPlayer, 1))
+		return;
+
+	void* const main = GetActive(pPlayer, 0);
+	if (!main || Weapon_IsOffhand(main) || !AkimboBridge_IsAkimboWeapon(main)
+		|| AkimboBridge_IsAlthand(main) || AkimboBridge_IsDisabled(main))
+		return;
+
+	const int8_t selMain = *reinterpret_cast<const int8_t*>(
+		reinterpret_cast<const uint8_t*>(pPlayer) + kSelectedWeaponsOffset);
+	if (selMain != kSelectedSlotInvalid)
+		return;
+
+	void* const other = AkimboBridge_GetOtherWeapon(main);
+	if (!other || !Weapon_IsEnabled(pPlayer, other))
+		return;
+
+	AkimboPlayerState& st = s_akimboPlayerServer[pPlayer];
+	if (gpGlobals->curTime < st.nextRaiseRetry)
+		return;
+	st.nextRaiseRetry = gpGlobals->curTime + kPartnerRaiseRetryInterval;
+
+	SwitchAlthand(pPlayer, main);
+
+	if (bridge_akimbo_diag.GetBool())
+		Msg(eDLL_T::SERVER, "[Akimbo] raise missing partner player=%p main=%p other=%p -> alt=%p\n",
+			pPlayer, main, other, GetActive(pPlayer, 1));
+}
+
 void AkimboBridge_Think(void* pPlayer, void* pUserCmd)
 {
 	static bool s_thinkReached = false;
@@ -1322,6 +1415,7 @@ void AkimboBridge_Think(void* pPlayer, void* pUserCmd)
 	if (cmd->impulse & kS21ExtraFlag_ToggleAkimbo)
 		ExecuteToggle(pPlayer);
 
+	RaiseMissingPartner(pPlayer);
 	AkimboBridge_UpdateState(pPlayer);
 
 	// Alt-hand input as the engine sees it while the pair is ACTIVE.
@@ -1530,6 +1624,7 @@ void AkimboBridge_RegisterPlayerFuncs(ScriptClassDescriptor_t* playerStruct)
 void AkimboBridge_LevelShutdown()
 {
 	s_akimboWeaponServer.Clear();
+	s_akimboPlayerServer.Clear();
 	s_configCache.clear();
 }
 
@@ -1544,7 +1639,9 @@ void VAkimboBridge::GetAdr(void) const
 	LogFunAdr("CWeaponX::FillClipAmmoFromStock", v_FillClipAmmoFromStock);
 	LogFunAdr("CPlayer::Weapon_Switch", v_WeaponSwitch);
 	LogFunAdr("CWeaponX::GetFireInterval", v_WeaponFireInterval);
-	LogFunAdr("CWeaponX::GetActivityModifiers", v_WeaponActivityModifiers);
+	LogFunAdr("WeaponInfo_FindMod", v_WeaponInfoFindMod);
+	LogFunAdr("CWeaponX::GetHandViewModel", v_WeaponHandViewModel);
+	LogFunAdr("Weapon_ApplyModBodygroups", v_WeaponApplyModBodygroups);
 }
 
 void VAkimboBridge::GetFun(void) const
@@ -1642,13 +1739,26 @@ void VAkimboBridge::GetFun(void) const
 		Warning(eDLL_T::SERVER,
 			"[Akimbo] CWeaponX::GetFireInterval pattern unresolved -- state-change cadence resync disabled\n");
 
-	// Server twin: owner handle at +0x11F0.
+	// Mod name -> bit index; mod count at WeaponInfo+0x4550.
 	Module_FindPattern(g_GameDll,
-		"48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B FA 48 8B F1 8B 91 F0 11 00 00 83 FA FF 0F 84 ?? ?? ?? ?? 0F B7 C2 C1")
-		.GetPtr(v_WeaponActivityModifiers);
-	if (!v_WeaponActivityModifiers)
+		"48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 8B BA 50 45 00 00 45 33 DB")
+		.GetPtr(v_WeaponInfoFindMod);
+	if (!v_WeaponInfoFindMod)
 		Warning(eDLL_T::SERVER,
-			"[Akimbo] CWeaponX::GetActivityModifiers pattern unresolved -- dedi keeps one-handed clips\n");
+			"[Akimbo] WeaponInfo_FindMod pattern unresolved -- optic bits follow the txt Mods order\n");
+
+	// Server twin: owner handle at +0x11F0, per-hand viewmodel handles on the player.
+	Module_FindPattern(g_GameDll,
+		"48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 8B 91 F0 11 00 00 48 8B F9 83 FA FF 0F 84 ?? ?? ?? ?? 0F B7 C2 48 8D 35")
+		.GetPtr(v_WeaponHandViewModel);
+
+	// Reads active_optic_appearance at modValues+0xED8.
+	Module_FindPattern(g_GameDll,
+		"48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 41 54 41 55 41 56 41 57 48 83 EC 20 4C 8B E1 4D 8B F1 49 8B 89 D8 0E 00 00")
+		.GetPtr(v_WeaponApplyModBodygroups);
+	if (!v_WeaponHandViewModel || !v_WeaponApplyModBodygroups)
+		Warning(eDLL_T::SERVER,
+			"[Akimbo] mod bodygroup apply pattern unresolved -- optic bodygroups refresh on the next mod change\n");
 }
 
 void VAkimboBridge::GetVar(void) const { }
@@ -1688,8 +1798,6 @@ void VAkimboBridge::Detour(const bool bAttach) const
 		DetourSetup(&v_SwitchToOffhand, &Hook_SwitchToOffhand, bAttach);
 	if (v_FillClipAmmoFromStock)
 		DetourSetup(&v_FillClipAmmoFromStock, &Hook_FillClipAmmoFromStock, bAttach);
-	if (v_WeaponActivityModifiers)
-		DetourSetup(&v_WeaponActivityModifiers, &Hook_WeaponActivityModifiers, bAttach);
 	if (v_WeaponTranslateActivity)
 		DetourSetup(&v_WeaponTranslateActivity, &Hook_WeaponTranslateActivity, bAttach);
 }

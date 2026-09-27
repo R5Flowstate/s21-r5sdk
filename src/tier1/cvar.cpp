@@ -110,7 +110,7 @@ static void ConVar_AppendFlags(const ConCommandBase* const var, char* buf, size_
 		{
 			char append[128];
 			V_snprintf(append, sizeof(append), " %s", info.shortdesc);
-			V_strncat(buf, append, bufsize);
+			V_strcat_sized(buf, append, bufsize);
 		}
 	}
 }
@@ -795,7 +795,7 @@ static void ConVar_AppendFlags(const ConCommandBase* const var, char* buf, size_
 		{
 			char append[128];
 			V_snprintf(append, sizeof(append), " %s", info.shortdesc);
-			V_strncat(buf, append, bufsize);
+			V_strcat_sized(buf, append, bufsize);
 		}
 	}
 }

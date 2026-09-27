@@ -36,6 +36,7 @@ const CmdRecording_s* CmdRecorder_Get(int nId);
 void CmdRecorder_Free(int nId);
 void CmdRecorder_OnPlayerGone(int nSlot);
 void CmdRecorder_LevelShutdown(void);
+int  CmdRecorder_LoadDemo(const char* pszName, const int nPov, const float flStartSec, const float flEndSec);
 
 void CmdRecorder_RegisterPlayerFuncs(ScriptClassDescriptor_t* pPlayerStruct);
 void CmdRecorder_RegisterGlobalFuncs(CSquirrelVM* pVM);

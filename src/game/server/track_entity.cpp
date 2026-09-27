@@ -8,6 +8,7 @@
 
 #include "track_entity.h"
 #include "player.h"
+#include "util_server.h"
 #include "game/shared/edict_dirty.h"
 #include "game/shared/sdk_entity_state.h"
 #include "game/shared/vscript_gamedll_defs.h"
@@ -195,6 +196,22 @@ static void TrackEnt_ClearExtra(void* pPlayer)
 	MarkEntityEdictDirty(pPlayer);
 }
 
+// DT_ThirdPersonView is a nested table: its proxies receive the player's view-data
+// member, not the player, so map it back to the player that contains it.
+static const void* TrackEnt_Owner(const void* pStruct)
+{
+	const uintptr_t addr = reinterpret_cast<uintptr_t>(pStruct);
+	const int nMaxClients = gpGlobals ? gpGlobals->maxClients : 0;
+	for (int i = 1; i <= nMaxClients; ++i)
+	{
+		const CPlayer* const p = UTIL_PlayerByIndex(i);
+		const uintptr_t base = reinterpret_cast<uintptr_t>(p);
+		if (p && addr >= base && addr < base + sizeof(CPlayer))
+			return p;
+	}
+	return pStruct;
+}
+
 static void __fastcall TrackEnt_Emit(void* pStruct, void* pOut, size_t fieldOff, size_t fieldBytes)
 {
 	if (!pOut)
@@ -203,7 +220,7 @@ static void __fastcall TrackEnt_Emit(void* pStruct, void* pOut, size_t fieldOff,
 	if (!pStruct)
 		return;
 	TrackEntityWire wire;
-	if (!TrackEntity_GetWire(pStruct, &wire))
+	if (!TrackEntity_GetWire(TrackEnt_Owner(pStruct), &wire))
 		return;
 	memcpy(pOut, reinterpret_cast<const uint8_t*>(&wire) + fieldOff, fieldBytes);
 }

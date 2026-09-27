@@ -174,6 +174,39 @@ static void CON_Help_f()
 }
 
 static ConCommand con_help("con_help", CON_Help_f, "Shows the colors and description of each context", FCVAR_RELEASE);
+
+//-----------------------------------------------------------------------------
+// Purpose: engine ConVars do not exist in ICvar at SDK init; bind them once
+//          the engine has linked its static list.
+//-----------------------------------------------------------------------------
+static bool s_bEngineConVarsBound = false;
+
+static void Cvar_BindEngineConVarsOnce(void)
+{
+	if (s_bEngineConVarsBound || !g_pCVar || !g_pCVar->FindVar("fps_max"))
+		return;
+
+	s_bEngineConVarsBound = true;
+	Msg(eDLL_T::CLIENT, "[CVAR] engine ConVars registered -- applying SDK binds\n");
+	Bridge_ApplyLaunchConVarOverrides();
+}
+
+static __int64 ConVar_RegisterStatics(unsigned int nFlags)
+{
+	const __int64 result = v_ConVar_RegisterStatics(nFlags);
+	Cvar_BindEngineConVarsOnce();
+	return result;
+}
+
+void VCVarStaticsS21::Detour(const bool bAttach) const
+{
+	if (!v_ConVar_RegisterStatics)
+		return;
+
+	DetourSetup(&v_ConVar_RegisterStatics, &ConVar_RegisterStatics, bAttach);
+	if (bAttach)
+		Cvar_BindEngineConVarsOnce();
+}
 #else // !CLIENT_DLL
 #include "tier1/cvar.h"
 

@@ -13,6 +13,10 @@
 // that hook reports here after the engine stamped m_customActivityEndTime.
 void MeleeActivityTrace_OnStart(void* weapon, unsigned int activity, unsigned char flags, char result, const void* pRet);
 
+// The anim-anchor send proxy reports the traced melee viewmodel's wire anchor.
+void MeleeActivityTrace_OnAnchorEncode(const void* pEnt, int objectID, int seq,
+	float nowT, float qCyc, float heldStart, float heldCyc, bool bLatched);
+
 // CWeaponX::OnCustomActivityFinished -- clears the owner's melee attack state.
 inline int64_t (*CWeaponX__OnCustomActivityFinished)(void* weapon) = nullptr;
 

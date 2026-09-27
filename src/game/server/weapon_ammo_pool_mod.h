@@ -27,4 +27,7 @@ class VWeaponAmmoPoolMod : public IDetour
 
 void WeaponAmmoPoolMod_LevelShutdown(void);
 
+// Runs the weapon's modded-settings recalc (with the akimbo optic mask).
+bool WeaponMods_Recalculate(void* pWeaponX);
+
 #endif // WEAPON_AMMO_POOL_MOD_H

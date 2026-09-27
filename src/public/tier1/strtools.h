@@ -39,7 +39,25 @@
 #define V_strcmp strcmp
 #define V_strncmp strncmp
 #define V_strstr strstr
-#define V_strncpy strncpy
+// V_strncat is the CRT strncat (third argument = characters to append). Callers
+// holding the destination's total size use this instead; it truncates.
+inline char* V_strcat_sized(char* const pDest, const char* const pSrc, const size_t destSize)
+{
+	if (destSize)
+		strncat_s(pDest, destSize, pSrc, _TRUNCATE);
+	return pDest;
+}
+
+// Source semantics: strncpy that always terminates, so a source >= maxLen is truncated, never unterminated.
+inline char* V_strncpy(char* const pDest, const char* const pSrc, const size_t maxLen)
+{
+	if (maxLen)
+	{
+		strncpy(pDest, pSrc, maxLen);
+		pDest[maxLen - 1] = '\0';
+	}
+	return pDest;
+}
 #define V_strdup _strdup
 #define V_strcat strcat
 

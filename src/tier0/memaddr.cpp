@@ -104,40 +104,28 @@ void CMemory::PatchString(const char* szString) const
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: find array of bytes in process memory
-// Input: *szPattern - 
-// searchDirect - 
-// opCodesToScan - 
-// occurrence - 
-// Output: CMemory
+// Purpose: scan opCodesToScan bytes up or down from pBase; outputs the offset
+//          of the requested occurrence relative to pBase
 //-----------------------------------------------------------------------------
-CMemory CMemory::FindPattern(const char* szPattern, const Direction searchDirect, const int opCodesToScan, const ptrdiff_t occurrence) const
+static bool CMemory_ScanNear(const uint8_t* const pBase, const vector<uint16_t>& patternBytes,
+	const CMemory::Direction searchDirect, const int opCodesToScan, const ptrdiff_t occurrence,
+	ptrdiff_t* const pOutOffset)
 {
-	if (!IsValid())
-	{
-		CMemory_ReportInvalidChain();
-		return CMemory();
-	}
-
-	uint8_t* pScanBytes = reinterpret_cast<uint8_t*>(ptr); // Get the base of the module.
-
-	const vector<uint16_t> PatternBytes = PatternToBytes(szPattern); // Convert our pattern to a byte array.
-
-	const size_t patternDataLen = PatternBytes.size();
-	const uint16_t* const patternData = PatternBytes.data();
+	const size_t patternDataLen = patternBytes.size();
+	const uint16_t* const patternData = patternBytes.data();
 
 	ptrdiff_t occurrences = 0;
 
 	for (long i = 01; i < opCodesToScan + patternDataLen; i++)
 	{
 		bool bFound = true;
-		const int nMemOffset = searchDirect == Direction::DOWN ? i : -i;
+		const int nMemOffset = searchDirect == CMemory::Direction::DOWN ? i : -i;
 
 		for (size_t j = 0ull; j < patternDataLen; j++)
 		{
 			// If either the current byte equals to the byte in our pattern or our current byte in the pattern is a wildcard
 			// our if clause will be false.
-			uint8_t* const pCurrentAddr = (pScanBytes + nMemOffset + j);
+			const uint8_t* const pCurrentAddr = (pBase + nMemOffset + j);
 			_mm_prefetch(reinterpret_cast<const char*>(pCurrentAddr + 64), _MM_HINT_T0); // precache some data in L1.
 
 			const uint16_t currentByte = patternData[j];
@@ -154,10 +142,45 @@ CMemory CMemory::FindPattern(const char* szPattern, const Direction searchDirect
 			occurrences++;
 			if (occurrence == occurrences)
 			{
-				return CMemory(&*(pScanBytes + nMemOffset));
+				*pOutOffset = nMemOffset;
+				return true;
 			}
 		}
 	}
+
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: find array of bytes in process memory
+// Input: *szPattern - 
+// searchDirect - 
+// opCodesToScan - 
+// occurrence - 
+// Output: CMemory
+//-----------------------------------------------------------------------------
+CMemory CMemory::FindPattern(const char* szPattern, const Direction searchDirect, const int opCodesToScan, const ptrdiff_t occurrence) const
+{
+	if (!IsValid())
+	{
+		CMemory_ReportInvalidChain();
+		return CMemory();
+	}
+
+	const vector<uint16_t> PatternBytes = PatternToBytes(szPattern); // Convert our pattern to a byte array.
+	ptrdiff_t nOffset = 0;
+
+	// Prefer the pre-detour snapshot of the game's code when the whole window is inside it.
+	const size_t nReach = static_cast<size_t>(opCodesToScan) + PatternBytes.size() * 2;
+	const bool bDown = searchDirect == Direction::DOWN;
+	const uintptr_t nWindow = bDown ? ptr : ptr - nReach;
+	const size_t nWindowLen = bDown ? nReach : nReach + PatternBytes.size(); // UP still reads len bytes above ptr
+	const uint8_t* const pPristine = (bDown || ptr > nReach) ? g_GameDll.GetPristineView(nWindow, nWindowLen) : nullptr;
+	if (pPristine && CMemory_ScanNear(pPristine + (ptr - nWindow), PatternBytes, searchDirect, opCodesToScan, occurrence, &nOffset))
+		return CMemory(ptr + nOffset);
+
+	if (CMemory_ScanNear(reinterpret_cast<const uint8_t*>(ptr), PatternBytes, searchDirect, opCodesToScan, occurrence, &nOffset))
+		return CMemory(ptr + nOffset);
 
 	return CMemory();
 }
@@ -179,43 +202,7 @@ CMemory CMemory::FindPatternSelf(const char* szPattern, const Direction searchDi
 		return *this;
 	}
 
-	uint8_t* pScanBytes = reinterpret_cast<uint8_t*>(ptr); // Get the base of the module.
-
-	const vector<uint16_t> PatternBytes = PatternToBytes(szPattern); // Convert our pattern to a byte array.
-	const pair<size_t, const uint16_t*> bytesInfo = std::make_pair<size_t, const uint16_t*>(PatternBytes.size(), PatternBytes.data()); // Get the size and data of our bytes.
-
-	ptrdiff_t occurrences = 0;
-
-	for (long i = 01; i < opCodesToScan + bytesInfo.first; i++)
-	{
-		bool bFound = true;
-		int nMemOffset = searchDirect == Direction::DOWN ? i : -i;
-
-		for (size_t j = 0ull; j < bytesInfo.first; j++)
-		{
-			// If either the current byte equals to the byte in our pattern or our current byte in the pattern is a wildcard
-			// our if clause will be false.
-			uint8_t* const pCurrentAddr = (pScanBytes + nMemOffset + j);
-			_mm_prefetch(reinterpret_cast<const char*>(pCurrentAddr + 64), _MM_HINT_T0); // precache some data in L1.
-			if (*pCurrentAddr != bytesInfo.second[j] && bytesInfo.second[j] != 0xffff)
-			{
-				bFound = false;
-				break;
-			}
-		}
-
-		if (bFound)
-		{
-			occurrences++;
-			if (occurrence == occurrences)
-			{
-				ptr = uintptr_t(&*(pScanBytes + nMemOffset));
-				return *this;
-			}
-		}
-	}
-
-	ptr = uintptr_t();
+	ptr = FindPattern(szPattern, searchDirect, opCodesToScan, occurrence).GetPtr();
 	return *this;
 }
 

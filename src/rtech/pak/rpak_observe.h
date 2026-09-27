@@ -74,8 +74,9 @@ static constexpr size_t    kS21_PakSlot_Handle   = 0x00;
 static constexpr size_t    kS21_PakSlot_Status   = 0x04;
 static constexpr size_t    kS21_PakSlot_Name     = 0x18;
 // Same-guid tiebreak: Pak_TrackAsset keeps the current owner unless the new pak's
-// slot priority is strictly greater. Never written for a plain rpak (stays 0).
+// slot priority is strictly greater. Pak_InitAsyncLoad writes 2 for every pak.
 static constexpr size_t    kS21_PakSlot_Priority = 0xD8;
+static constexpr unsigned __int64 kS21_PakLoadedPriority = 2;
 
 const char* Pak_StatusToString_S21(int status);
 void Pak_DumpGuidChain_S21(unsigned __int64 guid, const char* tag);

@@ -17,6 +17,17 @@
 
 #include <cmath>
 
+// Local player's boost shape relative to the shared tuning; mirrors the dedi's per-player profile.
+static float s_flProfileHeightScale = 1.0f;
+static float s_flProfileSprintScale = 1.0f;
+
+void MantleBoostClient_SetProfile(const float flHeightScale, const float flSprintScale)
+{
+	const auto clampScale = [](const float f) { return isfinite(f) ? fminf(fmaxf(f, 0.25f), 4.0f) : 1.0f; };
+	s_flProfileHeightScale = clampScale(flHeightScale);
+	s_flProfileSprintScale = clampScale(flSprintScale);
+}
+
 //-----------------------------------------------------------------------------
 // C_MoveData: view/buttons match dedi; velocity is +292 here, +304 on dedi.
 //-----------------------------------------------------------------------------
@@ -950,7 +961,7 @@ static void MantleBoost_ApplyBoost(uintptr_t ctx, uintptr_t pPlayer, uintptr_t p
 		}
 	}
 	if (nApply == 4)
-		flSpeed *= bridge_mantle_boost_sprint_mult.GetFloat();
+		flSpeed *= bridge_mantle_boost_sprint_mult.GetFloat() * s_flProfileSprintScale;
 
 	if (bDirOk)
 	{
@@ -989,7 +1000,7 @@ static void MantleBoost_ApplyBoost(uintptr_t ctx, uintptr_t pPlayer, uintptr_t p
 
 		// Jump for side effects; recompose vz as sqrt(2*g*h).
 		const float flHeight = (nApply == 4)
-			? bridge_mantle_boost_jump_height.GetFloat()
+			? bridge_mantle_boost_jump_height.GetFloat() * s_flProfileHeightScale
 			: 56.0f;   // player_jumpHeight authored default (state 3)
 		vel[0] = velBefore[0];
 		vel[1] = velBefore[1];

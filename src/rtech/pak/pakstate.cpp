@@ -428,6 +428,20 @@ static void Pak_StringToGUID_f(const CCommand& args)
 	Msg(eDLL_T::RTECH, "] GUID: '0x%llX'\n", guid);
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: pak command arguments are joined onto the pak read/write roots and
+//          must stay inside them: a plain file name, nothing else
+//-----------------------------------------------------------------------------
+static bool Pak_IsBareFileName(const char* const pszName)
+{
+	if (!pszName || !pszName[0] || strstr(pszName, "..") || strpbrk(pszName, "/\\:"))
+	{
+		Warning(eDLL_T::RTECH, "pak commands take a plain file name inside the pak folder\n");
+		return false;
+	}
+	return true;
+}
+
 /*
 =====================
 Pak_Decompress_f
@@ -438,7 +452,7 @@ Pak_Decompress_f
 */
 static void Pak_Decompress_f(const CCommand& args)
 {
-	if (args.ArgC() < 2)
+	if (args.ArgC() < 2 || !Pak_IsBareFileName(args.ArgS()))
 	{
 		return;
 	}
@@ -467,7 +481,7 @@ Pak_Compress_f
 */
 static void Pak_Compress_f(const CCommand& args)
 {
-	if (args.ArgC() < 2)
+	if (args.ArgC() < 2 || !Pak_IsBareFileName(args.ArgS()))
 	{
 		return;
 	}
@@ -499,7 +513,7 @@ Pak_OodleCompress_f
 */
 static void Pak_OodleCompress_f(const CCommand& args)
 {
-	if (args.ArgC() < 3)
+	if (args.ArgC() < 3 || !Pak_IsBareFileName(args.Arg(1)) || !Pak_IsBareFileName(args.Arg(2)))
 	{
 		Msg(eDLL_T::RTECH, "usage: pak_oodle_compress <inPakName> <outPakName>\n");
 		return;
@@ -790,6 +804,20 @@ static void Pak_StringToGUID_f(const CCommand& args)
 	Msg(eDLL_T::RTECH, "] GUID: '0x%llX'\n", guid);
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: pak command arguments are joined onto the pak read/write roots and
+//          must stay inside them: a plain file name, nothing else
+//-----------------------------------------------------------------------------
+static bool Pak_IsBareFileName(const char* const pszName)
+{
+	if (!pszName || !pszName[0] || strstr(pszName, "..") || strpbrk(pszName, "/\\:"))
+	{
+		Warning(eDLL_T::RTECH, "pak commands take a plain file name inside the pak folder\n");
+		return false;
+	}
+	return true;
+}
+
 /*
 =====================
 Pak_Decompress_f
@@ -800,7 +828,7 @@ Pak_Decompress_f
 */
 static void Pak_Decompress_f(const CCommand& args)
 {
-	if (args.ArgC() < 2)
+	if (args.ArgC() < 2 || !Pak_IsBareFileName(args.ArgS()))
 	{
 		return;
 	}
@@ -829,7 +857,7 @@ Pak_Compress_f
 */
 static void Pak_Compress_f(const CCommand& args)
 {
-	if (args.ArgC() < 2)
+	if (args.ArgC() < 2 || !Pak_IsBareFileName(args.ArgS()))
 	{
 		return;
 	}

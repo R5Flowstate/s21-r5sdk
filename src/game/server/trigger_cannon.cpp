@@ -748,6 +748,17 @@ static void TriggerCannon_ArmFlightLock(const void* pPlayer, const void* pTrigge
 	}
 }
 
+void TriggerCannon_CancelFlightLock(const void* pPlayer)
+{
+	if (!pPlayer)
+		return;
+	for (int i = 0; i < TC_FLIGHT_LOCK_SLOTS; ++i)
+	{
+		if (s_flightLocks[i].pPlayer == pPlayer)
+			s_flightLocks[i].flExpireTime = 0.0f;
+	}
+}
+
 bool TriggerCannon_BeginFlightLock(void* pPlayer, void* pMoveData, float savedDir[3])
 {
 	if (!pPlayer || !pMoveData || !savedDir || !bridge_trigger_cannon_lock.GetBool())

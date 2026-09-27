@@ -118,6 +118,15 @@ class VExample : public IDetour
 
 Unresolved pattern = loud `Warning`, feature off -- never a silent no-op.
 
+One engine function has one entry jmp. Within a Detours transaction the FIRST
+attach owns it and every later hook on the same address never runs, with no
+error. Two differently named patterns often land on the same function. Before a
+new `DetourSetup`, grep for any `v_` that resolves to the same address and check
+the dedi boot log for `[DETOUR] shared target`. If the function is already
+hooked, extend the owning hook. The dedi boot pass links shared targets after
+its commit (`Detour_LinkSharedTargets`; boot shows `linked: A -> B -> original`),
+but client attaches and any attach after boot are not linked.
+
 ---
 
 ## Patterns

@@ -9,6 +9,7 @@
 #include "game/shared/sdk_entity_state.h"
 #ifndef CLIENT_DLL
 #include "game/shared/edict_dirty.h"
+#include "game/server/offhand_jump_toggle.h"
 #endif
 #include "public/tier0/memaddr.h"
 #include "public/tier0/module.h"
@@ -487,6 +488,8 @@ static void Hook_PerSelectorActivateOuter(int64_t a1, int a2)
 #ifndef CLIENT_DLL
 	if (predArmed && g_pPredictablePlayer)
 		*g_pPredictablePlayer = savedPred;
+
+	OffhandJumpToggle_PostSwitchToOffhand(reinterpret_cast<void*>(a1), reinterpret_cast<void*>(weapon));
 
 	if (sdk_offhand_ext_toss_diag.GetBool())
 	{

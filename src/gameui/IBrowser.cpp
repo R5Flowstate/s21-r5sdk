@@ -1040,7 +1040,8 @@ static bool Browser_IsSafeIdent(const char* const psz)
 
 static void Browser_AddUniqueMap(CUtlVector<CUtlString>& out, const char* psz)
 {
-	if (!psz || !psz[0])
+	// Rebuilt every frame from mod-supplied playlists; the dedup scan is linear.
+	if (!psz || !psz[0] || out.Count() >= 512)
 		return;
 
 	FOR_EACH_VEC(out, i)

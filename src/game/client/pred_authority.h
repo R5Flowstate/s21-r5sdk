@@ -60,6 +60,7 @@ float PredNative_TickInterval(void);
 // gpGlobals_Client->curtime -- the clock CategorizePosition holds the knockback
 // windows against. 0 when unresolved.
 float PredNative_CurTime(void);
+float PredNative_FrameTime(void);
 float PredNative_LatestPredictedTime(void);
 
 // The snapshot pair the engine is lerping between, as the engine publishes it.

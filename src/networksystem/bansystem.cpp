@@ -30,6 +30,13 @@ void CBanSystem::LoadList(void)
 		return;
 	}
 
+	if (nFileSize > (1 << 20))
+	{
+		Warning(eDLL_T::SERVER, "[BANSYS] banlist.json over cap (%zd bytes), skipping\n", nFileSize);
+		delete[] pBuf;
+		return;
+	}
+
 	rapidjson::Document document;
 	if (document.Parse(pBuf, nFileSize).HasParseError())
 	{
@@ -74,9 +81,9 @@ void CBanSystem::LoadList(void)
 			netadr_t adr;
 			const char* const adrStr = entry.GetString();
 
-			if (!adr.SetFromString(adrStr, true))
+			if (!adr.SetFromString(adrStr, false))
 			{
-				Warning(eDLL_T::SERVER, "%s: IP Address (%s) at index #%zd is invalid!\n", __FUNCTION__, currIdx, adrStr);
+				Warning(eDLL_T::SERVER, "%s: IP Address (%s) at index #%zd is invalid!\n", __FUNCTION__, adrStr, currIdx);
 				continue;
 			}
 
@@ -556,9 +563,9 @@ void CBanSystem::LoadList(void)
 			netadr_t adr;
 			const char* const adrStr = entry.GetString();
 
-			if (!adr.SetFromString(adrStr, true))
+			if (!adr.SetFromString(adrStr, false))
 			{
-				Warning(eDLL_T::SERVER, "%s: IP Address (%s) at index #%zd is invalid!\n", __FUNCTION__, currIdx, adrStr);
+				Warning(eDLL_T::SERVER, "%s: IP Address (%s) at index #%zd is invalid!\n", __FUNCTION__, adrStr, currIdx);
 				continue;
 			}
 
@@ -813,25 +820,41 @@ void CBanSystem::AuthorPlayerByName(const char* playerName, const bool shouldBan
 	if (!reason)
 		reason = shouldBan ? "Banned from server" : "Kicked from server";
 
+	// Names are client-chosen and not unique; act only on an unambiguous match.
+	CClient* pTarget = nullptr;
+	int nMatches = 0;
+
 	for (int i = 0; i < gpGlobals->maxClients; i++)
 	{
 		CClient* const pClient = g_pServer->GetClient(i);
-		const CNetChan* const pNetChan = pClient->GetNetChan();
-
-		if (!pNetChan)
+		if (!pClient)
 			continue;
 
-		if (strlen(pNetChan->GetName()) > 0)
-		{
-			if (strcmp(playerName, pNetChan->GetName()) == NULL) // Our wanted name?
-			{
-				if (shouldBan && AddEntry(&pNetChan->GetRemoteAddress(), pClient->GetPlatformUserId()) && !bSave)
-					bSave = true;
+		const CNetChan* const pNetChan = pClient->GetNetChan();
+		if (!pNetChan || !pNetChan->GetName()[0])
+			continue;
 
-				pClient->Disconnect(REP_MARK_BAD, reason);
-				bDisconnect = true;
-			}
+		if (strcmp(playerName, pNetChan->GetName()) == 0)
+		{
+			pTarget = pClient;
+			nMatches++;
 		}
+	}
+
+	if (nMatches > 1)
+	{
+		Warning(eDLL_T::SERVER, "%d players are named '%s'; use the user id or handle instead\n", nMatches, playerName);
+		return;
+	}
+
+	if (pTarget)
+	{
+		const CNetChan* const pNetChan = pTarget->GetNetChan();
+		if (shouldBan && AddEntry(&pNetChan->GetRemoteAddress(), pTarget->GetPlatformUserId()))
+			bSave = true;
+
+		pTarget->Disconnect(REP_MARK_BAD, "%s", reason);
+		bDisconnect = true;
 	}
 
 	if (bSave)
@@ -906,7 +929,7 @@ void CBanSystem::AuthorPlayerById(const char* playerHandle, const bool shouldBan
 			if (shouldBan && AddEntry(&pNetChan->GetRemoteAddress(), pClient->GetPlatformUserId()) && !bSave)
 				bSave = true;
 
-			pClient->Disconnect(REP_MARK_BAD, reason);
+			pClient->Disconnect(REP_MARK_BAD, "%s", reason);
 			bDisconnect = true;
 		}
 		else
@@ -917,7 +940,7 @@ void CBanSystem::AuthorPlayerById(const char* playerHandle, const bool shouldBan
 			if (shouldBan && AddEntry(&pNetChan->GetRemoteAddress(), pClient->GetPlatformUserId()) && !bSave)
 				bSave = true;
 
-			pClient->Disconnect(REP_MARK_BAD, reason);
+			pClient->Disconnect(REP_MARK_BAD, "%s", reason);
 			bDisconnect = true;
 		}
 	}

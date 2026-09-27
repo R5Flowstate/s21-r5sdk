@@ -11,12 +11,14 @@
 class CSquirrelVM;
 class CPlayer;
 class Vector3D;
+class bf_read;
 struct ScriptClassDescriptor_t;
 
 void Script_RegisterDedicatedWeaponNatives(void);
 void Script_UpdateDedicatedPlayerDecoySignature(void);
 void ServerScript_UpdateHeldObjectPlacement(CPlayer* player, int commandNumber = 0);
 int ServerScript_ClassifyPortalDir(const Vector3D& normal);
+void ServerScript_ReadPlacementPoseTrailer(bf_read* buf, int edictIndex, int cmdNumber);
 bool ServerScript_TraceForMoverBlocking(const Vector3D& portalExitPos,
 	const Vector3D& surfaceNormal, CPlayer* owner);
 

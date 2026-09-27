@@ -623,6 +623,7 @@ void VNetChan::Detour(const bool bAttach) const
 #include "engine/shared/s21_bridge_compat.h"
 #include "engine/server/server.h"
 #include "engine/client/client.h"
+#include "engine/server/demo_record_sv.h"
 #include "server/vengineserver_impl.h"
 #include <cmath>
 
@@ -1061,6 +1062,15 @@ int CNetChan::_SendDatagram(CNetChan* pChan, bf_write* pMsg)
     const int chokedPre = *reinterpret_cast<const int*>(base + 0x10);
 
     const int result = CNetChan__SendDatagram(pChan, pMsg);
+
+    // The send stream still holds the datagram the native just transmitted.
+    if (DemoSv_AnyActive())
+    {
+        const uint8_t* buf = *reinterpret_cast<uint8_t* const*>(base + 0x1C0);
+        const int      bits = *reinterpret_cast<const int*>(base + 0x1D0);
+        if (buf && bits > 0)
+            DemoSv_OnDatagram(pChan, buf, (bits + 7) >> 3);
+    }
 
     if (net_dumpSendDatagram.GetBool())
     {

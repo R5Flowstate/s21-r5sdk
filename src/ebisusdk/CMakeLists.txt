@@ -22,6 +22,8 @@ macro( add_ebisu_lib LIB_NAME )
 		"origin_offline.h"
 		"origin_igo.cpp"
 		"origin_igo.h"
+		"pin_survey.cpp"
+		"pin_survey.h"
 	)
 	endif()
 

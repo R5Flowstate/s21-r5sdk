@@ -37,6 +37,9 @@ void MantleBoostClient_OnAuthoritativeState(int nEntIndex, int nState);
 // already applied: 0 idle, 1 hang, 3 mantle jump, 4 sweet spot.
 int MantleBoostClient_GetState(void);
 
+// Local player's full-boost height / exit-sprint scale; must match the dedi's SetMantleBoostProfile.
+void MantleBoostClient_SetProfile(float flHeightScale, float flSprintScale);
+
 // The C_Player the TraversalMove detour last predicted for; 0 before the first
 // traversal of a session.
 uintptr_t MantleBoostClient_GetPredictedPlayer(void);

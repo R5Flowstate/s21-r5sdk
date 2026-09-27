@@ -188,7 +188,16 @@ bool Cmd_ExecuteUnrestricted(const char* const pCommandString, const char* const
 		}
 
 		ConVar* const pConVar = reinterpret_cast<ConVar*>(pCommandBase);
-		pConVar->SetValue(pValue ? pValue : pValueString);
+		const char* const pNewValue = pValue ? pValue : pValueString;
+
+		// A bare name is a query, as on the local console; setting it would
+		// wipe the convar to an empty string.
+		if (!pNewValue || !*pNewValue)
+		{
+			Msg(eDLL_T::ENGINE, "\"%s\" = \"%s\" (def. \"%s\")\n", pConVar->GetName(), pConVar->GetString(), pConVar->GetDefault());
+			return true;
+		}
+		pConVar->SetValue(pNewValue);
 	}
 	else // Invoke command callback directly.
 	{

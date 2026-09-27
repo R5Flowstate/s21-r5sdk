@@ -15,8 +15,26 @@
 #define MOD_MAX_MANIFEST_BYTES (4 * 1024 * 1024)
 #define MOD_MAX_SCAN_DEPTH 8
 #define MOD_ATTESTATION_MAX_LEN 256
+#define MOD_MAX_OWNED_FILES 8192
+#define MOD_MAX_MAPS 16
+#define MOD_MAX_OVERRIDES 64
+#define MOD_MAX_DEPENDENCIES 64
+#define MOD_MAX_CONVARS 128
+#define MOD_NAMESPACE_SEPARATOR "__"
+#define MOD_MAX_SCRIPT_WRAPS 64
+// 1 << script VM context (server 0, client 1, ui 2)
+#define MOD_WRAP_VM_SERVER (1 << 0)
+#define MOD_WRAP_VM_CLIENT (1 << 1)
+#define MOD_WRAP_VM_UI (1 << 2)
+#define MOD_MAX_SCRIPT_BYTES (4 * 1024 * 1024)
+// Two edits per wrapped definition; a real target is defined a handful of times per file.
+#define MOD_WRAP_MAX_EDITS_PER_FILE 512
+#define MOD_WRAP_MAX_CHAINS 256
 
 bool ModSystem_IsSafeRelativePath(const char* const pPath);
+KeyValues* ModSystem_LoadKeyValuesCapped(const char* const pszPath, const char* const pszPathID,
+	const char* const pszRootName, const ssize_t nMaxBytes);
+bool ModSystem_IsProtectedLocKey(const char* const pszKey);
 
 class CModAppSystemGroup;
 
@@ -45,9 +63,17 @@ public:
 		~ModInstance_t();
 
 		bool ParseSettings();
+		void Activate();
 		void ParseConVars();
 		void ParseDependencies();
 		void ParseLocalizationFiles();
+		bool ParseMaps();
+		bool ParseOverrides();
+		bool ParseScriptWraps();
+		bool VerifyScriptWraps();
+		bool MayDefineLocKey(const char* const pszKey) const;
+		bool VerifyOwnedFiles();
+		bool OwnsPath(const char* const pszRel) const;
 
 		inline void SetState(const eModState newState) { state = newState; };
 
@@ -83,6 +109,18 @@ public:
 		CUtlVector<ConVar*> conVars;
 		CUtlVector<CUtlString> dependencies;
 		CUtlVector<CUtlString> loadAfter;
+		CUtlVector<CUtlString> maps;
+		CUtlVector<CUtlString> datatableOverrides; // stock table stems, lowercase, optional "sub/" prefix
+		CUtlVector<CUtlString> localizationOverrides; // stock human tokens
+
+		struct ScriptWrap_t
+		{
+			CUtlString target;   // base script function
+			CUtlString function; // the mod's function, "<namespace>__*"
+			int contextMask;     // MOD_WRAP_VM_*
+			bool replace;        // same signature as the target, never sees the original
+		};
+		CUtlVector<ScriptWrap_t> scriptWraps;
 
 		CUtlString author;
 		CUtlString name;
@@ -91,6 +129,7 @@ public:
 		CUtlString version;
 
 		CUtlString basePath;
+		CUtlString nameSpace; // lowercase id, '.' as '_'; every file the mod ships carries it
 	};
 
 	CModSystem();
@@ -152,6 +191,7 @@ FORCEINLINE CModSystem* ModSystem()
 
 const char* ModSystem_StateToString(const CModSystem::eModState state);
 const char* ModSystem_RealmToString(const CModSystem::ModInstance_t::eModRealm realm);
+bool ModSystem_ApplyAutoloadLine(const CModSystem::ModInstance_t* const mod, const char* const pszLine);
 
 // FNV-1a checksum over the transmitted payload; detects corruption, not a MAC.
 bool ModSystem_BuildAttestation(char* const pBuf, const size_t bufSize);

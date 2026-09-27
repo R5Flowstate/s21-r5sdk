@@ -60,6 +60,7 @@
 #include "game/client/classvar_natives.h"
 #include "game/client/fs_1v1_convars.h"
 #include "game/client/fov_limit.h"
+#include "game/client/phase_door_depth.h"
 #include "game/client/visual_clutter.h"
 #include "game/client/mantle_boost_rui.h"
 #include "game/shared/pose_param.h"
@@ -72,6 +73,7 @@
 #include "codecs/miles/miles_banklist.h"
 #include "rtech/pak/pak_lobby_world.h"
 #include "rtech/pak/ui_image_skip.h"
+#include "rtech/pak/pak_relink_guard.h"
 #include "engine/sys_dll.h"
 #include "engine/sys_dll2.h"
 #include "engine/sys_engine.h"
@@ -83,6 +85,7 @@
 #include "vscript/languages/squirrel_re/include/sqstdaux.h"
 #include "vscript/languages/squirrel_re/vsquirrel.h"
 #include "vscript/vscript.h"
+#include "vscript/script_convar_guard.h"
 #include "vscript/vscript_s21_override.h"
 #include "vscript/weapon_kv_disk.h"
 #include "localize/localize_disk.h"
@@ -102,6 +105,8 @@
 #include "engine/client/cl_parse_ents.h"
 #include "engine/client/pdef_parse.h"
 #include "engine/client/camo_index.h"
+#include "ebisusdk/pin_survey.h"
+#include "engine/client/demo_play.h"
 #include "engine/staticpropmgr.h"
 #include "engine/modelloader.h"
 #include "engine/cmodel_bsp_debug.h"
@@ -115,12 +120,16 @@
 #include "game/client/grapple_rope_diag.h"
 #include "game/client/mantle_boost.h"
 #include "game/client/mantle_boost_anim.h"
+#include "game/client/glide_flight.h"
 #include "game/client/dodge_bind.h"
+#include "game/client/dodge_rules.h"
 #include "game/client/aimassist.h"
 #include "game/client/trigger_cannon.h"
 #include "game/client/halfduck_zip_parity.h"
 #include "game/client/zipline_disconnect.h"
 #include "game/client/move_sim_trace.h"
+#include "game/client/wall_launch.h"
+#include "game/client/double_jump_power.h"
 #include "game/client/melee_lunge_probe.h"
 #include "game/client/melee_activity_trace.h"
 #include "game/client/bridge_cmd_seed.h"
@@ -538,12 +547,14 @@ void DetourRegister()
 	// Tier0 - Core infrastructure (always needed)
 	//-------------------------------------------------------------------------
 	REGISTER(VPlatform);
+	REGISTER(VCVarStaticsS21);
 
 	//-------------------------------------------------------------------------
 	// RTech - lobby world
 	//-------------------------------------------------------------------------
 	REGISTER(VPakLobbyWorldS21);
 	REGISTER(VUIImageSkipS21);
+	REGISTER(VPakRelinkGuard);
 	REGISTER(VVfxAliasNullGuardS21);
 	REGISTER(VSurfDataFallbackGuardS21);
 	REGISTER(VBodySkinGuardS21);
@@ -559,6 +570,7 @@ void DetourRegister()
 	REGISTER(VActivityList);
 	REGISTER(VClassVarNativesCl);
 	REGISTER(VFOVLimit);
+	REGISTER(VPhaseDoorDepth);
 	REGISTER(VVisualClutter);
 
 	//-------------------------------------------------------------------------
@@ -593,6 +605,7 @@ void DetourRegister()
 	//-------------------------------------------------------------------------
 	REGISTER(VSquirrelS21Core);
 	REGISTER(VScriptS21Override);
+	REGISTER(VScriptConVarGuard);
 	REGISTER(VPlatformFSOverrideS21);
 	REGISTER(VFSScriptRedirectS21);
 	REGISTER(VRPakObserveS21);
@@ -618,7 +631,9 @@ void DetourRegister()
 	REGISTER(VTriggerClientPredictForce);
 	REGISTER(VMantleBoostClient);
 	REGISTER(VMantleBoostAnimClient);
+	REGISTER(VGlideFlightClient);
 	REGISTER(VDodgeBind);
+	REGISTER(VDodgeRules);
 	REGISTER(VAimAssist);
 	REGISTER(VMantleBoostRuiCl);
 	REGISTER(VTriggerCannonClient);
@@ -626,6 +641,8 @@ void DetourRegister()
 	REGISTER(VMeleeActivityTrace);
 	REGISTER(VHalfDuckZipParityClient);
 	REGISTER(VZipDiscClient);
+	REGISTER(VWallLaunchClient);
+	REGISTER(VDoubleJumpPowerClient);
 	REGISTER(VMoveSimTraceClient);
 	REGISTER(VBridgeCmdSeedClient);
 	REGISTER(VBridgeFireTapClient);
@@ -652,11 +669,13 @@ void DetourRegister()
 	REGISTER(VCLParsePacketEntitiesBound);
 	REGISTER(VPdefParseBound);
 	REGISTER(VCamoIndexClamp);
+	REGISTER(VPinSurvey);
 	REGISTER(VMaterialMissingLogS21);
 	REGISTER(VTexStreamFeedbackSyncS21);
 	REGISTER(VMaterialGlue);
 	REGISTER(VModelMissingLogS21);
 	REGISTER(VPsoCacheS21);
+	REGISTER(VDemoPlayer);
 }
 
 //-----------------------------------------------------------------------------

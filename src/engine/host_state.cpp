@@ -342,6 +342,10 @@ void CHostState::LoadConfig(void) const
 		// CVar_Connect runs long before this exec, so the cfg would otherwise win.
 		Cbuf_AddText(Cbuf_GetCurrentPlayer(), "_sdk_apply_launch_convars\n", cmd_source_t::kCommandSrcCode);
 	}
+
+	// Queued after offline_client.cfg, which names the player "unnamed".
+	if (CommandLine()->CheckParm("-offlinename"))
+		Cbuf_AddText(Cbuf_GetCurrentPlayer(), "_cl_apply_offline_name\n", cmd_source_t::kCommandSrcCode);
 }
 
 void CHostState::LoadModConfigs()
@@ -397,21 +401,12 @@ void CHostState::LoadModConfigs()
 				while (lineEnd > lineBegin && (lineEnd[-1] == '\r' || lineEnd[-1] == ' ' || lineEnd[-1] == '\t')) --lineEnd;
 				if (lineBegin >= lineEnd) return;
 
-				std::string cmd(lineBegin, size_t(lineEnd - lineBegin));
+				const std::string line(lineBegin, size_t(lineEnd - lineBegin));
+				if (line.compare(0, 2, "//") == 0)
+					return;
 
-				const char* s = cmd.c_str();
-				while (*s == ' ' || *s == '\t') ++s;
-				const char* e = s;
-				while (*e && *e != ' ' && *e != '\t' && *e != '\n' && *e != '\r') ++e;
-				std::string name(s, size_t(e - s));
-
-				ConCommandBase* pBase = g_pCVar->FindCommandBase(name.c_str());
-				if (!pBase) return;
-
-				cmd.push_back('\n');
-				// VCmd is a server-product detour, so v_Cmd_Dispatch is null here.
-				// The command was resolved above, so only a real one is queued.
-				Cbuf_AddText(Cbuf_GetCurrentPlayer(), cmd.c_str(), cmd_source_t::kCommandSrcCode);
+				if (!ModSystem_ApplyAutoloadLine(mod, line.c_str()))
+					Warning(eDLL_T::MODSYSTEM, "[AUTOLOAD-CFG] %s: refused '%s'\n", mod->name.String(), line.c_str());
 			};
 
 			const char* p = buffer.c_str();
@@ -580,6 +575,7 @@ CHostState* g_pHostState = nullptr;
 #include "engine/server/server.h"
 #include "engine/cmd.h"
 #include "engine/cmd_frame_queue.h"
+#include "engine/agent_link.h"
 #include "engine/net.h"
 #include "engine/gl_screen.h"
 #include "engine/host.h"
@@ -590,6 +586,7 @@ CHostState* g_pHostState = nullptr;
 #include "engine/cmodel_bsp.h"
 #include "engine/server/server.h"
 #include "engine/server/precache_natives.h"
+#include "engine/client/client.h"
 #include "engine/server/snapshot_diag.h"
 #include "engine/net_chan.h"
 #include "engine/server/mod_policy_gate.h"
@@ -809,10 +806,19 @@ static void HostState_KeepAlive()
 
 	string password = sv_password.GetString();
 
+	// Browsers show the host's settings alongside its own description.
+	string description = hostdesc.GetString();
+	{
+		char szSettings[160];
+		Playlists_DescribeActiveSettings(szSettings, sizeof(szSettings));
+		if (szSettings[0])
+			description = description.empty() ? string(szSettings) : description + " | " + szSettings;
+	}
+
 	const NetGameServer_t gameServer
 	{
 		hostname->GetString(),
-		hostdesc.GetString(),
+		description,
 		spire_host_visibility.GetInt() == ServerVisibility_e::HIDDEN,
 		password.length() > 0,
 		g_pHostState->m_levelName,
@@ -1198,6 +1204,9 @@ void CHostState::FrameUpdate(CHostState* pHostState, double flCurrentTime, float
 
 				Host_PumpSignonLadder();
 				ModPolicyGate_OnFrame();
+				// Inside the abort-server frame: an engine error raised by agent
+				// script unwinds to a live setjmp instead of a stale one.
+				AgentLink_FrameBegin();
 				CHostState__State_Run(&g_pHostState->m_iCurrentState, flCurrentTime, flFrameTime);
 				break;
 			}
@@ -1452,21 +1461,12 @@ void CHostState::LoadModConfigs()
 				while (lineEnd > lineBegin && (lineEnd[-1] == '\r' || lineEnd[-1] == ' ' || lineEnd[-1] == '\t')) --lineEnd;
 				if (lineBegin >= lineEnd) return;
 
-				std::string cmd(lineBegin, size_t(lineEnd - lineBegin));
+				const std::string line(lineBegin, size_t(lineEnd - lineBegin));
+				if (line.compare(0, 2, "//") == 0)
+					return;
 
-				const char* s = cmd.c_str();
-				while (*s == ' ' || *s == '\t') ++s;
-				const char* e = s;
-				while (*e && *e != ' ' && *e != '\t' && *e != '\n' && *e != '\r') ++e;
-				std::string name(s, size_t(e - s));
-
-				ConCommandBase* pBase = g_pCVar->FindCommandBase(name.c_str());
-				if (!pBase) return;
-
-				cmd.push_back('\n');
-				CCommand args;
-				args.Tokenize(cmd.c_str(), cmd_source_t::kCommandSrcCode);
-				v_Cmd_Dispatch(Cbuf_GetCurrentPlayer(), pBase, &args, false);
+				if (!ModSystem_ApplyAutoloadLine(mod, line.c_str()))
+					Warning(eDLL_T::MODSYSTEM, "[AUTOLOAD-CFG] %s: refused '%s'\n", mod->name.String(), line.c_str());
 			};
 
 			const char* p = buffer.c_str();
@@ -1563,6 +1563,8 @@ void CHostState::State_NewGame(void)
 
 		// LevelInit complete for this map -- resume entity snapshot packing.
 		SnapshotDiag_SetPackFrozen(false);
+
+		HostProof_Publish(hostport ? hostport->GetInt() : 0);
 	}
 
 	Host_UpdateSessionID();

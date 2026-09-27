@@ -75,6 +75,7 @@ struct BotProgram_s
 	int      m_nLegSide;        // -1 left, 0 hold, +1 right
 	float    m_flLegForward;    // -1..1, depth steps
 	bool     m_bLegCrouch;
+	int      m_nStrafeCrouch;   // BotStrafeCrouch_t
 	float    m_flLegEnd;        // curTime when this leg ends
 	int      m_nLegsQueued;     // pending ADAD burst legs
 	int      m_nFlipStreak;
@@ -99,6 +100,16 @@ enum BotFireMode_t
 	BOTFIRE_TAP,        // semi-auto: one pull per shot
 	BOTFIRE_BURST       // burst weapons: one pull per burst
 };
+
+// Zero is the memset default, so a fresh program keeps the brain's own mix.
+enum BotStrafeCrouch_t
+{
+	BOTCROUCH_BRAIN = 0, // hard brain crouches on some legs, easy never
+	BOTCROUCH_OFF,
+	BOTCROUCH_ON         // both brains mix crouched legs in
+};
+
+static constexpr int BOTCMD_EASY_CROUCH_PCT = 25;
 
 struct BotCmdState_s
 {
@@ -433,9 +444,18 @@ static void BotCmd_StrafeSetLeg(BotProgram_s& prog, const CPlayer* pPlayer, int 
 		prog.m_nLastStrafeSide = side;
 	prog.m_flLegForward = forward;
 	prog.m_bLegCrouch = crouch;
-	prog.m_flLegEnd = gpGlobals->curTime + dur / Max(prog.m_flStrafeSpeedMult, 0.25f);
+	prog.m_flLegEnd = gpGlobals->curTime + dur;
 	prog.m_vecLegStart = pPlayer->Diag_AbsOrigin();
 	prog.m_flLegStartTime = gpGlobals->curTime;
+}
+
+static bool BotCmd_StrafeRollCrouch(const BotProgram_s& prog, int brainPct)
+{
+	if (prog.m_nStrafeCrouch == BOTCROUCH_OFF)
+		return false;
+	if (!prog.m_bStrafeHard && prog.m_nStrafeCrouch == BOTCROUCH_ON)
+		brainPct = BOTCMD_EASY_CROUCH_PCT;
+	return brainPct > 0 && (rand() % 100) < brainPct;
 }
 
 // Same decision table as the NPC strafer: the easy brain alternates sides on a
@@ -459,7 +479,7 @@ static void BotCmd_StrafePickLeg(CPlayer* pPlayer, BotProgram_s& prog)
 	if (!prog.m_bStrafeHard)
 	{
 		side = BotCmd_StrafeOpenSide(pPlayer, prog, -lastSide);
-		BotCmd_StrafeSetLeg(prog, pPlayer, side, 0.0f, BotCmd_Rand(prog.m_flStrafeWaitMin, prog.m_flStrafeWaitMax), false);
+		BotCmd_StrafeSetLeg(prog, pPlayer, side, 0.0f, BotCmd_Rand(prog.m_flStrafeWaitMin, prog.m_flStrafeWaitMax), BotCmd_StrafeRollCrouch(prog, 0));
 		return;
 	}
 
@@ -505,7 +525,7 @@ static void BotCmd_StrafePickLeg(CPlayer* pPlayer, BotProgram_s& prog)
 	{
 		// ADAD burst: three quick legs, sometimes crouched
 		side = BotCmd_StrafeOpenSide(pPlayer, prog, side);
-		const bool crouch = (rand() % 100) < 20;
+		const bool crouch = BotCmd_StrafeRollCrouch(prog, 20);
 		BotCmd_StrafeSetLeg(prog, pPlayer, side, 0.0f, BotCmd_Rand(0.28f, 0.45f), crouch);
 		prog.m_nLegsQueued = 2;
 	}
@@ -520,7 +540,7 @@ static void BotCmd_StrafePickLeg(CPlayer* pPlayer, BotProgram_s& prog)
 	else
 	{
 		side = BotCmd_StrafeOpenSide(pPlayer, prog, side);
-		BotCmd_StrafeSetLeg(prog, pPlayer, side, 0.0f, BotCmd_Rand(prog.m_flStrafeWaitMin, prog.m_flStrafeWaitMax), (rand() % 100) < 8);
+		BotCmd_StrafeSetLeg(prog, pPlayer, side, 0.0f, BotCmd_Rand(prog.m_flStrafeWaitMin, prog.m_flStrafeWaitMax), BotCmd_StrafeRollCrouch(prog, 8));
 	}
 }
 
@@ -561,10 +581,12 @@ static void BotCmd_ProgramMove(CPlayer* pPlayer, BotProgram_s& prog, CUserCmd* c
 		if (gpGlobals->curTime >= prog.m_flLegEnd)
 			BotCmd_StrafePickLeg(pPlayer, prog);
 
-		// Full-deflection side input in the bot's own view frame, the way a
-		// keyboard player strafes; a partial stick makes the run blend stutter.
-		cmd->forwardmove = prog.m_flLegForward * BOTCMD_MAX_MOVE;
-		cmd->sidemove = static_cast<float>(prog.m_nLegSide) * BOTCMD_MAX_MOVE;
+		// Side input in the bot's own view frame, the way a keyboard player
+		// strafes. The speed multiplier scales the stick below 1.0 (a legend
+		// already runs at the cap, so above 1.0 it stays full deflection).
+		const float deflect = BOTCMD_MAX_MOVE * Clamp(prog.m_flStrafeSpeedMult, 0.25f, 1.0f);
+		cmd->forwardmove = prog.m_flLegForward * deflect;
+		cmd->sidemove = static_cast<float>(prog.m_nLegSide) * deflect;
 		if (prog.m_bLegCrouch)
 			cmd->buttons |= IN_DUCK;
 		break;
@@ -955,6 +977,21 @@ static SQRESULT Script_BotCmd_SetStrafeTiming(HSQUIRRELVM v)
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
+static SQRESULT Script_BotCmd_SetStrafeCrouch(HSQUIRRELVM v)
+{
+	BotCmdState_s* const st = BotCmd_ThisBot(v, nullptr);
+	SQInteger nMode = BOTCROUCH_BRAIN;
+	sq_getinteger(v, 2, &nMode);
+	if (st && st->m_nMode == BOTCMD_PROGRAM)
+	{
+		BotProgram_s& prog = st->m_Prog;
+		prog.m_nStrafeCrouch = Clamp(static_cast<int>(nMode), static_cast<int>(BOTCROUCH_BRAIN), static_cast<int>(BOTCROUCH_ON));
+		if (prog.m_nStrafeCrouch == BOTCROUCH_OFF)
+			prog.m_bLegCrouch = false;
+	}
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
 static SQRESULT Script_BotCmd_SetFireProfile(HSQUIRRELVM v)
 {
 	CPlayer* pPlayer = nullptr;
@@ -1092,6 +1129,8 @@ void BotCmd_RegisterPlayerFuncs(ScriptClassDescriptor_t* pPlayerStruct)
 		"Program: change the strafe tempo multiplier on a live strafer.", "void", "float speedMult", false, Script_BotCmd_SetStrafeSpeed);
 	pPlayerStruct->AddFunction("BotCmd_SetStrafeTiming", "Script_BotCmd_SetStrafeTiming",
 		"Program: seconds one strafe direction is held, random between min and max per leg.", "void", "float minSec, float maxSec", false, Script_BotCmd_SetStrafeTiming);
+	pPlayerStruct->AddFunction("BotCmd_SetStrafeCrouch", "Script_BotCmd_SetStrafeCrouch",
+		"Program: crouched strafe legs, 0 the brain's own mix, 1 never, 2 mixed into either brain.", "void", "int mode", false, Script_BotCmd_SetStrafeCrouch);
 	pPlayerStruct->AddFunction("BotCmd_SetFireProfile", "Script_BotCmd_SetFireProfile",
 		"Program: trigger cadence for the held weapon (0 hold, 1 tap per shot, 2 pull per burst), seconds between pulls, aim error cone in degrees.", "void",
 		"int mode, float shotInterval, float aimErrorDeg", false, Script_BotCmd_SetFireProfile);

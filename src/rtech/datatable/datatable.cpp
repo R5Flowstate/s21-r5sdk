@@ -8,6 +8,7 @@
 #include "tier1/cvar.h"
 #include "tier1/strtools.h"
 #include "filesystem/filesystem.h"
+#include "pluginsystem/modsystem.h"
 #include "datatable.h"
 #include <unordered_map>
 #include <vector>
@@ -102,7 +103,7 @@ static int Datatable_GetColumnTypeSize(int type)
 	}
 }
 
-static int Datatable_ParseColumnType(const char* typeName)
+static int Datatable_ParseColumnType(const char* typeName, const bool bAllowNumeric = true)
 {
 	if (!typeName)
 		return -1;
@@ -115,7 +116,7 @@ static int Datatable_ParseColumnType(const char* typeName)
 	if (_stricmp(typeName, "asset") == 0)            return DTCOL_ASSET;
 	if (_stricmp(typeName, "asset_noprecache") == 0) return DTCOL_ASSET_NOPRECACHE;
 
-	if (strlen(typeName) == 1 && typeName[0] >= '0' && typeName[0] <= '6')
+	if (bAllowNumeric && strlen(typeName) == 1 && typeName[0] >= '0' && typeName[0] <= '6')
 		return typeName[0] - '0';
 
 	return -1;
@@ -204,6 +205,22 @@ static void Datatable_TrimInPlace(std::string& s)
 		s.clear();
 	else
 		s = s.substr(start, end - start + 1);
+}
+
+//-----------------------------------------------------------------------------
+static bool Datatable_IsTypeLine(const std::vector<std::string>& cells, const int columnCount, const bool bAllowNumeric)
+{
+	if (static_cast<int>(cells.size()) != columnCount)
+		return false;
+
+	for (int i = 0; i < columnCount; i++)
+	{
+		std::string t = cells[static_cast<size_t>(i)];
+		Datatable_TrimInPlace(t);
+		if (Datatable_ParseColumnType(t.c_str(), bAllowNumeric) < 0)
+			return false;
+	}
+	return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -340,56 +357,27 @@ static DiskTableBlock* Datatable_ParseCSV(const char* csvPath, const char* asset
 	int dataEndLine = -1;
 	bool formatA = false;
 
-	// Format A: types on line 2
+	// Named type rows win over digit codes: an all-small-int data row ("0,1")
+	// otherwise parses as a digit type row on line 2.
+	const int lastIdx = static_cast<int>(lines.size()) - 1;
+	for (int pass = 0; pass < 2 && colTypeStrs.empty(); pass++)
 	{
+		const bool bAllowNumeric = (pass == 1);
+
+		// Format A: types on line 2
 		std::vector<std::string> candidate = Datatable_SplitCSVLine(lines[1].c_str());
-		bool allValid = (static_cast<int>(candidate.size()) == columnCount);
-
-		if (allValid)
-		{
-			for (int i = 0; i < columnCount; i++)
-			{
-				std::string t = candidate[static_cast<size_t>(i)];
-				Datatable_TrimInPlace(t);
-				if (Datatable_ParseColumnType(t.c_str()) < 0)
-				{
-					allValid = false;
-					break;
-				}
-			}
-		}
-
-		if (allValid)
+		if (Datatable_IsTypeLine(candidate, columnCount, bAllowNumeric))
 		{
 			colTypeStrs = std::move(candidate);
 			dataStartLine = 2;
 			dataEndLine = static_cast<int>(lines.size());
 			formatA = true;
-		}
-	}
-
-	// Format B: types on last line (only if A failed)
-	if (colTypeStrs.empty())
-	{
-		const int lastIdx = static_cast<int>(lines.size()) - 1;
-		std::vector<std::string> candidate = Datatable_SplitCSVLine(lines[static_cast<size_t>(lastIdx)].c_str());
-		bool allValid = (static_cast<int>(candidate.size()) == columnCount);
-
-		if (allValid)
-		{
-			for (int i = 0; i < columnCount; i++)
-			{
-				std::string t = candidate[static_cast<size_t>(i)];
-				Datatable_TrimInPlace(t);
-				if (Datatable_ParseColumnType(t.c_str()) < 0)
-				{
-					allValid = false;
-					break;
-				}
-			}
+			break;
 		}
 
-		if (allValid)
+		// Format B: types on last line
+		candidate = Datatable_SplitCSVLine(lines[static_cast<size_t>(lastIdx)].c_str());
+		if (Datatable_IsTypeLine(candidate, columnCount, bAllowNumeric))
 		{
 			colTypeStrs = std::move(candidate);
 			dataStartLine = 1;
@@ -810,6 +798,143 @@ static int Datatable_ScanDirectory(
 	return loaded;
 }
 
+// One root: CSVs at the top and one level of subdirectories.
+static int Datatable_ScanRoot(std::unordered_map<uint64_t, DiskTableBlock*>& next, const char* basePath)
+{
+	int loaded = Datatable_ScanDirectory(next, basePath, "");
+
+	char searchPath[DATATABLE_MAX_PATH_LEN * 2];
+	V_snprintf(searchPath, sizeof(searchPath), "%s*", basePath);
+
+	WIN32_FIND_DATAA fd;
+	const HANDLE hDir = FindFirstFileA(searchPath, &fd);
+	if (hDir == INVALID_HANDLE_VALUE)
+		return loaded;
+
+	do
+	{
+		if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+			continue;
+		if (!Datatable_IsSafeComponent(fd.cFileName))
+			continue;
+
+		loaded += Datatable_ScanDirectory(next, basePath, fd.cFileName);
+	}
+	while (FindNextFileA(hDir, &fd));
+
+	FindClose(hDir);
+	return loaded;
+}
+
+// asset "datatable/<x>.rpak" -> mod-relative "datatable/<x>.csv"
+static bool Datatable_ModOwnsAsset(const CModSystem::ModInstance_t* mod, const char* assetPath)
+{
+	char rel[DATATABLE_MAX_PATH_LEN];
+	V_strncpy(rel, assetPath, sizeof(rel));
+	const size_t len = strlen(rel);
+	if (len < 5 || _stricmp(rel + len - 5, ".rpak") != 0)
+		return false;
+
+	rel[len - 5] = '\0';
+	V_strncat(rel, ".csv", sizeof(rel) - strlen(rel) - 1);
+	return mod->OwnsPath(rel);
+}
+
+//-----------------------------------------------------------------------------
+// Mod tables merge under platform/datatable: the local folder wins, a mod only
+// supplies what it owns, and a stock table replaced by two mods is refused for
+// both rather than left to load order.
+//-----------------------------------------------------------------------------
+static int Datatable_MergeModTables(std::unordered_map<uint64_t, DiskTableBlock*>& next)
+{
+	if (!ModSystem()->IsEnabled())
+		return 0;
+
+	std::unordered_map<uint64_t, DiskTableBlock*> merged;
+	std::unordered_map<uint64_t, std::string> owner;
+	std::unordered_map<uint64_t, std::string> conflicts;
+
+	ModSystem()->LockModList();
+	FOR_EACH_VEC(ModSystem()->GetResolvedModList(), i)
+	{
+		const CModSystem::ModInstance_t* const mod = ModSystem()->GetResolvedModList()[i];
+		if (!mod || !mod->IsEnabled())
+			continue;
+
+		char root[DATATABLE_MAX_PATH_LEN];
+		if (V_snprintf(root, sizeof(root), "%sdatatable\\", mod->GetBasePath().String()) <= 0)
+			continue;
+		V_FixSlashes(root, '\\');
+
+		std::unordered_map<uint64_t, DiskTableBlock*> modNext;
+		Datatable_ScanRoot(modNext, root);
+
+		for (auto& pair : modNext)
+		{
+			DiskTableBlock* const block = pair.second;
+			const uint64_t guid = pair.first;
+
+			if (!Datatable_ModOwnsAsset(mod, block->assetPath))
+			{
+				Warning(eDLL_T::RTECH, "[DiskDatatable] Mod '%s' does not own '%s'; ignored\n",
+					mod->id.String(), block->assetPath);
+				Datatable_FreeBlock(block);
+				continue;
+			}
+
+			if (next.find(guid) != next.end())
+			{
+				Msg(eDLL_T::RTECH, "[DiskDatatable] '%s' from mod '%s' is overridden by platform/datatable\n",
+					block->assetPath, mod->id.String());
+				Datatable_FreeBlock(block);
+				continue;
+			}
+
+			const auto seen = owner.find(guid);
+			if (seen != owner.end())
+			{
+				conflicts.emplace(guid, seen->second + "' and '" + mod->id.String());
+				Datatable_FreeBlock(block);
+				continue;
+			}
+
+			owner.emplace(guid, mod->id.String());
+			merged.emplace(guid, block);
+		}
+	}
+	ModSystem()->UnlockModList();
+
+	for (const auto& conflict : conflicts)
+	{
+		const auto it = merged.find(conflict.first);
+		if (it == merged.end())
+			continue;
+
+		Error(eDLL_T::RTECH, NO_ERROR,
+			"[DiskDatatable] Mods '%s' both replace '%s'; neither is applied\n",
+			conflict.second.c_str(), it->second->assetPath);
+		Datatable_FreeBlock(it->second);
+		merged.erase(it);
+	}
+
+	int loaded = 0;
+	for (auto& pair : merged)
+	{
+		if (next.size() >= DATATABLE_MAX_DISK_ENTRIES)
+		{
+			Warning(eDLL_T::RTECH, "[DiskDatatable] Entry cap (%zu) reached, skipping mod table %s\n",
+				DATATABLE_MAX_DISK_ENTRIES, pair.second->assetPath);
+			Datatable_FreeBlock(pair.second);
+			continue;
+		}
+
+		next.emplace(pair.first, pair.second);
+		++loaded;
+	}
+
+	return loaded;
+}
+
 static void Datatable_LoadAllDiskFiles(void)
 {
 	std::unordered_map<uint64_t, DiskTableBlock*> next;
@@ -820,38 +945,14 @@ static void Datatable_LoadAllDiskFiles(void)
 		return;
 	}
 
-	int loaded = 0;
 	// Win32 against the process working directory, not IFileSystem: the S21
 	// client's filesystem vtable does not match this header's layout, and
 	// calling through it corrupts the caller's stack.
-	const char* basePath = s_datatableDiskBasePath;
-
-	loaded += Datatable_ScanDirectory(next, basePath, "");
-
-	// One level of subdirectories only
-	char searchPath[DATATABLE_MAX_PATH_LEN * 2];
-	V_snprintf(searchPath, sizeof(searchPath), "%s*", basePath);
-
-	WIN32_FIND_DATAA fd;
-	const HANDLE hDir = FindFirstFileA(searchPath, &fd);
-	if (hDir != INVALID_HANDLE_VALUE)
-	{
-		do
-		{
-			if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
-				continue;
-			if (!Datatable_IsSafeComponent(fd.cFileName))
-				continue;
-
-			loaded += Datatable_ScanDirectory(next, basePath, fd.cFileName);
-		}
-		while (FindNextFileA(hDir, &fd));
-
-		FindClose(hDir);
-	}
+	int loaded = Datatable_ScanRoot(next, s_datatableDiskBasePath);
+	const int loadedMods = Datatable_MergeModTables(next);
 
 	Datatable_Publish(std::move(next));
-	Msg(eDLL_T::RTECH, "[DiskDatatable] Loaded %d override(s)\n", loaded);
+	Msg(eDLL_T::RTECH, "[DiskDatatable] Loaded %d override(s), %d from mods\n", loaded + loadedMods, loadedMods);
 
 	{
 		WIN32_FIND_DATAA legacyFd;

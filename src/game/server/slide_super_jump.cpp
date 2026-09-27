@@ -4,7 +4,7 @@
 //
 // The S21 client's Jump grants a second jump when the player's settings carry
 // player_slideSuperJumpEnabled (the "boosted_slide_jump" mod): after a jump
-// taken from a slide, a jump press within 0.3s of leaving the ground adds
+// taken from a slide, a jump or dodge press within 0.3s of leaving the ground adds
 // up * sqrt(2 * gravity * slideSuperJumpHeight) once per slideSuperJumpCooldown.
 // The S3 Jump returns 0 for any airborne press, so the twin evaluates the same
 // gates around the native and applies the same impulse to the move velocity.
@@ -76,6 +76,8 @@ static char __fastcall Hook_CGameMovement_Jump(void* ctx)
 		st.m_bJumpedSinceGround = true;
 		st.m_bLastJumpFromSlide = bSliding;
 		st.m_flTimeLeftGround = flCurTime;
+		if (bridge_slide_super_jump_trace.GetBool())
+			Msg(eDLL_T::SERVER, "[SSJ] jump t=%.3f fromSlide=%d onGround=%d\n", flCurTime, bSliding ? 1 : 0, bOnGround ? 1 : 0);
 		return result;
 	}
 	if (bOnGround)
@@ -88,8 +90,10 @@ static char __fastcall Hook_CGameMovement_Jump(void* ctx)
 
 	if (!bridge_slide_super_jump.GetBool())
 		return result;
+	// Any press that enters Jump qualifies: with a separate movement-ability key the
+	// retail hint is "jump then dodge".
 	const uint32_t nPressed = *reinterpret_cast<const uint32_t*>(mv + SSJ_MV_OFF_BUTTONS_PRESSED);
-	if (!(nPressed & IN_JUMP))
+	if (!(nPressed & (IN_JUMP | IN_DODGE)))
 		return result;
 
 	const char* pszReject = nullptr;
@@ -106,7 +110,7 @@ static char __fastcall Hook_CGameMovement_Jump(void* ctx)
 	if (pszReject)
 	{
 		if (bridge_slide_super_jump_trace.GetBool())
-			DevMsg(eDLL_T::SERVER, "[SSJ] airborne jump press rejected: %s\n", pszReject);
+			Msg(eDLL_T::SERVER, "[SSJ] airborne jump press rejected: %s\n", pszReject);
 		return result;
 	}
 

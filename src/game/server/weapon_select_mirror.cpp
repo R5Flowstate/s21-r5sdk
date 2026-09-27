@@ -16,7 +16,6 @@
 #include "game/server/gameinterface.h"
 #include "engine/server/server.h"
 #include "engine/client/client.h"
-#include "game/server/jetdrive.h"
 #include "game/shared/sdk_entity_state.h"
 #include "game/shared/edict_dirty.h"
 #include "game/shared/weapon_enforce.h"
@@ -44,6 +43,7 @@ static ConVar bridge_weap_select_mirror_hold("bridge_weap_select_mirror_hold", "
 // activeWeapons +0x16CC + 4*slot. Do not use client-half offsets.
 static constexpr uintptr_t WEAPSEL_SELECTED_OFF     = 0x16D8; // m_selectedWeapons[2], int8 per active slot
 static constexpr uintptr_t WEAPSEL_ACTIVE_NATIVE    = 0x16CC; // server activeWeapons[3] (DT-visible), EHandle per slot
+static constexpr ptrdiff_t WEAPON_OFF_FIREMODE      = 0x2750; // CWeaponX fire mode; 1..5 = offhand
 static constexpr int8_t    WEAPSEL_SLOT_INVALID     = -1;     // WEAPON_INVENTORY_SLOT_INVALID
 
 // Pending reset entries: after the hold expires, put m_selectedWeapons back to
@@ -274,20 +274,14 @@ static __int64 __fastcall Hook_SetActiveWeapon(void* player, unsigned int slot, 
 				"[WeaponEnforce] blocked SetActiveWeapon slot=%u player=%p weapon=%p\n",
 				slot, player, reinterpret_cast<void*>(weaponEnt));
 		}
-		return 0;
-	}
 
-	if (player && weaponEnt
-		&& JetDrive_ShouldBlockSetActiveWeapon(player, reinterpret_cast<void*>(weaponEnt)))
-	{
-		static int s_nJdBlockLog = 8;
-		if (s_nJdBlockLog > 0)
-		{
-			--s_nJdBlockLog;
-			Warning(eDLL_T::SERVER,
-				"[JETDRIVE] blocked SetActiveWeapon slot=%u player=%p weapon=%p\n",
-				slot, player, reinterpret_cast<void*>(weaponEnt));
-		}
+		// A spent offhand switching back to a disabled weapon leaves the hand empty;
+		// keeping it raised lets it fire again (Skyward Dive relaunching).
+		const void* const pCur = oldActiveEH != 0xFFFFFFFFu
+			? SDKEntityState_Resolve(SDKEntityHandle(oldActiveEH), ESide::Server) : nullptr;
+		if (pCur && static_cast<unsigned int>(*reinterpret_cast<const int*>(
+			static_cast<const uint8_t*>(pCur) + WEAPON_OFF_FIREMODE) - 1) <= 4)
+			return v_SetActiveWeapon(player, slot, 0);
 		return 0;
 	}
 

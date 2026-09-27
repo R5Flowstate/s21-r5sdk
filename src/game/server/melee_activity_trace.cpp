@@ -16,6 +16,7 @@
 #include "tier1/cvar.h"
 #include "gameinterface.h"   // gpGlobals
 #include "melee_activity_trace.h"
+#include "weapon_custom_activity.h"
 
 static ConVar bridge_melee_trace("bridge_melee_trace", "0", FCVAR_DEVELOPMENTONLY,
 	"[MELEE-ACT] log custom-activity start/finish, PlayerMelee_EndAttack and "
@@ -42,12 +43,24 @@ static constexpr ptrdiff_t kPlayerLungeStartTime  = 28464;
 static constexpr ptrdiff_t kPlayerLungeEndTime    = 28468;
 static constexpr ptrdiff_t kPlayerLungeSmoothTime = 28480;
 
+// CBaseAnimating (server half).
+static constexpr ptrdiff_t kAnimSequence         = 0xFE0;
+static constexpr ptrdiff_t kAnimStartTime        = 0xFEC;
+static constexpr ptrdiff_t kAnimStartCycle       = 0xFF0;
+static constexpr ptrdiff_t kAnimPlaybackRate     = 0xFF4;
+
 // CGlobalVars: curtime and the clock the weapon code compares activity end
 // times against.
 static constexpr ptrdiff_t kGlobalsCurTime       = 0x10;
 static constexpr ptrdiff_t kGlobalsWeaponTime    = 0x28;
 
+// How long past the activity end the viewmodel wire stays traced.
+static constexpr float kVmTraceTail = 1.2f;
+
 static bool s_bFirstFire = true;
+static int s_nTracedVmEdict = -1;
+static float s_flTracedVmUntil = 0.f;
+static float s_flTracedVmRate = -1.f;
 
 static float MeleeTrace_Global(const ptrdiff_t off)
 {
@@ -101,16 +114,58 @@ void MeleeActivityTrace_OnStart(void* weapon, unsigned int activity, unsigned ch
 	const float flEnd = *reinterpret_cast<const float*>(pWeapon + kWeaponCustomEndTime);
 	const float flWt  = MeleeTrace_Global(kGlobalsWeaponTime);
 
+	const uintptr_t pVm = reinterpret_cast<uintptr_t>(WeaponCustomAct_GetViewmodel(weapon));
+	int vmEdict = -1, vmSeq = -1;
+	float vmStart = 0.f, vmStartCyc = 0.f, vmRate = 0.f;
+	if (pVm)
+	{
+		vmEdict    = *reinterpret_cast<const int16_t*>(pVm + kWeaponEdictIndex);
+		vmSeq      = *reinterpret_cast<const int*>(pVm + kAnimSequence);
+		vmStart    = *reinterpret_cast<const float*>(pVm + kAnimStartTime);
+		vmStartCyc = *reinterpret_cast<const float*>(pVm + kAnimStartCycle);
+		vmRate     = *reinterpret_cast<const float*>(pVm + kAnimPlaybackRate);
+		if (result)
+		{
+			s_nTracedVmEdict = vmEdict;
+			s_flTracedVmUntil = flEnd + kVmTraceTail;
+			s_flTracedVmRate = -1.f;
+		}
+	}
+
 	Warning(eDLL_T::SERVER,
 		"[MELEE-ACT] dedi START wpn=%d ok=%d act=%u flags=%02X seq=%d ideal=%d "
-		"end=%.4f dur=%.4f ct=%.4f wt=%.4f ready=%.4f ret=%llX\n",
+		"end=%.4f dur=%.4f ct=%.4f wt=%.4f ready=%.4f vm=%d vmSeq=%d vmStart=%.4f vmC0=%.4f "
+		"vmRate=%.4f seqDur=%.4f ret=%llX\n",
 		*reinterpret_cast<const int16_t*>(pWeapon + kWeaponEdictIndex), result, activity,
 		static_cast<unsigned>(flags),
 		*reinterpret_cast<const int*>(pWeapon + kWeaponCustomSequence),
 		*reinterpret_cast<const int*>(pWeapon + kWeaponIdealSequence),
 		flEnd, flEnd - flWt, MeleeTrace_Global(kGlobalsCurTime), flWt,
 		*reinterpret_cast<const float*>(pWeapon + kWeaponNextReadyTime),
+		vmEdict, vmSeq, vmStart, vmStartCyc, vmRate, (flEnd - flWt) * vmRate,
 		static_cast<unsigned long long>(MeleeTrace_Rva(pRet)));
+}
+
+void MeleeActivityTrace_OnAnchorEncode(const void* pEnt, const int objectID, const int seq,
+	const float nowT, const float qCyc, const float heldStart, const float heldCyc, const bool bLatched)
+{
+	if (!bridge_melee_trace.GetBool() || !pEnt || objectID != s_nTracedVmEdict)
+		return;
+	const float ct = MeleeTrace_Global(kGlobalsCurTime);
+	if (ct > s_flTracedVmUntil)
+	{
+		s_nTracedVmEdict = -1;
+		return;
+	}
+
+	const float rate = *reinterpret_cast<const float*>(reinterpret_cast<uintptr_t>(pEnt) + kAnimPlaybackRate);
+	if (!bLatched && rate == s_flTracedVmRate)
+		return;
+	s_flTracedVmRate = rate;
+
+	Warning(eDLL_T::SERVER,
+		"[MELEE-VM] dedi %s vm=%d ct=%.4f seq=%d live=(%.4f %.4f) held=(%.4f %.4f) rate=%.4f\n",
+		bLatched ? "LATCH" : "RATE", objectID, ct, seq, nowT, qCyc, heldStart, heldCyc, rate);
 }
 
 static int64_t Hook_OnCustomActivityFinished(void* weapon)

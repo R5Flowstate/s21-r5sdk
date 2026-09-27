@@ -28,6 +28,12 @@ public:
 
 	void LoadSections();
 
+	// Snapshot .text before the first detour or byte patch. Scans then match the
+	// original bytes and return live addresses, so a scan that runs after another
+	// module hooked its target (lazy resolve, map load) still resolves.
+	void CapturePristineCode(void);
+	const uint8_t* GetPristineView(const QWORD nAddress, const size_t nLen) const;
+
 	template<class PatternArray, class MaskArray>
 	CMemory FindPatternSIMD(const PatternArray& pattern, const MaskArray& mask, const ModuleSections_t* moduleSection = nullptr) const
 	{
@@ -87,11 +93,18 @@ public:
 private:
 	CMemory FindPatternSIMD(const uint8_t* pPattern, const char* szMask, const size_t nPatternLen,
 		const ModuleSections_t* moduleSection = nullptr, const size_t nOccurrence = 0) const;
+	CMemory ScanSIMD(const uint8_t* pData, const size_t nSize, const uint8_t* pPattern,
+		const char* pMask, const size_t nPatternLen, const size_t nOccurrence) const;
 
 	QWORD                m_pModuleBase;
 	DWORD                m_nModuleSize;
 	string               m_ModuleName;
 	ModuleSectionsMap_t  m_ModuleSections;
+
+	// Process-lifetime copy of .text; never freed so copies of this object stay valid.
+	const uint8_t*       m_pPristineText = nullptr;
+	QWORD                m_nPristineTextBase = 0;
+	size_t               m_nPristineTextSize = 0;
 };
 
 // Helper to turn "48 BC ??" into "\x48\xBC\x00", "xx?" at compile time while discarding

@@ -7,6 +7,7 @@
 
 
 #include "weapon_ammo_pool_mod.h"
+#include "akimbo.h"
 #include "game/shared/weapon_legendary_ext.h"
 #include "public/tier1/sdk_parse.h"
 
@@ -555,11 +556,35 @@ static void* __fastcall Hook_CWeaponX_PrecacheWeaponInfo(void* pWeaponX)
 	return result;
 }
 
+// m_modBitfieldCurrent; the recalc reads it as its mod set.
+static constexpr uintptr_t kWeaponModBitfieldCurrentOffset = 0x157C;
+
 static int64_t __fastcall Hook_CWeaponX_RecalcModdedSettings(void* pWeaponX)
 {
+	// S3's recalc has no disabled-mod mask; the akimbo optic mask is applied
+	// to the mod set for the duration of the call instead.
+	const uint32_t disabled = AkimboBridge_GetModBitfieldDisabled(pWeaponX);
+	uint32_t* const pCurrent = reinterpret_cast<uint32_t*>(
+		reinterpret_cast<uint8_t*>(pWeaponX) + kWeaponModBitfieldCurrentOffset);
+	const uint32_t current = *pCurrent;
+	const uint32_t masked = current & ~disabled;
+	if (masked != current)
+		*pCurrent = masked;
+
 	const int64_t result = v_CWeaponX_RecalcModdedSettings(pWeaponX);
+
+	if (masked != current && *pCurrent == masked)
+		*pCurrent = current;
+
 	WeaponAmmoPoolMod_Fixup(pWeaponX);
 	return result;
+}
+
+bool WeaponMods_Recalculate(void* pWeaponX)
+{
+	if (!pWeaponX || !v_CWeaponX_RecalcModdedSettings)
+		return false;
+	return Hook_CWeaponX_RecalcModdedSettings(pWeaponX) != 0;
 }
 
 //-----------------------------------------------------------------------------

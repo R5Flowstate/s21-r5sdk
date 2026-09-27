@@ -11,6 +11,7 @@
 #include "vscript/vscript.h"
 #include "game/shared/vscript_shared.h"
 #include "pluginsystem/modsystem.h"
+#include "vscript/script_wraps.h"
 #if !defined(CLIENT_DLL)
 #include "game/server/vscript_server.h" // Script_RegisterTraceLineEntitiesOnlyArity
 #include "game/shared/scriptremotefunctions_server.h"
@@ -74,6 +75,9 @@ static bool Script_WhenNodeMatches(const RSON::Node_t* const node, const SQCONTE
 		return Script_WhenExprMatches(node->value.GetString(), context);
 	if (node->type & RSON::RSON_ARRAY)
 	{
+		// A mixed-type array stores child nodes, not values; GetArrayValue would read node headers.
+		if (node->type != (RSON::RSON_ARRAY | RSON::RSON_STRING))
+			return false;
 		if (node->valueCount < 0 || node->valueCount > 32)
 			return false;
 		for (int i = 0; i < node->valueCount; ++i)
@@ -85,6 +89,111 @@ static bool Script_WhenNodeMatches(const RSON::Node_t* const node, const SQCONTE
 		return false;
 	}
 	return false;
+}
+
+// Grammar the native When evaluator compiles without failing: expr := unary (('&&'|'||') unary)*,
+// unary := '!'* (NAME | '(' expr ')'). Its failure path is unsafe, and unknown names fail.
+static bool Script_ModWhenParse(const char*& p, int depth);
+
+static void Script_ModWhenSkipSpace(const char*& p)
+{
+	while (*p == ' ' || *p == '\t')
+		++p;
+}
+
+static bool Script_ModWhenUnary(const char*& p, const int depth)
+{
+	static const char* const kNames[] = { "SERVER", "CLIENT", "UI", "SP", "MP", "DEV" };
+
+	Script_ModWhenSkipSpace(p);
+	while (*p == '!')
+	{
+		++p;
+		Script_ModWhenSkipSpace(p);
+	}
+
+	if (*p == '(')
+	{
+		++p;
+		if (!Script_ModWhenParse(p, depth + 1))
+			return false;
+		Script_ModWhenSkipSpace(p);
+		if (*p != ')')
+			return false;
+		++p;
+		return true;
+	}
+
+	const char* const start = p;
+	while ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '_')
+		++p;
+	const int n = static_cast<int>(p - start);
+	for (const char* const name : kNames)
+	{
+		if (static_cast<int>(strlen(name)) == n && !strncmp(start, name, n))
+			return true;
+	}
+	return false;
+}
+
+static bool Script_ModWhenParse(const char*& p, const int depth)
+{
+	if (depth > 8 || !Script_ModWhenUnary(p, depth))
+		return false;
+
+	for (;;)
+	{
+		Script_ModWhenSkipSpace(p);
+		if ((p[0] == '&' && p[1] == '&') || (p[0] == '|' && p[1] == '|'))
+		{
+			p += 2;
+			if (!Script_ModWhenUnary(p, depth))
+				return false;
+			continue;
+		}
+		return true;
+	}
+}
+
+static bool Script_ModWhenIsSafe(const char* const expr)
+{
+	if (!expr || strlen(expr) > 256)
+		return false;
+	const char* p = expr;
+	if (!Script_ModWhenParse(p, 0))
+		return false;
+	Script_ModWhenSkipSpace(p);
+	return *p == '\0';
+}
+
+// A mod compile list reaches the native parser, which reads arrays at string stride and
+// evaluates When itself: only plain strings / string arrays and a known When vocabulary pass.
+static bool Script_ModRsonIsSafe(const RSON::Node_t* const rson)
+{
+	if (!rson || !(rson->type & RSON::RSON_OBJECT))
+		return false;
+
+	int safety = 0;
+	for (RSON::Field_t* key = rson->GetFirstSubKey(); key != nullptr; key = key->GetNextKey())
+	{
+		if (++safety > 4096 || !key->name)
+			return false;
+
+		const bool bWhen = !_stricmp(key->name, "When");
+		if (!bWhen && _stricmp(key->name, "Scripts"))
+			continue;
+
+		const int type = key->node.type;
+		if (type == RSON::RSON_STRING)
+		{
+			if (bWhen && !Script_ModWhenIsSafe(key->node.value.GetString()))
+				return false;
+			continue;
+		}
+		if (bWhen || type != (RSON::RSON_ARRAY | RSON::RSON_STRING))
+			return false;
+	}
+	return true;
 }
 
 static int Script_CountRsonScripts(const RSON::Node_t* const rson, const SQCONTEXT context)
@@ -196,8 +305,9 @@ RSON::Node_t* Script_LoadScriptList(const SQChar* rsonfile)
 //---------------------------------------------------------------------------------
 SQBool Script_LoadScriptFile(CSquirrelVM* const s, const SQChar* path, const SQChar* name, SQInteger flags)
 {
-	///////////////////////////////////////////////////////////////////////////////
-	return v_Script_LoadScriptFile(s, path, name, flags);
+	const SQBool result = v_Script_LoadScriptFile(s, path, name, flags);
+	ScriptWraps_ReleaseSources();
+	return result;
 }
 
 //---------------------------------------------------------------------------------
@@ -249,6 +359,14 @@ static void Script_AppendModScriptList(const SQCONTEXT context, char** const scr
 
 		char* modScriptPaths[MAX_SCRIPT_FILES_TO_LOAD];
 		int modScriptCount = 0;
+
+		if (!Script_ModRsonIsSafe(modRson))
+		{
+			Warning(eDLL_T::ENGINE,
+				"[MOD-SCRIPT] '%s' compile list has a malformed Scripts/When entry (plain strings only; When uses SERVER CLIENT UI SP MP DEV with && || ! and parentheses) -- skipped\n",
+				mod->name.String());
+			continue;
+		}
 
 		const int listed = Script_CountRsonScripts(modRson, context);
 		if (listed > MAX_SCRIPT_FILES_TO_LOAD)
@@ -346,6 +464,7 @@ bool Script_ParseScriptList(SQCONTEXT context, const char* scriptListPath,
 	{
 		Script_AppendModScriptList(context, scriptArray, pScriptCount);
 		s_scriptModListAppended[(int)context] = true;
+		ScriptWraps_BeginContext((int)context);
 	}
 
 	// always returns true internally, and code never checks return value,
@@ -392,6 +511,7 @@ SQBool Script_PrecompileScripts(CSquirrelVM* vm)
 	}
 	}
 
+	ScriptWraps_EndContext((int)context);
 	s_scriptModPrecompileListDeferred[(int)context].Reset();
 	timer.End();
 

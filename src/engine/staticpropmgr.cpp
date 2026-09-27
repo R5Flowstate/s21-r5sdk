@@ -354,6 +354,11 @@ namespace
 	const Vector3D* g_pMainViewForward = nullptr;
 }
 
+CEngineTraceClient* EngineTrace_GetClient(void)
+{
+	return g_ppEngineTraceClient ? *g_ppEngineTraceClient : nullptr;
+}
+
 //-----------------------------------------------------------------------------
 // Print the static prop model name + id under the crosshair. Traces the render
 // view ray against the collision system (which, unlike mat_crosshair's world-

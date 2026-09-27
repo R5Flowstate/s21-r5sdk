@@ -203,14 +203,12 @@ void CRConServer::Shutdown(void)
 	}
 
 	const int nConnCount = m_Socket.GetAcceptedSocketCount();
-	m_Socket.CloseAllAcceptedSockets();
+	CloseAllSockets();
 
 	if (m_Socket.IsListening())
 	{
 		m_Socket.CloseListenSocket();
 	}
-
-	m_BannedList.clear();
 
 	Msg(eDLL_T::SERVER, "%s deinitialized (%i accepted sockets closed)\n",
 		sv_rcon_useloopbacksocket.GetBool() ? "Local console access" : "Remote server access",
@@ -322,7 +320,7 @@ bool CRConServer::SetPassword(const char* pszPassword)
 	const bool wasInitialized = m_bInitialized;
 
 	m_bInitialized = false;
-	m_Socket.CloseAllAcceptedSockets();
+	CloseAllSockets();
 
 	if (!RCONServer_DigestPassword(pszPassword, nLen, m_PasswordHash))
 	{
@@ -394,6 +392,13 @@ void CRConServer::RunFrame(void)
 		for (m_nConnIndex = nCount - 1; m_nConnIndex >= 0; m_nConnIndex--)
 		{
 			ConnectedNetConsoleData_s& data = m_Socket.GetAcceptedSocketData(m_nConnIndex);
+
+			if (!data.helloSent)
+			{
+				data.helloSent = true;
+				SendEncoded(data, "", 0, "", 0,
+					netcon::response_e::SERVERDATA_RESPONSE_AUTH, int(eDLL_T::NETCON));
+			}
 
 			if (CheckForBan(data))
 			{
@@ -576,6 +581,7 @@ void CRConServer::Authenticate(const netcon::request& request, ConnectedNetConso
 		++m_nAuthConnections;
 
 		const netadr_t& netAdr = m_Socket.GetAcceptedSocketAddress(m_nConnIndex);
+		m_FailedAuthByAdr.erase(netAdr.GetIP());
 		const bool bLoopback = NET_IsAddressLoopback(netAdr);
 		if (!bLoopback)
 		{
@@ -623,6 +629,13 @@ void CRConServer::Authenticate(const netcon::request& request, ConnectedNetConso
 		data.authorized = false;
 		data.validated = false;
 		data.numFailedAttempts++;
+
+		if (m_FailedAuthByAdr.size() >= RCON_MAX_BANNEDLIST_SIZE * 8)
+			m_FailedAuthByAdr.clear();
+
+		const int nTotalFails = ++m_FailedAuthByAdr[netAdr.GetIP()];
+		if (nTotalFails > data.numFailedAttempts)
+			data.numFailedAttempts = nTotalFails;
 	}
 }
 
@@ -754,9 +767,13 @@ bool CRConServer::CheckForBan(ConnectedNetConsoleData_s& data)
 		const char* pszWhiteListAddress = sv_rcon_whitelistaddress.GetString();
 		if (!pszWhiteListAddress[0])
 		{
-			// Deferred to the end of RunFrame: Shutdown() purges the accepted
-			// socket vector, and this call sits under a live data reference.
-			m_bPendingShutdown = true;
+			// Refuse rather than reset: a reset would forget every ban.
+			static bool s_bFullWarned = false;
+			if (!s_bFullWarned)
+			{
+				s_bFullWarned = true;
+				Warning(eDLL_T::SERVER, "[RCON] ban list full; refusing new connections (set sv_rcon_whitelistaddress)\n");
+			}
 
 			return true;
 		}
@@ -780,6 +797,12 @@ bool CRConServer::CheckForBan(ConnectedNetConsoleData_s& data)
 	{
 		return true;
 	}
+
+	// A fresh connection starts at zero; the per-address count is what stops
+	// a peer from reconnecting after every wrong password.
+	const auto failIt = m_FailedAuthByAdr.find(netAdr.GetIP());
+	if (failIt != m_FailedAuthByAdr.end() && failIt->second > data.numFailedAttempts)
+		data.numFailedAttempts = failIt->second;
 
 	// Check if netconsole has reached maximum number of attempts > add to banned list.
 	if (data.numFailedAttempts >= sv_rcon_maxfailures.GetInt()
@@ -805,6 +828,28 @@ bool CRConServer::CheckForBan(ConnectedNetConsoleData_s& data)
 	}
 
 	return false;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: closes every accepted connection; deferred while the frame walk
+//          holds references into the accepted-socket vector
+//-----------------------------------------------------------------------------
+void CRConServer::CloseAllSockets(void)
+{
+	m_nAuthConnections = 0;
+
+	if (!m_bInFrameWalk)
+	{
+		m_Socket.CloseAllAcceptedSockets();
+		return;
+	}
+
+	for (int i = m_Socket.GetAcceptedSocketCount() - 1; i >= 0; i--)
+	{
+		ConnectedNetConsoleData_s& data = m_Socket.GetAcceptedSocketData(i);
+		data.authorized = false;
+		DeferSocketClose(i);
+	}
 }
 
 //-----------------------------------------------------------------------------

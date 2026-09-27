@@ -46,6 +46,7 @@
 #include "game/server/skydive.h"
 #include "game/server/player_overheat.h"
 #include "game/server/translocation.h"
+#include "game/server/weapon_custom_activity.h"
 #include "game/server/headglitch_detect.h"
 #include "game/shared/status_effects_sdk.h"
 #include "game/shared/util_shared.h"
@@ -61,6 +62,7 @@
 #include "tier2/curlutils.h"
 #include "ebisusdk/EbisuSDK.h"
 #include "game/server/sound.h"
+#include "game/server/realm_adopt.h"
 #include "vscript/languages/squirrel_re/include/sqarray.h"
 
 #include <atomic>
@@ -515,6 +517,12 @@ static SQRESULT ServerScript_PlayerMeleeClearLungeTargetShim(HSQUIRRELVM v)
 		}
 	}
 
+	if (!ServerScript_EntityIsPlayer(pSubject))
+	{
+		Warning(eDLL_T::SERVER, "[LUNGE-CLR] subject %p is not a player -- clear skipped\n", pSubject);
+		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+	}
+
 	SQBool clearSelf = SQFalse;
 	if (SQ_FAILED(sq_getbool(v, 3, &clearSelf)))
 		clearSelf = SQFalse;
@@ -708,7 +716,33 @@ static void ServerScript_ResolveSafeSpotFns(void)
 	}
 }
 
-static bool ServerScript_EntityIsPlayer(void* pEntity)
+void ServerNatives_SetAbsOrigin(CBaseEntity* pEntity, const float xyz[3])
+{
+	if (!pEntity || !xyz)
+		return;
+
+	ServerScript_ResolveSafeSpotFns();
+	if (!v_CBaseEntity_SetAbsOrigin)
+	{
+		static bool s_bWarned = false;
+		if (!s_bWarned)
+		{
+			s_bWarned = true;
+			Warning(eDLL_T::SERVER, "[SAFESPOT] SetAbsOrigin unresolved -- ServerNatives_SetAbsOrigin no-op\n");
+		}
+		return;
+	}
+
+	v_CBaseEntity_SetAbsOrigin(pEntity, xyz);
+}
+
+bool ServerNatives_SetAbsOriginResolved(void)
+{
+	ServerScript_ResolveSafeSpotFns();
+	return v_CBaseEntity_SetAbsOrigin != nullptr;
+}
+
+bool ServerScript_EntityIsPlayer(void* pEntity)
 {
 	if (!pEntity)
 		return false;
@@ -993,7 +1027,8 @@ static SQRESULT ServerScript_EmitSoundOnEntityExceptToPlayers(HSQUIRRELVM v)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: realm-scoped world particle spawn. No realm filter; leave slot 4 unread.
+// Purpose: realm-scoped world particle spawn. Recipients are narrowed to the
+// players sharing a realm with the entity in slot 4.
 //-----------------------------------------------------------------------------
 static SQRESULT ServerScript_StartParticleEffectInWorldForRealmsShim(HSQUIRRELVM v)
 {
@@ -1011,7 +1046,11 @@ static SQRESULT ServerScript_StartParticleEffectInWorldForRealmsShim(HSQUIRRELVM
         SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
     }
 
+    // Mask 0 (no realms) would drop every recipient; treat it like no realm entity.
+    const uint64_t realms = RealmAdopt_GetRealmsBitMask(ServerScript_EntityPtrFromStackIdx(v, 5));
+    RealmAdopt_ArmTempEntRealms(realms);
     const SQRESULT result = v_Script_Server_StartParticleEffectInWorld(v);
+    RealmAdopt_ArmTempEntRealms(0);
     if (result == SQ_ERROR)
         return result;
 
@@ -1761,6 +1800,10 @@ static ConVar cafe_prefs_disk("cafe_prefs_disk", "1", FCVAR_RELEASE,
 	"Master gate for Cafe_PlayerPrefs disk I/O. 0 = read returns \"\", write is a no-op.");
 static ConVar cafe_prefs_allow_anon("cafe_prefs_allow_anon", "1", FCVAR_RELEASE,
 	"Allow offline players (platform uid 9990000) to use the hashed-name anon prefs bucket.");
+static ConVar sv_local_host_admin("sv_local_host_admin", "1", FCVAR_RELEASE,
+	"The player on the machine running this server (proven by its host key, not by address) is a server admin.");
+static ConVar cafe_prefs_trust_unverified("cafe_prefs_trust_unverified", "0", FCVAR_RELEASE,
+	"Let players without a verified identity (no join token, not loopback) use the prefs store. Their uid is whatever the client claimed; private LAN only.");
 static ConVar cafe_prefs_verbose("cafe_prefs_verbose", "0", FCVAR_DEVELOPMENTONLY,
 	"Log every successful Cafe_PlayerPrefs write (default logs only the first).");
 static ConVar fs_http_timeout("fs_http_timeout", "5", FCVAR_RELEASE,
@@ -1788,7 +1831,15 @@ static bool s_bFsHttpCapWarned = false;
 static std::atomic<bool> s_bFsHttpFirstOk{ false };
 
 static constexpr size_t kCafePrefsMaxPayload = 4096;
+static constexpr size_t kCafePrefsMaxLayoutPayload = 65536;
 static constexpr size_t kCafePrefsMaxKeyLen = 32;
+
+// Map editor layouts ("me_" keys) hold up to a player's whole prop budget.
+static size_t CafePrefs_MaxPayloadForKey(const char* pszSanitizedKey)
+{
+	return strncmp(pszSanitizedKey, "me_", 3) == 0
+		? kCafePrefsMaxLayoutPayload : kCafePrefsMaxPayload;
+}
 
 static bool CafePrefs_MkDir(const char* pszPath)
 {
@@ -1865,6 +1916,19 @@ static bool CafePrefs_ResolveDir(CPlayer* pPlayer, char* pszOut, size_t nOutLen)
 	if (!pClient)
 		return false;
 
+	// An unverified uid (auth off, or a skipped token) is client-chosen and
+	// would open another player's files.
+	if (!pClient->GetClientExtended()->IsIdentityVerified() && !cafe_prefs_trust_unverified.GetBool())
+	{
+		static bool s_bUnverifiedLogged = false;
+		if (!s_bUnverifiedLogged)
+		{
+			s_bUnverifiedLogged = true;
+			Warning(eDLL_T::SERVER, "[FR-PREFS] refused: client identity is not verified\n");
+		}
+		return false;
+	}
+
 	const uint64_t uid = static_cast<uint64_t>(pClient->GetPlatformUserId());
 	if (uid == 0)
 		return false;
@@ -1900,6 +1964,23 @@ static bool CafePrefs_ResolveDir(CPlayer* pPlayer, char* pszOut, size_t nOutLen)
 	return true;
 }
 
+// Windows opens these as devices whatever the extension ("NUL.txt" is NUL).
+static bool CafePrefs_IsReservedName(const char* pszKey)
+{
+	static const char* const s_ReservedNames[] = {
+		"CON", "PRN", "AUX", "NUL",
+		"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+	};
+	for (const char* const pszName : s_ReservedNames)
+	{
+		if (V_stricmp(pszKey, pszName) == 0)
+			return true;
+	}
+	return false;
+}
+
+// Rejects rather than rewrites: two keys must never map to one file.
 static bool CafePrefs_SanitizeKey(const char* pszKey, char* pszOut, size_t nOutLen)
 {
 	if (!pszKey || !pszKey[0] || !pszOut || nOutLen < 2)
@@ -1907,15 +1988,20 @@ static bool CafePrefs_SanitizeKey(const char* pszKey, char* pszOut, size_t nOutL
 
 	const size_t nMax = (nOutLen - 1) < kCafePrefsMaxKeyLen ? (nOutLen - 1) : kCafePrefsMaxKeyLen;
 	size_t nOut = 0;
-	for (const char* p = pszKey; *p && nOut < nMax; ++p)
+	for (const char* p = pszKey; *p; ++p)
 	{
+		if (nOut >= nMax)
+			return false;
+
 		const unsigned char c = static_cast<unsigned char>(*p);
 		const bool bOk = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
 			|| (c >= '0' && c <= '9') || c == '_' || c == '-';
-		pszOut[nOut++] = bOk ? static_cast<char>(c) : '_';
+		if (!bOk)
+			return false;
+		pszOut[nOut++] = static_cast<char>(c);
 	}
 	pszOut[nOut] = '\0';
-	return nOut > 0;
+	return nOut > 0 && !CafePrefs_IsReservedName(pszOut);
 }
 
 static SQRESULT ServerScript_CafePlayerPrefs_Write(HSQUIRRELVM v)
@@ -1947,21 +2033,6 @@ static SQRESULT ServerScript_CafePlayerPrefs_Write(HSQUIRRELVM v)
 		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 	}
 
-	const size_t nPayloadLen = strlen(pszPayload);
-	if (nPayloadLen > kCafePrefsMaxPayload)
-	{
-		static bool s_bPayloadTooLongLogged = false;
-		if (!s_bPayloadTooLongLogged)
-		{
-			s_bPayloadTooLongLogged = true;
-			Warning(eDLL_T::SERVER,
-				"[FR-PREFS] write rejected: payload longer than %zu bytes\n",
-				kCafePrefsMaxPayload);
-		}
-		sq_pushbool(v, false);
-		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
-	}
-
 	char szKey[kCafePrefsMaxKeyLen + 1];
 	if (!CafePrefs_SanitizeKey(pszKey, szKey, sizeof(szKey)))
 	{
@@ -1970,6 +2041,22 @@ static SQRESULT ServerScript_CafePlayerPrefs_Write(HSQUIRRELVM v)
 		{
 			s_bBadKeyLogged = true;
 			Warning(eDLL_T::SERVER, "[FR-PREFS] write rejected: empty or invalid key\n");
+		}
+		sq_pushbool(v, false);
+		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+	}
+
+	const size_t nMaxPayload = CafePrefs_MaxPayloadForKey(szKey);
+	const size_t nPayloadLen = strnlen(pszPayload, nMaxPayload + 1);
+	if (nPayloadLen > nMaxPayload)
+	{
+		static bool s_bPayloadTooLongLogged = false;
+		if (!s_bPayloadTooLongLogged)
+		{
+			s_bPayloadTooLongLogged = true;
+			Warning(eDLL_T::SERVER,
+				"[FR-PREFS] write rejected: payload longer than %zu bytes (key=%s)\n",
+				nMaxPayload, szKey);
 		}
 		sq_pushbool(v, false);
 		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
@@ -2055,6 +2142,41 @@ static SQRESULT ServerScript_CafePlayerPrefs_Write(HSQUIRRELVM v)
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
+static SQRESULT ServerScript_CafeIsIdentityVerified(HSQUIRRELVM v)
+{
+	CPlayer* pPlayer = nullptr;
+	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pPlayer)))
+		return SQ_ERROR;
+
+	bool bVerified = false;
+	if (pPlayer && g_pServer)
+	{
+		CClient* const pClient = g_pServer->GetClient(pPlayer->GetEdict() - 1);
+		bVerified = pClient && pClient->GetClientExtended()->IsIdentityVerified();
+	}
+
+	sq_pushbool(v, bVerified);
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+// True for the player on this server's own machine while sv_local_host_admin is on.
+static SQRESULT ServerScript_CafeIsLocalHostAdmin(HSQUIRRELVM v)
+{
+	CPlayer* pPlayer = nullptr;
+	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pPlayer)))
+		return SQ_ERROR;
+
+	bool bHost = false;
+	if (sv_local_host_admin.GetBool() && pPlayer && g_pServer)
+	{
+		CClient* const pClient = g_pServer->GetClient(pPlayer->GetEdict() - 1);
+		bHost = pClient && pClient->GetClientExtended()->IsLocalHost();
+	}
+
+	sq_pushbool(v, bHost);
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
 static SQRESULT ServerScript_CafePlayerPrefs_Read(HSQUIRRELVM v)
 {
 	CPlayer* pPlayer = nullptr;
@@ -2108,7 +2230,8 @@ static SQRESULT ServerScript_CafePlayerPrefs_Read(HSQUIRRELVM v)
 		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 	}
 
-	if (static_cast<size_t>(nSize) > kCafePrefsMaxPayload)
+	const size_t nMaxPayload = CafePrefs_MaxPayloadForKey(szKey);
+	if (static_cast<size_t>(nSize) > nMaxPayload)
 	{
 		static bool s_bCorruptLogged = false;
 		if (!s_bCorruptLogged)
@@ -2116,7 +2239,7 @@ static SQRESULT ServerScript_CafePlayerPrefs_Read(HSQUIRRELVM v)
 			s_bCorruptLogged = true;
 			Warning(eDLL_T::SERVER,
 				"[FR-PREFS] load treated as corrupt (>%zu bytes): '%s'\n",
-				kCafePrefsMaxPayload, szPath);
+				nMaxPayload, szPath);
 		}
 		sq_pushstring(v, "", -1);
 		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
@@ -2178,8 +2301,17 @@ static bool FsHttp_UrlOk(const char* pszUrl)
 			return false;
 	}
 
+	// The request carries the host key, so it may only go to the stats host.
 	if (V_strnicmp(pszUrl, "https://", 8) == 0)
-		return true;
+	{
+		static const char s_szStatsHost[] = "play.r5flowstate.org";
+		const size_t nStatsHost = sizeof(s_szStatsHost) - 1;
+		const char* const pszHttpsHost = pszUrl + 8;
+		if (V_strnicmp(pszHttpsHost, s_szStatsHost, nStatsHost) != 0)
+			return false;
+		const char cAfter = pszHttpsHost[nStatsHost];
+		return cAfter == '\0' || cAfter == '/' || cAfter == ':' || cAfter == '?' || cAfter == '#';
+	}
 
 	if (V_strnicmp(pszUrl, "http://", 7) != 0)
 		return false;
@@ -2312,6 +2444,21 @@ SQRESULT ServerScript_FS_StatsIngest(HSQUIRRELVM v)
 
 	const char* pszUrl = fs_stats_url.GetString();
 	const char* pszKey = fs_stats_host_key.GetString();
+
+	// Without online auth every uid in the body is client-chosen.
+	static ConVar* const s_pAuthEnable = g_pCVar ? g_pCVar->FindVar("sv_onlineAuthEnable") : nullptr;
+	static ConVar* const s_pAuthMode = g_pCVar ? g_pCVar->FindVar("sv_onlineAuthMode") : nullptr;
+	if (!s_pAuthEnable || !s_pAuthEnable->GetBool() || !s_pAuthMode || s_pAuthMode->GetInt() != 1)
+	{
+		static bool s_bNoAuthLogged = false;
+		if (!s_bNoAuthLogged)
+		{
+			s_bNoAuthLogged = true;
+			Warning(eDLL_T::SERVER, "[FS-HTTP] stats ingest off: needs sv_onlineAuthEnable 1 and sv_onlineAuthMode 1\n");
+		}
+		sq_pushbool(v, false);
+		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+	}
 
 	if (!pszBody || !pszUrl || !pszUrl[0] || !pszKey || !pszKey[0]
 		|| !FsHttp_UrlOk(pszUrl)
@@ -2600,6 +2747,7 @@ void Script_RegisterDedicatedS21ServerNatives(CSquirrelVM* s)
         ServerScript_EmitSoundOnEntityExceptToPlayers);
 
 	Translocation_RegisterFreeFuncs(s);
+	WeaponCustomAct_RegisterConstants(s);
 
 	Script_RegisterFuncNamed(s, "HeadGlitch_GetScore",
 		"Script_HeadGlitch_GetScore",
@@ -2909,6 +3057,22 @@ void Script_RegisterDedicatedPlayerNatives(ScriptClassDescriptor_t* playerStruct
         "string key",
         false,
         ServerScript_CafePlayerPrefs_Read);
+
+    playerStruct->AddFunction("Cafe_IsIdentityVerified",
+        "ScriptCafeIsIdentityVerified",
+        "True when this player's uid and name are proven (verified join token, or the loopback host)",
+        "bool",
+        "",
+        false,
+        ServerScript_CafeIsIdentityVerified);
+
+    playerStruct->AddFunction("Cafe_IsLocalHostAdmin",
+        "ScriptCafeIsLocalHostAdmin",
+        "True for the player playing on the machine that runs the server (sv_local_host_admin)",
+        "bool",
+        "",
+        false,
+        ServerScript_CafeIsLocalHostAdmin);
 
     playerStruct->AddFunction(
         "SetShadowShieldIsActive",

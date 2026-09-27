@@ -36,44 +36,31 @@ static ConVar sv_scriptremote_c2s_error_kick("sv_scriptremote_c2s_error_kick", "
 
 struct ScriptRemoteC2SRateSlot_t
 {
-	uint64_t uKey;
-	bool bUsed;
+	int nUserID;
 	double flWindowStart;
 	int nCount;
 	int nErrors;
 };
 
-// Loopback clients share id64 0; salt their ephemeral UserID into a stable key.
-static constexpr uint64_t kScriptRemoteC2SLoopbackSalt = 0x9E3779B97F4A7C15ULL;
+// One slot per client handle; a new UserID in the slot is a new connection and starts clean.
+static ScriptRemoteC2SRateSlot_t s_scriptRemoteC2SRate[MAX_PLAYERS + 1];
 
-static ScriptRemoteC2SRateSlot_t s_scriptRemoteC2SRate[256];
-
-static uint64_t ScriptRemoteC2S_RateKey(CClient* pClient)
-{
-	const PlatformUserId_t uId64 = pClient->GetPlatformUserId();
-	if (uId64 != 0)
-		return static_cast<uint64_t>(uId64);
-	return (kScriptRemoteC2SLoopbackSalt ^ static_cast<uint64_t>(pClient->GetUserID()));
-}
-
-// Open-address linear probe; -1 when full (caller fails open, never kicks).
 static int ScriptRemoteC2S_RateSlot(CClient* pClient)
 {
-	const uint64_t uKey = ScriptRemoteC2S_RateKey(pClient);
-	int nSlot = static_cast<int>(uKey & 255);
-	int safety = 0;
-	while (safety++ < 256)
+	const int nSlot = static_cast<int>(pClient->GetHandle());
+	if (nSlot < 0 || nSlot >= static_cast<int>(ARRAYSIZE(s_scriptRemoteC2SRate)))
+		return -1;
+
+	ScriptRemoteC2SRateSlot_t& slot = s_scriptRemoteC2SRate[nSlot];
+	const int nUserID = pClient->GetUserID();
+	if (slot.nUserID != nUserID)
 	{
-		ScriptRemoteC2SRateSlot_t& slot = s_scriptRemoteC2SRate[nSlot];
-		if (!slot.bUsed || slot.uKey == uKey)
-		{
-			slot.bUsed = true;
-			slot.uKey = uKey;
-			return nSlot;
-		}
-		nSlot = (nSlot + 1) & 255;
+		slot.nUserID = nUserID;
+		slot.flWindowStart = 0.0;
+		slot.nCount = 0;
+		slot.nErrors = 0;
 	}
-	return -1;
+	return nSlot;
 }
 
 // Returns false if this call should be dropped (and kick already issued if configured).
@@ -92,11 +79,9 @@ static bool ScriptRemoteC2S_CheckRate(CClient* pClient)
 	const int nSlot = ScriptRemoteC2S_RateSlot(pClient);
 	if (nSlot < 0)
 	{
-		static volatile LONG s_nRateFullLog = 0;
-		if (InterlockedIncrement(&s_nRateFullLog) <= 8)
-			Warning(eDLL_T::SERVER, "[C2S-SR] rate table full -- fail-open call (client #%d)\n",
-				pClient->GetUserID());
-		return true;
+		Warning(eDLL_T::SERVER, "[C2S-SR] client #%d has no rate slot -- dropping call\n",
+			pClient->GetUserID());
+		return false;
 	}
 	ScriptRemoteC2SRateSlot_t& slot = s_scriptRemoteC2SRate[nSlot];
 	const double flNow = Plat_FloatTime();
@@ -130,13 +115,7 @@ static bool ScriptRemoteC2S_NoteScriptError(CClient* pClient)
 
 	const int nSlot = ScriptRemoteC2S_RateSlot(pClient);
 	if (nSlot < 0)
-	{
-		static volatile LONG s_nErrFullLog = 0;
-		if (InterlockedIncrement(&s_nErrFullLog) <= 8)
-			Warning(eDLL_T::SERVER, "[C2S-SR] rate table full -- fail-open error note (client #%d)\n",
-				pClient->GetUserID());
 		return false;
-	}
 	ScriptRemoteC2SRateSlot_t& slot = s_scriptRemoteC2SRate[nSlot];
 	const double flNow = Plat_FloatTime();
 	double flWindow = static_cast<double>(sv_scriptremote_c2s_rate_window.GetFloat());

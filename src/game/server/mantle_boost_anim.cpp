@@ -1,6 +1,7 @@
 //=============================================================================//
 //
-// Purpose: ACT_MP_MANTLE_BOOST_AIR selection in CMultiPlayerAnimState.
+// Purpose: ACT_MP_MANTLE_BOOST_AIR and armored leap activity selection in
+// CMultiPlayerAnimState.
 //
 // The activity chain in CalcMainActivity predates mantle boost, so the check
 // is grafted at the point later builds evaluate it: after the skydive states
@@ -14,6 +15,7 @@
 #include "game/server/player.h"
 #include "game/server/mantle_boost.h"
 #include "game/server/mantle_boost_anim.h"
+#include "game/server/armored_leap.h"
 #include "game/shared/activity.h"
 #include "game/shared/midfunc_jump_patch.h"
 
@@ -48,12 +50,20 @@ static int MantleBoostAnim_ActivityId(void)
 
 static int __fastcall MantleBoostAnim_Select(void* const pAnimState)
 {
-	if (!bridge_mantle_boost_air_anim.GetBool() || !pAnimState || !CMultiPlayerAnimState__IsOnGround)
+	if (!pAnimState || !CMultiPlayerAnimState__IsOnGround)
 		return -1;
 
 	const CPlayer* const pPlayer = *reinterpret_cast<const CPlayer* const*>(
 		reinterpret_cast<uintptr_t>(pAnimState) + ANIMSTATE_OFF_PLAYER);
 	if (!pPlayer)
+		return -1;
+
+	// The armored leap states sit directly ahead of the boost-air check.
+	const int nLeapActivity = ArmoredLeap_AnimActivity(pPlayer);
+	if (nLeapActivity >= 0)
+		return nLeapActivity;
+
+	if (!bridge_mantle_boost_air_anim.GetBool())
 		return -1;
 
 	if (MantleBoost_GetState(pPlayer) != 4 || CMultiPlayerAnimState__IsOnGround(pAnimState))

@@ -28,6 +28,7 @@
 #include "engine/client/bridge_join_auth.h"
 #include "engine/client/net_bridge_skip.h"
 #include "tier1/strtools.h"
+#include "tier0/commandline.h"
 
 //------------------------------------------------------------------------------
 // Purpose: console command callbacks
@@ -35,30 +36,48 @@
 static std::string SanitizePersonaName(const std::string& name); // forward
 static void CL_MaskBadWords(std::string& name); // forward
 
+// Offline persona: applied locally, sent to the server with the next connect.
+static bool CL_SetOfflinePersona(const char* pszName)
+{
+    if (!IsOriginDisabled() || !g_PersonaName)
+        return false;
+
+    std::string sanitized = SanitizePersonaName(pszName ? pszName : "");
+    CL_MaskBadWords(sanitized);
+    if (sanitized.empty())
+        sanitized = "unnamed";
+
+    strncpy(g_PersonaName, sanitized.c_str(), MAX_PERSONA_NAME_LEN - 1);
+    g_PersonaName[MAX_PERSONA_NAME_LEN - 1] = '\0';
+    if (name_cvar)
+        name_cvar->SetValue(g_PersonaName);
+    return true;
+}
+
 static void SetName_f(const CCommand& args)
 {
     if (args.ArgC() < 2)
         return;
 
     if (!IsOriginDisabled())
+    {
+        Warning(eDLL_T::CLIENT, "cl_setname: only available when playing offline\n");
         return;
+    }
 
-    const char* pszName = args.Arg(1);
+    if (CL_SetOfflinePersona(args.ArgS()))
+        Msg(eDLL_T::CLIENT, "cl_setname: name is now '%s'; it is sent on the next connect ('reconnect' applies it now)\n", g_PersonaName);
+}
 
-    if (!pszName[0])
-        pszName = "unnamed";
-
-    // Sanitize to allowed ASCII set before applying
-    std::string sanitized = SanitizePersonaName(pszName);
-    // Mask bad words locally
-    CL_MaskBadWords(sanitized);
-    if (sanitized.empty())
-        sanitized = "_";
-
-    // Update offline persona name.
-    strncpy(g_PersonaName, sanitized.c_str(), MAX_PERSONA_NAME_LEN - 1);
-    g_PersonaName[MAX_PERSONA_NAME_LEN - 1] = '\0';
-    name_cvar->SetValue(g_PersonaName);
+// Runs after system/offline_client.cfg, which resets the name to its default.
+static void ApplyOfflineName_f(const CCommand& args)
+{
+    NOTE_UNUSED(args);
+    const char* pszName = nullptr;
+    if (!CommandLine()->CheckParm("-offlinename", &pszName) || !pszName || !pszName[0])
+        return;
+    if (CL_SetOfflinePersona(pszName))
+        Msg(eDLL_T::CLIENT, "[EbisuSDK] offline name '%s'\n", g_PersonaName);
 }
 static void Reconnect_f(const CCommand& args)
 {
@@ -70,7 +89,9 @@ static void Reconnect_f(const CCommand& args)
 //------------------------------------------------------------------------------
 // Purpose: console commands
 //------------------------------------------------------------------------------
-static ConCommand cl_setname("cl_setname", SetName_f, "Sets the client's persona name", FCVAR_RELEASE);
+static ConCommand cl_setname("cl_setname", SetName_f, "Sets the client's persona name (offline only)", FCVAR_RELEASE);
+static ConCommand cl_apply_offline_name("_cl_apply_offline_name", ApplyOfflineName_f,
+    "Applies the -offlinename launch parameter.", FCVAR_RELEASE | FCVAR_HIDDEN | FCVAR_DONTRECORD);
 static ConCommand reconnect("reconnect", Reconnect_f, "Reconnect to current server.", FCVAR_DONTRECORD|FCVAR_RELEASE);
 
 //------------------------------------------------------------------------------
@@ -617,7 +638,7 @@ static void CL_MaskBadWords(std::string& name)
         {
             for (size_t k = 0; k < bad.size() && (pos + k) < name.size(); ++k)
             {
-                name[pos + k] = '*';
+                name[pos + k] = '_'; // the server rejects '*' in a name
                 lower[pos + k] = '*';
             }
             pos += bad.size();
@@ -626,29 +647,29 @@ static void CL_MaskBadWords(std::string& name)
 }
 
 //------------------------------------------------------------------------------
-// Purpose: Sanitize persona name to printable ASCII
+// Purpose: reduce a persona name to what the server accepts on connect
+//          (IsValidPersonaName: A-Z a-z 0-9 - _); spaces become '_'
 //------------------------------------------------------------------------------
+static constexpr size_t PERSONA_NAME_WIRE_MAX = 32; // server sv_maxPersonaNameLength default
+
 std::string SanitizePersonaName(const std::string& name)
 {
     std::string sanitized;
     sanitized.reserve(name.length());
 
-    auto isAllowed = [](unsigned char ch) -> bool { return ch >= 32 && ch <= 126; };
-
-    for (unsigned char c : name)
+    for (const unsigned char c : name)
     {
-        if (isAllowed(c))
-        {
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_')
             sanitized += static_cast<char>(c);
-        }
-        // else: drop disallowed char
+        else if (c == ' ' && !sanitized.empty() && sanitized.back() != '_')
+            sanitized += '_';
     }
 
-    // Trim to engine max (leave room for terminator in caller)
-    if (sanitized.length() >= (size_t)MAX_PERSONA_NAME_LEN)
-    {
-        sanitized.resize(MAX_PERSONA_NAME_LEN - 1);
-    }
+    while (!sanitized.empty() && sanitized.back() == '_')
+        sanitized.pop_back();
+
+    if (sanitized.length() > PERSONA_NAME_WIRE_MAX)
+        sanitized.resize(PERSONA_NAME_WIRE_MAX);
 
     return sanitized;
 }
@@ -1122,7 +1143,7 @@ static bool S21_StringCmdNameDenied(const char* pszName)
 	static const char* const kDeny[] = {
 		"script", "script_client", "script_ui",
 		"bind", "unbind", "unbindall",
-		"exec", "alias", "quit",
+		"exec", "execifexists", "alias", "quit",
 		"_setClassVarClient",
 		"rcon", "cl_rcon_address", "cl_rcon_inputonly",
 		"platform_user_id",
@@ -1132,10 +1153,18 @@ static bool S21_StringCmdNameDenied(const char* pszName)
 		"language", "bridge_ui_language", "localize_ui_reset",
 		"localize_disk", "localize_disk_strict", "localize_retire_poison",
 		"bridge_pose_param_ext", "bridge_pose_moveyaw",
+		"playlist_reload", "datatable_reload", "modsystem_reload",
+		"modsystem_enable",
+		// These write files at a name the sender picks.
+		"con_logfile", "record", "demo_record",
 	};
 
 	if (!pszName || !pszName[0])
 		return false;
+
+	// Replay commands and their archived prune caps are the player's own.
+	if (V_strnicmp(pszName, "demo_", 5) == 0)
+		return true;
 
 	for (size_t i = 0; i < ARRAYSIZE(kDeny); ++i)
 	{
@@ -1198,9 +1227,40 @@ static bool Hook_S21ProcessStringCmd(void* pCl, void* pMsg)
 	return v_S21ProcessStringCmd(pCl, pMsg);
 }
 
+// The stock handler sets any convar the server names; only replicated ones are the server's to set.
+static bool (*v_S21ProcessSetConVar)(void* pCl, void* pMsg) = nullptr;
+
+// NET_SetConVar entries: char name[260] then char value[2048].
+static constexpr size_t S21_SETCONVAR_ENTRY_SIZE = 2308;
+static constexpr size_t S21_SETCONVAR_NAME_SIZE = 260;
+
+static bool Hook_S21ProcessSetConVar(void* pCl, void* pMsg)
+{
+	if (pMsg && g_pCVar)
+	{
+		char* const pEntries = *reinterpret_cast<char**>(static_cast<char*>(pMsg) + 0x20);
+		const uint32_t nCount = *reinterpret_cast<uint32_t*>(static_cast<char*>(pMsg) + 0x28);
+
+		for (uint32_t i = 0; pEntries && i < nCount; ++i)
+		{
+			char* const pszName = pEntries + size_t(i) * S21_SETCONVAR_ENTRY_SIZE;
+			pszName[S21_SETCONVAR_NAME_SIZE - 1] = '\0';
+
+			const ConVar* const pVar = g_pCVar->FindVar(pszName);
+			if (!pVar || (pVar->GetFlags() & FCVAR_REPLICATED))
+				continue;
+
+			Warning(eDLL_T::CLIENT, "[SEC][SETCONVAR] drop S2C '%s'\n", pszName);
+			pszName[0] = '\0';
+		}
+	}
+	return v_S21ProcessSetConVar(pCl, pMsg);
+}
+
 void VClientStringCmdRestrict::GetAdr(void) const
 {
 	LogFunAdr("CClientState::ProcessStringCmd", v_S21ProcessStringCmd);
+	LogFunAdr("CClientState::ProcessSetConVar", v_S21ProcessSetConVar);
 }
 
 void VClientStringCmdRestrict::GetFun(void) const
@@ -1210,12 +1270,20 @@ void VClientStringCmdRestrict::GetFun(void) const
 		.GetPtr(v_S21ProcessStringCmd);
 	if (!v_S21ProcessStringCmd)
 		Warning(eDLL_T::CLIENT, "[SEC][STRCMD] ProcessStringCmd pattern unresolved\n");
+
+	Module_FindPattern(g_GameDll,
+		"40 57 48 83 EC 30 83 B9 9C 00 00 00 02 48 8B FA 7D 08 32 C0 48 83 C4 30 5F C3 48 8B 41 50 83 B8 D8 32 00 00 01")
+		.GetPtr(v_S21ProcessSetConVar);
+	if (!v_S21ProcessSetConVar)
+		Warning(eDLL_T::CLIENT, "[SEC][SETCONVAR] ProcessSetConVar pattern unresolved\n");
 }
 
 void VClientStringCmdRestrict::Detour(const bool bAttach) const
 {
 	if (v_S21ProcessStringCmd)
 		DetourSetup(&v_S21ProcessStringCmd, &Hook_S21ProcessStringCmd, bAttach);
+	if (v_S21ProcessSetConVar)
+		DetourSetup(&v_S21ProcessSetConVar, &Hook_S21ProcessSetConVar, bAttach);
 }
 
 /////////////////////////////////////////////////////////////////////////////////

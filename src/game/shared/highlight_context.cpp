@@ -271,12 +271,12 @@ static int FindOrCreateContext(const char* name)
 	return id;
 }
 
-static bool IsValidContext(int id)
+static bool IsValidContext(const int64_t id)
 {
 	return id >= 0 && id < MAX_HIGHLIGHT_CONTEXTS && s_contexts[id].registered;
 }
 
-static bool IsVirtualContext(int id)
+static bool IsVirtualContext(const int64_t id)
 {
 	return id > 7 && id < MAX_HIGHLIGHT_CONTEXTS;
 }
@@ -388,7 +388,7 @@ SQRESULT Script_HighlightContext_SetParam(HSQUIRRELVM v)
 	const SQVector3D* vec = nullptr;
 	sq_getvector(v, 4, &vec);
 
-	if (IsValidContext(static_cast<int>(contextId)) && paramIdx >= 0 && paramIdx < MAX_HIGHLIGHT_PARAMS && vec)
+	if (IsValidContext(contextId) && paramIdx >= 0 && paramIdx < MAX_HIGHLIGHT_PARAMS && vec)
 	{
 		s_contexts[contextId].params[paramIdx][0] = vec->x;
 		s_contexts[contextId].params[paramIdx][1] = vec->y;
@@ -405,7 +405,7 @@ SQRESULT Script_HighlightContext_GetParam(HSQUIRRELVM v)
 	sq_getinteger(v, 3, &paramIdx);
 
 	float x = 0.0f, y = 0.0f, z = 0.0f;
-	if (IsValidContext(static_cast<int>(contextId)) && paramIdx >= 0 && paramIdx < MAX_HIGHLIGHT_PARAMS)
+	if (IsValidContext(contextId) && paramIdx >= 0 && paramIdx < MAX_HIGHLIGHT_PARAMS)
 	{
 		x = s_contexts[contextId].params[paramIdx][0];
 		y = s_contexts[contextId].params[paramIdx][1];
@@ -423,7 +423,7 @@ SQRESULT Script_HighlightContext_SetDrawFunc(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 	sq_getinteger(v, 3, &drawFunc);
 
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 		s_contexts[contextId].drawFunc = static_cast<int>(drawFunc);
 
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
@@ -435,7 +435,7 @@ SQRESULT Script_HighlightContext_GetDrawFunc(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 
 	int result = 0;
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 		result = s_contexts[contextId].drawFunc;
 
 	sq_pushinteger(v, result);
@@ -449,7 +449,7 @@ SQRESULT Script_HighlightContext_SetRadius(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 	sq_getfloat(v, 3, &radius);
 
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 		s_contexts[contextId].outlineRadius = static_cast<float>(radius);
 
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
@@ -461,7 +461,7 @@ SQRESULT Script_HighlightContext_GetOutlineRadius(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 
 	float result = 0.0f;
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 		result = s_contexts[contextId].outlineRadius;
 
 	sq_pushfloat(v, result);
@@ -474,7 +474,7 @@ SQRESULT Script_HighlightContext_GetInsideFunction(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 
 	int result = 0;
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 		result = s_contexts[contextId].insideFunction;
 
 	sq_pushinteger(v, result);
@@ -487,7 +487,7 @@ SQRESULT Script_HighlightContext_GetOutlineFunction(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 
 	int result = 0;
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 		result = s_contexts[contextId].outsideFunction;
 
 	sq_pushinteger(v, result);
@@ -500,7 +500,7 @@ SQRESULT Script_HighlightContext_SetFlags(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 	sq_getinteger(v, 3, &flags);
 
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 		s_contexts[contextId].flags = static_cast<int>(flags);
 
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
@@ -512,7 +512,7 @@ SQRESULT Script_HighlightContext_SetFill(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 	sq_getinteger(v, 3, &fn);
 
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 		s_contexts[contextId].insideFunction = static_cast<int>(fn);
 
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
@@ -524,7 +524,7 @@ SQRESULT Script_HighlightContext_SetOutline(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 	sq_getinteger(v, 3, &fn);
 
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 		s_contexts[contextId].outsideFunction = static_cast<int>(fn);
 
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
@@ -536,7 +536,7 @@ SQRESULT Script_HighlightContext_SetFillFocused(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 	sq_getinteger(v, 3, &fn);
 
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 		s_contexts[contextId].insideFunctionFocused = static_cast<int>(fn);
 
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
@@ -548,7 +548,7 @@ SQRESULT Script_HighlightContext_SetOutlineFocused(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 	sq_getinteger(v, 3, &fn);
 
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 		s_contexts[contextId].outsideFunctionFocused = static_cast<int>(fn);
 
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
@@ -560,7 +560,7 @@ SQRESULT Script_HighlightContext_SetADSFade(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 	sq_getbool(v, 3, &val);
 
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 		s_contexts[contextId].adsFade = val != 0;
 
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
@@ -572,7 +572,7 @@ SQRESULT Script_HighlightContext_SetAfterPostProcess(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 	sq_getbool(v, 3, &val);
 
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 		s_contexts[contextId].isAfterPostProcess = val != 0;
 
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
@@ -584,7 +584,7 @@ SQRESULT Script_HighlightContext_SetEntityVisible(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 	sq_getbool(v, 3, &val);
 
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 		s_contexts[contextId].isEntityVisible = val != 0;
 
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
@@ -596,7 +596,7 @@ SQRESULT Script_HighlightContext_SetDisableDeathFade(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 	sq_getbool(v, 3, &val);
 
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 	{
 		if (val) s_contexts[contextId].flags |= 0x1;
 		else     s_contexts[contextId].flags &= ~0x1;
@@ -612,7 +612,7 @@ SQRESULT Script_HighlightContext_SetNearFadeDistance(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 	sq_getfloat(v, 3, &dist);
 
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 		s_contexts[contextId].nearFadeDistance = static_cast<float>(dist);
 
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
@@ -625,7 +625,7 @@ SQRESULT Script_HighlightContext_SetFarFadeDistance(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 	sq_getfloat(v, 3, &dist);
 
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 		s_contexts[contextId].farFadeDistance = static_cast<float>(dist);
 
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
@@ -639,7 +639,7 @@ SQRESULT Script_HighlightContext_SetFocusedColor(HSQUIRRELVM v)
 	const SQVector3D* color = nullptr;
 	sq_getvector(v, 3, &color);
 
-	if (IsValidContext(static_cast<int>(contextId)) && color)
+	if (IsValidContext(contextId) && color)
 	{
 		s_contexts[contextId].focusedColor[0] = color->x;
 		s_contexts[contextId].focusedColor[1] = color->y;
@@ -655,7 +655,7 @@ SQRESULT Script_HighlightContext_IsEntityVisible(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 
 	bool result = true;
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 		result = s_contexts[contextId].isEntityVisible;
 
 	sq_pushbool(v, result);
@@ -668,7 +668,7 @@ SQRESULT Script_HighlightContext_IsAfterPostProcess(HSQUIRRELVM v)
 	sq_getinteger(v, 2, &contextId);
 
 	bool result = false;
-	if (IsValidContext(static_cast<int>(contextId)))
+	if (IsValidContext(contextId))
 		result = s_contexts[contextId].isAfterPostProcess;
 
 	sq_pushbool(v, result);

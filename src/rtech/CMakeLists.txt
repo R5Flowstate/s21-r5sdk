@@ -72,6 +72,8 @@ macro( add_rtech_game_lib LIB_NAME )
 		"pak/ui_image_skip.h"
 		"pak/mapedit_paks_cl.cpp"
 		"pak/mapedit_paks_cl.h"
+		"pak/pak_relink_guard.cpp"
+		"pak/pak_relink_guard.h"
 	)
 	add_sources( SOURCE_GROUP "Vfx"
 		"vfx_alias.cpp"

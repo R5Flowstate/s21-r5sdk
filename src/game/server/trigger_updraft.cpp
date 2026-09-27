@@ -9,6 +9,7 @@
 
 #include "trigger_updraft.h"
 #include "skydive.h"
+#include "skyward.h"
 #include "jetdrive.h"
 #include "player.h"
 #include "baseentity.h"
@@ -16,6 +17,7 @@
 #include "entitylist.h"
 #include "trigger_cannon.h"
 #include "trigger_gravity.h"
+#include "armored_leap.h"
 #include "game/shared/dt_extend.h"
 #include "game/shared/edict_dirty.h"
 #include "game/shared/sdk_entity_state.h"
@@ -185,6 +187,8 @@ bool UpdraftBridge_IsLifting(const void* pPlayer)
 // Gravity gated while lifting or gravity-lift active.
 static void* Hook_ApplyHalfGravity(void* pCtx, float flFrameTime)
 {
+	ArmoredLeap_NoteHalfGravity(pCtx, flFrameTime);
+
 	if (pCtx && bridge_movement_gravity_gate.GetBool())
 	{
 		void* const pPlayer = *reinterpret_cast<void**>(
@@ -192,17 +196,18 @@ static void* Hook_ApplyHalfGravity(void* pCtx, float flFrameTime)
 
 		const bool bUpdraft = UpdraftBridge_IsLifting(pPlayer);
 		const bool bLift = !bUpdraft && TriggerGravity_IsLiftActive(pPlayer);
+		const bool bSkyward = !bUpdraft && !bLift && SkywardBridge_IsActive(pPlayer);
 
-		if (bUpdraft || bLift)
+		if (bUpdraft || bLift || bSkyward)
 		{
-			static int s_nGateDiag[2] = {};
-			const int nWhich = bUpdraft ? 0 : 1;
+			static int s_nGateDiag[3] = {};
+			const int nWhich = bUpdraft ? 0 : (bLift ? 1 : 2);
 			if (bridge_updraft_diag.GetInt() > 0 && s_nGateDiag[nWhich] < 8)
 			{
 				++s_nGateDiag[nWhich];
 				Warning(eDLL_T::SERVER,
 					"[GRAV-GATE] suppressed half-gravity #%d src=%s player=%p dt=%.4f\n",
-					s_nGateDiag[nWhich], bUpdraft ? "updraft" : "gravitylift",
+					s_nGateDiag[nWhich], bUpdraft ? "updraft" : (bLift ? "gravitylift" : "skyward"),
 					pPlayer, flFrameTime);
 			}
 			return nullptr;

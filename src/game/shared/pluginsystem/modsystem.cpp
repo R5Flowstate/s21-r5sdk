@@ -56,11 +56,21 @@ static SQRESULT SharedScript_ModSystem_RunCallbacks(HSQUIRRELVM v)
 		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 	}
 
+	// A ModInit that calls back in here would recurse under the list lock.
+	static bool s_bRunning[4] = {};
+	const int nCtx = static_cast<int>(context) & 3;
+	if (s_bRunning[nCtx])
+	{
+		Warning(eDLL_T::MODSYSTEM, "[MOD-CB] ModSystem_RunCallbacks re-entered; ignored\n");
+		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+	}
+	s_bRunning[nCtx] = true;
+
 	ModSystem()->LockModList();
 
-	FOR_EACH_VEC(ModSystem()->GetModList(), i)
+	FOR_EACH_VEC(ModSystem()->GetResolvedModList(), i)
 	{
-		const CModSystem::ModInstance_t* const mod = ModSystem()->GetModList()[i];
+		const CModSystem::ModInstance_t* const mod = ModSystem()->GetResolvedModList()[i];
 
 		if (!mod->IsEnabled())
 			continue;
@@ -76,18 +86,24 @@ static SQRESULT SharedScript_ModSystem_RunCallbacks(HSQUIRRELVM v)
 
 		if (!modCodeCB)
 		{
-			Warning(eDLL_T::MODSYSTEM, "Mod '%s'(\"%s\") has precompiled scripts, but entry point \"%s()\" was not found!\n",
-				mod->name.String(), mod->id.String(), modCodeCBName.String());
+			// The entry point is optional: wraps and other VMs' scripts need none.
+			DevMsg(eDLL_T::MODSYSTEM, "[MOD-CB] '%s' has no %s() in this VM\n",
+				mod->id.String(), modCodeCBName.String());
 
 			continue;
 		}
 
 		// Not freed on purpose. FindFunction returns engine-allocated memory;
 		// free() through the wrong CRT corrupts the heap.
-		s->ExecuteFunction(modCodeCB, nullptr, 0, nullptr, NULL);
+		if (s->ExecuteFunction(modCodeCB, nullptr, 0, nullptr, NULL) == SCRIPT_ERROR)
+		{
+			Warning(eDLL_T::MODSYSTEM, "Mod '%s'(\"%s\") entry point \"%s()\" raised an error\n",
+				mod->name.String(), mod->id.String(), modCodeCBName.String());
+		}
 	}
 
 	ModSystem()->UnlockModList();
+	s_bRunning[nCtx] = false;
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 

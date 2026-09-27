@@ -12,6 +12,7 @@
 #include "halfduck_zip_parity.h"
 #include "game/server/zipline_cooldown.h"
 #include "game/server/zipline_disconnect.h"
+#include "game/server/armored_leap.h"
 #include "game/shared/dt_extend.h"
 #include "game/shared/edict_dirty.h"
 
@@ -307,7 +308,7 @@ static void HalfDuck_FsmTraceEmit(
 //-----------------------------------------------------------------------------
 // Post-orig: engine writes the latch on the standing->duck edge; consumer reads later.
 //-----------------------------------------------------------------------------
-static double __fastcall Hook_CGameMovement_Duck(void* ctx)
+static double HalfDuck_Duck(void* ctx)
 {
 	uint8_t* const player = ctx
 		? *reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(ctx) + HD_CTX_OFF_PLAYER)
@@ -396,6 +397,14 @@ static double __fastcall Hook_CGameMovement_Duck(void* ctx)
 
 	HalfDuck_FsmTraceEmit(player, pre, post, bZiplining, nGrace);
 
+	return flResult;
+}
+
+static double __fastcall Hook_CGameMovement_Duck(void* ctx)
+{
+	ArmoredLeap_BeforeDuck(ctx);
+	const double flResult = HalfDuck_Duck(ctx);
+	ArmoredLeap_AfterDuck(ctx);
 	return flResult;
 }
 

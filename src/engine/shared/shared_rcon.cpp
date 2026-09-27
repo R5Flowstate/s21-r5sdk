@@ -16,13 +16,16 @@ enum NetconDirection_e : u8
 
 // Bound into the AEAD tag so a frame cannot be replayed, reordered, or reflected
 // back down the opposite direction of the connection it was captured on.
+// Console frames also carry the server's per-accept session id (announced in
+// the hello frame), so a captured console stream fails on any other connection.
 struct NetconAadBlock_s
 {
-	NetconAadBlock_s(const u64 seqNr, const u64 sessionId, const NetconDirection_e direction)
+	NetconAadBlock_s(const u64 seqNr, const u64 sessionId, const NetconDirection_e direction, const u64 serverSessionId)
 	{
 		// Fixed byte order: both ends must build a bit-identical block.
 		m_SeqNr = _byteswap_uint64(seqNr);
 		m_SessionId = _byteswap_uint64(sessionId);
+		m_ServerSessionId = _byteswap_uint64(serverSessionId);
 		m_Direction = direction;
 
 		memset(m_Padding, 0, sizeof(m_Padding));
@@ -30,6 +33,7 @@ struct NetconAadBlock_s
 
 	u64 m_SeqNr;
 	u64 m_SessionId;
+	u64 m_ServerSessionId;
 	NetconDirection_e m_Direction;
 	u8 m_Padding[7];
 };
@@ -179,7 +183,15 @@ bool NetconShared_PackEnvelope(const CNetConBase* pBase, ConnectedNetConsoleData
 		? NETCON_DIR_TO_SERVER
 		: NETCON_DIR_TO_CLIENT;
 
-	NetconAadBlock_s aad(data.sendSeqNr, data.sendSessionId, sendDir);
+	if (bEncrypt && sendDir == NETCON_DIR_TO_SERVER && !data.recvSessionKnown)
+	{
+		if (bDebug)
+			Warning(eDLL_T::ENGINE, "[RCON] no server hello yet; frame not sent\n");
+		return false;
+	}
+
+	NetconAadBlock_s aad(data.sendSeqNr, data.sendSessionId, sendDir,
+		sendDir == NETCON_DIR_TO_SERVER ? data.recvSessionId : 0);
 
 	netcon::envelope envelope;
 
@@ -292,7 +304,8 @@ bool NetconShared_UnpackEnvelope(const CNetConBase* pBase, ConnectedNetConsoleDa
 		? NETCON_DIR_TO_CLIENT
 		: NETCON_DIR_TO_SERVER;
 
-	NetconAadBlock_s aad(header.seqnr(), header.sessionid(), recvDir);
+	NetconAadBlock_s aad(header.seqnr(), header.sessionid(), recvDir,
+		recvDir == NETCON_DIR_TO_SERVER ? data.sendSessionId : 0);
 
 	const byte* netMsg = reinterpret_cast<const byte*>(envelope.data().c_str());
 	const byte* dataBuf = netMsg;

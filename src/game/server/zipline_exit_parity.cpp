@@ -18,6 +18,7 @@
 #include "trigger_cannon.h" // TriggerPass_MovementTime
 #include "zipline_cooldown.h" // ZiplineCooldown_ShouldRefuseMount / _OnMountGranted
 #include "zipline_disconnect.h"
+#include "armored_leap.h"
 #include "akimbo.h"
 #include "game/shared/edict_dirty.h"
 #include <cmath>
@@ -2524,6 +2525,9 @@ static bool Hook_Zipline_Use(uintptr_t player, bool forGrappleZipline)
 		return false;
 
 	if (ZiplineCooldown_ShouldRefuseMount(reinterpret_cast<void*>(player)))
+		return false;
+
+	if (ArmoredLeap_IsActive(reinterpret_cast<void*>(player)))
 		return false;
 
 	uint32_t activeBefore = 0xFFFFFFFFu;

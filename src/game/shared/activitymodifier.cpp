@@ -70,6 +70,18 @@ CUtlSymbol FindActivityModifier(const char* modifierName)
 	return CUtlSymbol();
 }
 
+CUtlSymbol InternActivityModifier(const char* modifierName)
+{
+	if (!modifierName || !*modifierName || !v_AddActivityModifierString)
+		return CUtlSymbol();
+	if (!IsActivityModifierSystemInitialized())
+		return CUtlSymbol();
+
+	CUtlSymbol result;
+	v_AddActivityModifierString(reinterpret_cast<void*>(g_pActivityModifiersTable), &result, modifierName);
+	return result;
+}
+
 bool IsActivityModifierSystemInitialized()
 {
 	if (!s_initialized || !g_pActivityModifiersTable || !g_ActivityModifierSymbols)

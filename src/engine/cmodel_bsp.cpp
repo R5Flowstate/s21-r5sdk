@@ -227,6 +227,11 @@ void Mod_GetAllInstalledMaps()
         const boost::csub_match& match = regexMatches[2];
         const std::string mapName = match.str();
 
+        // Mod folders are on the GAME path too; only map-shaped names, and a bounded list.
+        if (mapName.empty() || mapName.length() > 63 || g_InstalledMaps.Count() >= 1024
+            || mapName.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_") != std::string::npos)
+            continue;
+
         if (mapName.compare("frontend") == 0)
             continue; // Frontend contains no BSP's.
 
@@ -325,15 +330,47 @@ static bool Mod_IsCustomPakLoadFinished(const int commonType)
 // *rootPath - 
 // *fileName - 
 //-----------------------------------------------------------------------------
-template <typename T, int N>
-static void Mod_FormatPakPath(T(&pOut)[N], const char* const rootPath, const char* const fileName)
+// Per mod, per list (preload.rson, level PakList).
+static constexpr int MOD_MAX_PAKS_PER_LIST = 32;
+
+// Flat pak file name only: no separators, drive letters or "..".
+static bool Mod_IsFlatPakName(const char* const pszName)
 {
+    if (!pszName || !*pszName)
+        return false;
+
+    size_t nLen = 0;
+    for (const char* p = pszName; *p; ++p, ++nLen)
+    {
+        const unsigned char c = static_cast<unsigned char>(*p);
+        if (nLen >= 128 || c == '/' || c == '\\' || c == ':' || (c == '.' && p[1] == '.'))
+            return false;
+        if (!V_isalnum(c) && c != '_' && c != '.' && c != '(' && c != ')' && c != '-')
+            return false;
+    }
+    return true;
+}
+
+template <typename T, int N>
+static bool Mod_FormatPakPath(T(&pOut)[N], const char* const rootPath, const char* const fileName)
+{
+    if (*rootPath && !Mod_IsFlatPakName(fileName))
+    {
+        Error(eDLL_T::ENGINE, NO_ERROR, "%s: refused pak name \"%s\" in root \"%s\" (flat file names only)\n", __FUNCTION__, fileName, rootPath);
+        return false;
+    }
+
     const int ret = V_snprintf(pOut, N, "%s%s%s", rootPath, Pak_GetReadPath(), fileName);
 
     if (ret < 0 || ret >= N)
-        Error(eDLL_T::ENGINE, EXIT_FAILURE, "%s: failure encoding path for file \"%s\" in root \"%s\"\n", __FUNCTION__, fileName, rootPath);
+    {
+        // Mod roots carry mod-authored names: refuse the entry instead of killing the process.
+        Error(eDLL_T::ENGINE, *rootPath ? NO_ERROR : EXIT_FAILURE, "%s: failure encoding path for file \"%s\" in root \"%s\"\n", __FUNCTION__, fileName, rootPath);
+        return false;
+    }
 
     V_FixSlashes(pOut);
+    return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -342,7 +379,11 @@ static void Mod_FormatPakPath(T(&pOut)[N], const char* const rootPath, const cha
 static void Mod_PreloadPaks(const char* const rootPath)
 {
     char preloadFileBuf[MAX_OSPATH];
-    Mod_FormatPakPath(preloadFileBuf, rootPath, "preload.rson");
+    if (!Mod_FormatPakPath(preloadFileBuf, rootPath, "preload.rson"))
+        return;
+
+    // A malformed mod preload list refuses that mod's preloads; only the base list is fatal.
+    const int errorCode = *rootPath ? NO_ERROR : EXIT_FAILURE;
 
     bool parseFailure;
     RSON::Node_t* const rson = RSON::LoadFromFile(preloadFileBuf, nullptr, &parseFailure);
@@ -350,7 +391,7 @@ static void Mod_PreloadPaks(const char* const rootPath)
     if (!rson)
     {
         if (parseFailure)
-            Error(eDLL_T::ENGINE, EXIT_FAILURE, "%s: failure parsing file \"%s\"\n", __FUNCTION__, preloadFileBuf);
+            Error(eDLL_T::ENGINE, errorCode, "%s: failure parsing file \"%s\"\n", __FUNCTION__, preloadFileBuf);
 
         return; // No pak preload file, just return out.
     }
@@ -358,23 +399,35 @@ static void Mod_PreloadPaks(const char* const rootPath)
     static const char* const arrayName = "Paks";
     const RSON::Field_t* const key = rson->FindKey(arrayName);
 
-    if (!key)
-        Error(eDLL_T::ENGINE, EXIT_FAILURE, "%s: missing array key \"%s\" in file \"%s\"\n", __FUNCTION__, arrayName, preloadFileBuf);
+    // A mixed-type array stores child nodes, not values; GetArrayValue would read node headers as strings.
+    const bool bStringArray = key && key->node.type == (RSON::eFieldType::RSON_ARRAY | RSON::eFieldType::RSON_STRING);
+    const bool bValueArray = key && key->node.type == (RSON::eFieldType::RSON_ARRAY | RSON::eFieldType::RSON_VALUE);
 
-    if ((key->node.type != (RSON::eFieldType::RSON_ARRAY | RSON::eFieldType::RSON_STRING)) &&
-        (key->node.type != (RSON::eFieldType::RSON_ARRAY | RSON::eFieldType::RSON_VALUE)))
+    if (!bStringArray && (!bValueArray || *rootPath))
     {
-        Error(eDLL_T::ENGINE, EXIT_FAILURE, "%s: expected an array of strings in file \"%s\"\n", __FUNCTION__, preloadFileBuf);
+        Error(eDLL_T::ENGINE, errorCode, "%s: expected an array of strings \"%s\" in file \"%s\"\n", __FUNCTION__, arrayName, preloadFileBuf);
+
+        RSON_Free(rson, AlignedMemAlloc());
+        AlignedMemAlloc()->Free(rson);
+        return;
     }
 
     for (int i = 0; i < key->node.valueCount; i++)
     {
+        if (*rootPath && i >= MOD_MAX_PAKS_PER_LIST)
+        {
+            Error(eDLL_T::ENGINE, NO_ERROR, "%s: \"%s\" preloads more than %d paks; rest skipped\n", __FUNCTION__, preloadFileBuf, MOD_MAX_PAKS_PER_LIST);
+            break;
+        }
+
         const RSON::Value_t* const value = key->node.GetArrayValue(i);
         const char* pakPath;
 
         if (*rootPath)
         {
-            Mod_FormatPakPath(preloadFileBuf, rootPath, value->stringValue);
+            if (!Mod_FormatPakPath(preloadFileBuf, rootPath, value->stringValue))
+                continue;
+
             pakPath = preloadFileBuf;
         }
         else
@@ -530,9 +583,12 @@ static void Mod_HandleLevelChanged(const char* const levelName)
 static KeyValues* Mod_GetLevelSettings(const char* const levelName, const char* const rootPath)
 {
     char pathBuf[MAX_OSPATH];
-    snprintf(pathBuf, sizeof(pathBuf), "%s%s%s.kv", rootPath, MOD_LEVEL_SETTINGS_PATH, levelName);
+    const int nLen = snprintf(pathBuf, sizeof(pathBuf), "%s%s%s.kv", rootPath, MOD_LEVEL_SETTINGS_PATH, levelName);
+    if (nLen < 0 || nLen >= static_cast<int>(sizeof(pathBuf)))
+        return nullptr;
 
-    return FileSystem()->LoadKeyValues(IFileSystem::TYPE_LEVELSETTINGS, pathBuf, "GAME");
+    // Settings files are a few hundred bytes; the core file may also come from a mod's search path.
+    return ModSystem_LoadKeyValuesCapped(pathBuf, "GAME", "LevelSettings", 1 << 20);
 }
 
 //-----------------------------------------------------------------------------
@@ -585,9 +641,17 @@ static void Mod_LoadLevelPaks(KeyValues* const settingsKV, const char* const roo
         return;
 
     char pathBuf[MAX_OSPATH];
+    int nModPaks = 0;
 
     for (KeyValues* subKey = pakListKV->GetFirstSubKey(); subKey != nullptr; subKey = subKey->GetNextKey())
     {
+        // The handle table is shared with the base install and every mod.
+        if (*rootPath && ++nModPaks > MOD_MAX_PAKS_PER_LIST)
+        {
+            Error(eDLL_T::ENGINE, NO_ERROR, "%s: root \"%s\" lists more than %d paks; rest skipped\n", __FUNCTION__, rootPath, MOD_MAX_PAKS_PER_LIST);
+            break;
+        }
+
         const int mode = subKey->GetInt(nullptr, -1);
 
         if (!Mod_ShouldLoadPakInCurrentContext(mode))
@@ -598,13 +662,21 @@ static void Mod_LoadLevelPaks(KeyValues* const settingsKV, const char* const roo
 
         if (*rootPath)
         {
-            Mod_FormatPakPath(pathBuf, rootPath, subKey->GetName());
+            if (!Mod_FormatPakPath(pathBuf, rootPath, subKey->GetName()))
+                continue;
 
             pakToLoad = pathBuf;
             isMod = true;
         }
         else
         {
+            // Base settings list flat names; a mod-declared map resolves its core file from the mod.
+            if (!Mod_IsFlatPakName(subKey->GetName()))
+            {
+                Error(eDLL_T::ENGINE, NO_ERROR, "%s: refused level pak name \"%s\" (flat file names only)\n", __FUNCTION__, subKey->GetName());
+                continue;
+            }
+
             pakToLoad = subKey->GetName();
             isMod = false;
         }
@@ -612,7 +684,7 @@ static void Mod_LoadLevelPaks(KeyValues* const settingsKV, const char* const roo
         const PakHandle_t pakId = s_customPakData.LoadAndAddPak(pakToLoad, isMod);
 
         if (pakId == PAK_INVALID_HANDLE)
-            Error(eDLL_T::ENGINE, NO_ERROR, "%s: unable to load pak '%s'\n", __FUNCTION__, pathBuf);
+            Error(eDLL_T::ENGINE, NO_ERROR, "%s: unable to load pak '%s'\n", __FUNCTION__, pakToLoad);
     }
 }
 

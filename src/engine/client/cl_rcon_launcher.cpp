@@ -183,7 +183,7 @@ namespace
 
 		CRConClient* const pClient = RCONClient();
 		ConnectedNetConsoleData_s* const pData = pClient ? pClient->GetData() : nullptr;
-		if (!pData)
+		if (!pData || !pData->recvSessionKnown)
 			return;
 
 		vector<byte> vecMsg;

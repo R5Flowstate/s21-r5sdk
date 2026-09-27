@@ -504,10 +504,13 @@ public:
 
 	// Diagnostic accessors for bridge usercmd/movement debugging ([MOVE-DIAG]).
 	inline const Vector3D& Diag_AbsOrigin(void)   const { return m_vecAbsOrigin; }
+	inline const Vector3D& Diag_AbsRotation(void) const { return m_angAbsRotation; }
 	inline const Vector3D& Diag_AbsVelocity(void) const { return m_vecAbsVelocity; }
 	inline void            Diag_SetAbsVelocity(const Vector3D& v) { m_vecAbsVelocity = v; } // used by jetdrive.cpp's port --
 	inline char            Diag_MoveType(void)    const { return m_MoveType; }
 	inline char            Diag_LifeState(void)   const { return m_lifeState; }
+	inline bool            Diag_HasMoveParent(void) const { return m_hMoveParent.IsValid(); }
+	inline int             Diag_TeamNum(void)     const { return m_iTeamNum; }
 	inline float           Diag_MaxSpeed(void)    const { return m_flMaxspeed; }
 	inline float           Diag_Speed(void)       const { return m_flSpeed; }
 	inline void            Diag_SetMaxSpeed(float v) { m_flMaxspeed = v; }

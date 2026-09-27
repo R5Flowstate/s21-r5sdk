@@ -224,6 +224,8 @@ public:
 
 		if (nBits > outSizeBits)
 			nBits = outSizeBits;
+		else if (nBits < 0)
+			nBits = 0;
 
 		ReadBits(pOut, nBits);
 		return nBits;
@@ -644,12 +646,10 @@ FORCEINLINE void CBitWrite::WriteUBitVar(unsigned int data)
 // write raw IEEE float bits in little endian form
 FORCEINLINE void CBitWrite::WriteBitFloat(float val)
 {
-	long intVal;
+	uint32 intVal;
+	static_assert(sizeof(intVal) == sizeof(val), "float must be 32 bits");
 
-	Assert(sizeof(long) == sizeof(float));
-	Assert(sizeof(float) == 4);
-
-	intVal = *((long*)&val);
+	memcpy(&intVal, &val, sizeof(intVal));
 	WriteUBitLong(intVal, 32);
 }
 

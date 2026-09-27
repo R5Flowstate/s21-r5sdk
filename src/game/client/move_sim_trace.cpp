@@ -10,6 +10,7 @@
 #include "tier1/cvar.h"
 #include "game/client/move_sim_trace.h"
 #include "game/client/wallclimb.h"
+#include "game/client/wall_launch.h"
 
 //-----------------------------------------------------------------------------
 // Raw layout constants -- r5apex client.
@@ -83,11 +84,14 @@ static __int64 __fastcall Hook_CGameMovement_FullWalkMove(void* ctx)
 	if (!ctx || !v_CGameMovement__FullWalkMove)
 		return 0;
 
+	WallLaunchClient_BeforeFullWalkMove(ctx);
+
 	const int nMode = bridge_move_trace.GetInt();
 	if (nMode <= 0)
 	{
 		const __int64 nTapOnly = v_CGameMovement__FullWalkMove(ctx);
 		WallClimbTap_AfterFullWalkMove(ctx);
+		WallLaunchClient_AfterFullWalkMove(ctx);
 		return nTapOnly;
 	}
 
@@ -100,6 +104,7 @@ static __int64 __fastcall Hook_CGameMovement_FullWalkMove(void* ctx)
 	{
 		const __int64 nNoPlayer = v_CGameMovement__FullWalkMove(ctx);
 		WallClimbTap_AfterFullWalkMove(ctx);
+		WallLaunchClient_AfterFullWalkMove(ctx);
 		return nNoPlayer;
 	}
 
@@ -121,6 +126,7 @@ static __int64 __fastcall Hook_CGameMovement_FullWalkMove(void* ctx)
 
 	const __int64 nResult = v_CGameMovement__FullWalkMove(ctx);
 	WallClimbTap_AfterFullWalkMove(ctx);
+	WallLaunchClient_AfterFullWalkMove(ctx);
 
 	const float* const pPostOrigin = reinterpret_cast<const float*>(mv + MT_MV_OFF_ORIGIN);
 	const float* const pPostVel = reinterpret_cast<const float*>(mv + MT_MV_OFF_VELOCITY);

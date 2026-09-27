@@ -28,6 +28,7 @@
 #include <fstream>
 #include "public/tier1/sdk_parse.h"
 #include "game/server/player_overheat.h"
+#include "game/server/offhand_jump_toggle.h"
 
 extern CGlobalVars* gpGlobals;
 
@@ -1021,6 +1022,9 @@ static void __fastcall Hook_CWeaponX_PlayerWeapon_BusyFrame(__int64 weapon)
 	}
 
 	v_CWeaponX_PlayerWeapon_BusyFrame(weapon);
+
+	if (weapon)
+		OffhandJumpToggle_OnBusyFrame(reinterpret_cast<void*>(weapon));
 }
 
 static char __fastcall Hook_CWeaponX_PrimaryAttack(__int64 weapon)

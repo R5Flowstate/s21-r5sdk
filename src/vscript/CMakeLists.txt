@@ -15,6 +15,10 @@ start_sources()
 add_sources( SOURCE_GROUP "Private"
     "vscript.cpp"
     "vscript.h"
+    "script_convar_guard.cpp"
+    "script_convar_guard.h"
+    "script_wraps.cpp"
+    "script_wraps.h"
 )
 
 # Client S21 override TUs (client_target_only). Detour registration is

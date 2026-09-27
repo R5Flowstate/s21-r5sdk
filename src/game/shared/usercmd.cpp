@@ -139,6 +139,15 @@ ConVar usercmd_dualwield_enable("usercmd_dualwield_enable", "0", FCVAR_REPLICATE
 //-----------------------------------------------------------------------------
 void ClampUserCmd(CUserCmd* ucmd)
 {
+	// commandType selects a script callback; anything outside the enum is dropped.
+	for (int i = 0; i < NUM_PING_COMMANDS; ++i)
+	{
+		PingCommand_s& ping = ucmd->m_pingCommands[i];
+		if (ping.commandType < PING_INVALID || ping.commandType > LAST_PING_COMMAND ||
+			!ping.pingOrigin.IsValid())
+			ping.Reset();
+	}
+
 	// Initialize the camera position as <0,0,0>, this should at least avoid
 	// crash and meme behaviors.
 	if (!ucmd->camerapos.IsValid())

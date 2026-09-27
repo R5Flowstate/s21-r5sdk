@@ -24,6 +24,8 @@ void AkimboBridge_UpdateState(void* pPlayer);
 
 int AkimboBridge_GetDisabledFromPlayerData(const void* pPlayerData);
 uint32_t AkimboBridge_GetModBitfieldDisabled(const void* pWeapon);
+// Engine mod-name lookup on the weapon's WeaponInfo; -1 if absent or unresolved.
+int WeaponMods_FindBit(const void* pWeapon, const char* pszModName);
 
 bool AkimboBridge_CanActivateAlthand(void* pPlayer, void* pWeapon);
 void AkimboBridge_OnSetActiveWeapon(void* pPlayer, unsigned int hand, void* pWeapon);
@@ -32,6 +34,8 @@ void AkimboBridge_OnZiplineStop(void* pPlayer);
 void AkimboBridge_PostHolster(void* pWeapon, bool fastHolster, void* pCaller);
 void* AkimboBridge_PreDeploy(void* pWeapon);
 void AkimboBridge_PostDeploy(void* pWeapon, void* pRedeploy);
+unsigned int AkimboBridge_AppendActivityModifiers(void* pWeapon, uint16_t* pMods,
+	unsigned int count, unsigned int capacity);
 
 void AkimboBridge_Think(void* pPlayer, void* pUserCmd);
 void AkimboBridge_RegisterWeaponFuncs(ScriptClassDescriptor_t* weaponStruct);

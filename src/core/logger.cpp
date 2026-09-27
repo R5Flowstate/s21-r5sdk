@@ -14,6 +14,7 @@ extern bool g_bSdkShutdownCallInitiated;
 #endif // !_TOOLS
 static const boost::regex s_AnsiRowRegex(R"(\x1b\[[\d;]+m)");
 static std::mutex s_LogMutex;
+PFN_LogTap g_LogTap = nullptr;
 
 static bool Logger_IsConsoleNoise(eDLL_T context, const std::string& formatted)
 {
@@ -277,6 +278,11 @@ void EngineLoggerSink(LogType_t logType, LogLevel_t logLevel, eDLL_T context,
 	va_end(argsCopy);
 
 #ifndef _TOOLS
+	if (g_LogTap && g_LogTap(context, logType, formatted.c_str(), formatted.length()))
+		return;
+#endif // !_TOOLS
+
+#ifndef _TOOLS
 	//-------------------------------------------------------------------------
 	// Colorize script warnings and errors
 	//-------------------------------------------------------------------------
@@ -441,6 +447,7 @@ void EngineLoggerSink(LogType_t logType, LogLevel_t logLevel, eDLL_T context,
 #endif // !_TOOLS
 static const boost::regex s_AnsiRowRegex(R"(\x1b\[[\d;]+m)");
 static std::mutex s_LogMutex;
+PFN_LogTap g_LogTap = nullptr;
 
 static bool Logger_IsConsoleNoise(eDLL_T context, const std::string& formatted)
 {
@@ -709,6 +716,11 @@ void EngineLoggerSink(LogType_t logType, LogLevel_t logLevel, eDLL_T context,
 	va_copy(argsCopy, args);
 	const string formatted = FormatV(pszFormat, argsCopy);
 	va_end(argsCopy);
+
+#ifndef _TOOLS
+	if (g_LogTap && g_LogTap(context, logType, formatted.c_str(), formatted.length()))
+		return;
+#endif // !_TOOLS
 
 #ifndef _TOOLS
 	//-------------------------------------------------------------------------

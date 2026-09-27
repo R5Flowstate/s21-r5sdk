@@ -28,7 +28,7 @@
 
 static ConVar settings_dlss_sr("settings_dlss_sr", "0", FCVAR_RELEASE,
 	"Replace the engine TSAA resolve with NGX SuperSampling on NVIDIA DX12. 0 = stock TSAA. Native-res SuperSampling is DLAA and is a quality cost, not a perf win.");
-static ConVar sdk_dlss_sr_probe("sdk_dlss_sr_probe", "1", FCVAR_DEVELOPMENTONLY,
+static ConVar sdk_dlss_sr_probe("sdk_dlss_sr_probe", "0", FCVAR_DEVELOPMENTONLY,
 	"Log the TSAA/FSR2 upscale pass. 0 = off, 1 = first and every change, 2 = every dispatch.");
 static ConVar settings_dlss_sr_skip_tsaa("settings_dlss_sr_skip_tsaa", "1", FCVAR_RELEASE,
 	"Skip the stock TSAA pixel dispatch while SuperSampling owns the resolve output. 0 = stack both passes.");

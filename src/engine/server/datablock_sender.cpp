@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include "engine/shared/s21_bridge_compat.h"
 #include "engine/server/datablock_oversized.h"
+#include "engine/server/demo_record_sv.h"
 
 static ConVar net_compressDataBlockLzAcceleration("net_compressDataBlockLzAcceleration", "1", FCVAR_DEVELOPMENTONLY, "The acceleration value for LZ4 data block compression");
 
@@ -171,6 +172,7 @@ void ServerDataBlockSender::WriteDataBlock(const uint8_t* const sourceData, cons
 	}
 
 	const int transferSize = actualDataSize + headerSize;
+	DemoSv_OnDataBlock(m_pClient, scratch, transferSize);
 	if (transferSize <= SNAPSHOT_SCRATCH_BUFFER_SIZE)
 	{
 		if (scratch != m_pScratchBuffer)

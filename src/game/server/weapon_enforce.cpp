@@ -41,7 +41,6 @@ static constexpr uintptr_t kWeaponTypeFlagsOffsetServer = 0x19B0;
 // includes WPT_VIEWHANDS from stranding the player with no selectable weapon.
 //-----------------------------------------------------------------------------
 static constexpr uint32_t kWeaponTypeBitViewhands = 0x100u;
-static constexpr uint32_t kWeaponTypeBitTactical  = 0x004u;
 
 //-----------------------------------------------------------------------------
 // m_inventory offset on CBaseCombatCharacter (server). Derived from the SDK
@@ -135,26 +134,8 @@ void WeaponEnforce_ForceSwapIfNowDisabled(void* pPlayer)
 	WeaponInventory* const pInv = reinterpret_cast<WeaponInventory*>(
 		reinterpret_cast<uint8_t*>(pPlayer) + kServerInventoryOffset);
 
-	// play_one_handed_alt_hand_anim_on_mainhand plays the tac's left-hand
-	// pose on the mainhand VM. Holster/Term of that slot deletes the host;
-	// the script FastHolster is the only put-away the S21 client runs.
-	bool bKeepAnimHost = false;
-	for (int slot = 0; slot < 3; slot++)
-	{
-		SDKEntityHandle h(static_cast<uint32_t>(pInv->activeWeapons[slot].ToInt()));
-		if (!h.IsValid())
-			continue;
-		void* const pKeep = SDKEntityState_Resolve(h, ESide::Server);
-		if (!pKeep)
-			continue;
-		const uint32_t keepFlags = ReadWeaponTypeFlagsServer(pKeep);
-		if ((keepFlags & kWeaponTypeBitTactical) != 0 && (keepFlags & disabled) == 0)
-		{
-			bKeepAnimHost = true;
-			break;
-		}
-	}
-
+	// A disabled slot empties even while an alt-hand tactical is up, as the S21
+	// shared ChangeWeaponsIfNecessary does; the tactical then plays its two-hand pose.
 	bool bMutated = false;
 	static int s_nClearLogBudget = 32;
 
@@ -186,9 +167,6 @@ void WeaponEnforce_ForceSwapIfNowDisabled(void* pPlayer)
 		// Prefer the resolved holster path so anim/state unwind matches a real
 		// put-away before we drop the active EHandle. SetActiveWeapon is only
 		// resolved inside snapshot_diag (diag detour), not a shared helper.
-		if (bKeepAnimHost)
-			continue;
-
 		const bool bHolstered = v_WeaponX_HolsterInternal
 			? (v_WeaponX_HolsterInternal(pWeapon, /*bDoFastHolster=*/true) != 0)
 			: false;

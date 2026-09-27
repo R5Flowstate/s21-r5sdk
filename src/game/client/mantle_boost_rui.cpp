@@ -265,7 +265,7 @@ static ConCommand mantle_boost_curve_rebake("mantle_boost_curve_rebake",
 // basis with no proxy animation or attachments involved. Each bake validates
 // itself against the native function at probe eyes before it is kept.
 //-----------------------------------------------------------------------------
-static ConVar mantle_boost_curve_autodump("mantle_boost_curve_autodump", "1", FCVAR_RELEASE,
+static ConVar mantle_boost_curve_autodump("mantle_boost_curve_autodump", "0", FCVAR_DEVELOPMENTONLY,
 	"Bake the S21 traversal camera curve for each mantle type on first climb "
 	"(writes platform/cfg/mantle_boost_curves.txt -- the dedi's sweet-spot input).");
 
@@ -507,6 +507,15 @@ static SQRESULT ClientScript_MantleBoostGetCrosshairRuiOffset(HSQUIRRELVM v)
 	return SQ_OK;
 }
 
+static SQRESULT ClientScript_SetLocalMantleBoostProfile(HSQUIRRELVM v)
+{
+	SQFloat flHeight = 1.0f, flSprint = 1.0f;
+	sq_getfloat(v, 2, &flHeight);
+	sq_getfloat(v, 3, &flSprint);
+	MantleBoostClient_SetProfile(flHeight, flSprint);
+	return SQ_OK;
+}
+
 void MantleBoostRui_RegisterClientFunctions(CSquirrelVM* s)
 {
 	if (!s)
@@ -514,6 +523,12 @@ void MantleBoostRui_RegisterClientFunctions(CSquirrelVM* s)
 		Warning(eDLL_T::CLIENT, "[MB-RUI] null CLIENT VM\n");
 		return;
 	}
+
+	// A new CLIENT VM is a new session: no class profile survives it.
+	MantleBoostClient_SetProfile(1.0f, 1.0f);
+	if (Script_RegisterFuncTC_S21(s, "SetLocalMantleBoostProfile", reinterpret_cast<void*>(ClientScript_SetLocalMantleBoostProfile),
+			"void", "float heightScale, float sprintScale") == SQ_ERROR)
+		Warning(eDLL_T::CLIENT, "[MB-RUI] SetLocalMantleBoostProfile registration FAILED\n");
 
 	struct Binding_s
 	{

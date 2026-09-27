@@ -32,6 +32,7 @@
 #include "vscript_server.h"
 #include "vscript_server_natives.h"
 #include "vscript_server_placement.h"
+#include "engine/server/vengineserver_impl.h"
 #include "player.h"
 #include "util_server.h"
 #include "entitylist.h"
@@ -1273,6 +1274,12 @@ SQRESULT Script_SetEnableScriptAnimModifier(HSQUIRRELVM v)
     if (SQ_FAILED(sq_getbool(v, 2, &bEnable)))
         return SQ_ERROR;
 
+    if (!DTExtend_EntityHasSendTable(pEnt, "DT_BaseAnimating"))
+    {
+        Warning(eDLL_T::SERVER, "[ANIM-MOD] SetEnableScriptAnimModifier on a non-animating entity -- ignored\n");
+        SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+    }
+
     reinterpret_cast<CBaseAnimating*>(pEnt)->SetEnableScriptAnimModifier(bEnable != SQFalse);
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
@@ -2308,9 +2315,12 @@ static Vector3D ServerScript_GetRefinedSurfaceNormal(
         if (!ServerScript_PlacementTraceLine(start, end, owner, probe))
             continue;
 
-        // fraction is the only acceptance test -- no startsolid/allsolid or
-        // surface gate exists here.
-        if (probe.fraction != 1.0f)
+        // S21 collision is one-sided, so a probe from open air only ever hits a
+        // front face. S3 also returns back faces and start-solid hits; drop them.
+        const Vector3D probeDir = ServerScript_Normalized(ServerScript_SubVector(end, start));
+        if (probe.fraction != 1.0f &&
+            !probe.startsolid &&
+            ServerScript_Dot(probe.plane.normal, probeDir) < 0.0f)
         {
             samplePoints[sampleCount] = probe.endpos;
             sampleNormals[sampleCount] = probe.plane.normal;
@@ -4736,6 +4746,244 @@ void ServerScript_UpdateHeldObjectPlacement(CPlayer* player, int commandNumber)
         ServerScript_ConsiderHeldWeapon(player, ServerScript_LookupEntityFromRawHandle(active[i]), cmdNumber);
 }
 
+//-----------------------------------------------------------------------------
+// Client placement pose. The S21 client's hologram entrance/exit rides a
+// usercmd trailer. The dedi's converted collision differs from the client's,
+// so its own recompute cannot always reproduce the hologram; at toss the
+// client pose is validated here and replaces the dedi result.
+//-----------------------------------------------------------------------------
+// The dedi only replicates non-default values at connect, so this defaults to 0
+// and is switched on at native registration.
+static ConVar sv_bridge_opl_pose_wire("sv_bridge_opl_pose_wire", "0", FCVAR_RELEASE | FCVAR_REPLICATED,
+    "Tell clients to send the object-placement pose trailer on usercmds.");
+static ConVar sv_alter_client_pose("sv_alter_client_pose", "1", FCVAR_RELEASE,
+    "Use the validated client hologram pose for special placement at toss.");
+
+struct ClientPlacementPose
+{
+    int cmdNumber = 0;
+    bool present = false;
+    Vector3D entrance;
+    Vector3D entranceAngles;
+    Vector3D exit;
+    Vector3D exitAngles;
+};
+
+static constexpr int kClientPoseSlots = 129;
+static constexpr int kClientPoseHistory = 128;
+static ClientPlacementPose s_clientPose[kClientPoseSlots][kClientPoseHistory];
+static int s_clientPoseMaxCmd[kClientPoseSlots];
+
+void ServerScript_ReadPlacementPoseTrailer(bf_read* buf, const int edictIndex, const int cmdNumber)
+{
+    const bool present = buf->ReadOneBit() != 0;
+    float f[12] = {};
+    if (present)
+    {
+        for (int k = 0; k < 12; ++k)
+            f[k] = buf->ReadFloat();
+    }
+
+    if (edictIndex < 1 || edictIndex >= kClientPoseSlots || cmdNumber <= 0 || buf->IsOverflowed())
+        return;
+
+    // Command numbers restart on reconnect; drop the old history.
+    if (cmdNumber < s_clientPoseMaxCmd[edictIndex] - 1024)
+    {
+        for (int k = 0; k < kClientPoseHistory; ++k)
+            s_clientPose[edictIndex][k] = ClientPlacementPose();
+        s_clientPoseMaxCmd[edictIndex] = 0;
+    }
+    if (cmdNumber > s_clientPoseMaxCmd[edictIndex])
+        s_clientPoseMaxCmd[edictIndex] = cmdNumber;
+
+    bool sane = present;
+    for (int k = 0; k < 12 && sane; ++k)
+        sane = isfinite(f[k]) && fabsf(f[k]) < 100000.0f;
+
+    ClientPlacementPose& rec = s_clientPose[edictIndex][cmdNumber % kClientPoseHistory];
+    rec.cmdNumber = cmdNumber;
+    rec.present = sane;
+    rec.entrance = Vector3D(f[0], f[1], f[2]);
+    rec.entranceAngles = Vector3D(f[3], f[4], f[5]);
+    rec.exit = Vector3D(f[6], f[7], f[8]);
+    rec.exitAngles = Vector3D(f[9], f[10], f[11]);
+}
+
+static const ClientPlacementPose* ServerScript_FindClientPose(CPlayer* owner, const int cmdNumber)
+{
+    const int edictIndex = static_cast<int>(owner->GetEdict());
+    if (edictIndex < 1 || edictIndex >= kClientPoseSlots || cmdNumber <= 0)
+        return nullptr;
+
+    const ClientPlacementPose& rec = s_clientPose[edictIndex][cmdNumber % kClientPoseHistory];
+    return rec.cmdNumber == cmdNumber ? &rec : nullptr;
+}
+
+static uint32_t ServerScript_SurfaceParentHandle(const Vector3D& point, const Vector3D& normal, CPlayer* owner)
+{
+    trace_t tr;
+    if (!ServerScript_PlacementTraceLine(ServerScript_AddScaled(point, normal, 4.0f),
+            ServerScript_AddScaled(point, normal, -8.0f), owner, tr))
+        return INVALID_EHANDLE_INDEX;
+
+    CBaseEntity* const hit = tr.hit_entity;
+    if (!hit)
+        return INVALID_EHANDLE_INDEX;
+
+    const char* const classname = ServerScript_EntityClassname(hit);
+    if (!classname || strcmp(classname, "worldspawn") == 0)
+        return INVALID_EHANDLE_INDEX;
+
+    return ServerScript_PlacementHandleFromEntity(hit);
+}
+
+// Returns nullptr when the pose passes, else the failed check.
+static const char* ServerScript_ValidateClientPose(
+    void* pWeapon, CPlayer* owner, const ClientPlacementPose& pose,
+    Vector3D& entranceNormal, Vector3D& exitNormal)
+{
+    const ServerObjectPlacementSettings& settings = ServerScript_GetPlacementSettings(pWeapon);
+    const Vector3D eye = ServerScript_PlayerEyeOrigin(owner);
+    Vector3D eyeDir;
+    AngleVectors(ServerScript_PlayerPlacementEyeAngles(owner), &eyeDir, nullptr, nullptr);
+    eyeDir = ServerScript_Normalized(eyeDir);
+
+    const QAngle entranceAng(pose.entranceAngles.x, pose.entranceAngles.y, pose.entranceAngles.z);
+    const QAngle exitAng(pose.exitAngles.x, pose.exitAngles.y, pose.exitAngles.z);
+    AngleVectors(entranceAng, &entranceNormal, nullptr, nullptr);
+    AngleVectors(exitAng, &exitNormal, nullptr, nullptr);
+    entranceNormal = ServerScript_Normalized(entranceNormal);
+    exitNormal = ServerScript_Normalized(exitNormal);
+
+    const Vector3D toEntrance = ServerScript_SubVector(pose.entrance, eye);
+    const float entranceDist = sqrtf(ServerScript_Dot(toEntrance, toEntrance));
+    if (entranceDist > ServerScript_ObjectPlacementDistance(pWeapon, true) + 64.0f)
+        return "entrance out of range";
+
+    // Aim: inside the last-good cone plus 5 degrees, or near the aim line
+    // (edge correction can shift a close entrance sideways).
+    const float coneCos = settings.lastGoodAngleMax < 1.0f
+        ? cosf(acosf(fmaxf(settings.lastGoodAngleMax, -1.0f)) + 0.08726646f)
+        : 0.9961947f;
+    const float along = ServerScript_Dot(toEntrance, eyeDir);
+    const Vector3D offLine = ServerScript_SubVector(toEntrance, ServerScript_ScaleVector(eyeDir, along));
+    const float lineTol = settings.lastGoodDistanceMax + 64.0f;
+    const bool inCone = entranceDist > 1.0f && along / entranceDist >= coneCos;
+    const bool nearLine = along > 0.0f && ServerScript_Dot(offLine, offLine) <= lineTol * lineTol;
+    if (!inCone && !nearLine)
+        return "entrance off aim";
+
+    trace_t sight;
+    if (!ServerScript_PlacementTraceLine(eye, pose.entrance, owner, sight))
+        return "trace engine missing";
+    const Vector3D sightGap = ServerScript_SubVector(sight.endpos, pose.entrance);
+    if (sight.fraction < 1.0f && ServerScript_Dot(sightGap, sightGap) > 48.0f * 48.0f)
+        return "entrance not visible";
+
+    const Vector3D depthVec = ServerScript_SubVector(pose.exit, pose.entrance);
+    const float depthSqr = ServerScript_Dot(depthVec, depthVec);
+    if (depthSqr > 1245.0f * 1245.0f || depthSqr < 8.0f * 8.0f)
+        return "portal depth";
+
+    if (ServerScript_Dot(entranceNormal, exitNormal) > 0.70710677f)
+        return "exit normal aligned";
+
+    if (!ServerScript_MayPlaceObjectAtPoint(pose.entrance, nullptr) ||
+        !ServerScript_MayPlaceObjectAtPoint(pose.exit, nullptr))
+        return "placement blocked by trigger";
+
+    if (!ServerScript_PostValidatePlacement(pose.entrance, entranceNormal,
+            ServerScript_ClassifyPortalDir(entranceNormal), owner) ||
+        !ServerScript_PostValidatePlacement(pose.exit, exitNormal,
+            ServerScript_ClassifyPortalDir(exitNormal), owner))
+        return "unsafe fall path";
+
+    // The player lands just off the exit; it must be open space on this side too.
+    const Vector3D hullMins(-16.0f, -16.0f, -16.0f);
+    const Vector3D hullMaxs(16.0f, 16.0f, 16.0f);
+    const Vector3D landing = ServerScript_AddScaled(pose.exit, exitNormal, 20.0f);
+    trace_t room;
+    if (!ServerScript_TraceLine(landing, landing, owner, room, true, &hullMins, &hullMaxs, kPlacementTraceMask))
+        return "trace engine missing";
+    if (room.startsolid || room.allsolid)
+        return "exit inside solid";
+
+    return nullptr;
+}
+
+static ConVar sv_alter_toss_log("sv_alter_toss_log", "0", FCVAR_DEVELOPMENTONLY,
+    "Log one verdict line per placement toss (valid/LKG/result/pose) plus that compute's reject reasons.");
+
+// At toss the client's verdict for this command wins when it validates.
+static void ServerScript_ApplyClientPlacementPose(void* pWeapon, CPlayer* owner, const int cmdNumber, const char*& source)
+{
+    source = "server";
+    if (!sv_alter_client_pose.GetBool() || !ServerScript_IsPhaseDoorWeapon(pWeapon))
+        return;
+
+    ServerPlacementCache* const cache = s_serverPlacementCache.Find(pWeapon);
+    const ClientPlacementPose* const pose = ServerScript_FindClientPose(owner, cmdNumber);
+    if (!cache || !pose)
+        return;
+
+    if (!pose->present)
+    {
+        // The hologram was invalid for this command; the client already played the miss.
+        cache->state.valid = false;
+        cache->hasValidSpot = false;
+        cache->isLastKnownGood = false;
+        source = "client-invalid";
+        return;
+    }
+
+    Vector3D entranceNormal;
+    Vector3D exitNormal;
+    const char* const reject = ServerScript_ValidateClientPose(pWeapon, owner, *pose, entranceNormal, exitNormal);
+    if (reject)
+    {
+        if (sv_alter_toss_log.GetBool())
+            Warning(eDLL_T::SERVER,
+                "[OPL-TOSS] client pose rejected (%s) cmd=%d entrance=<%.1f %.1f %.1f> exit=<%.1f %.1f %.1f>\n",
+                reject, cmdNumber, pose->entrance.x, pose->entrance.y, pose->entrance.z,
+                pose->exit.x, pose->exit.y, pose->exit.z);
+        source = "server(client-rejected)";
+        return;
+    }
+
+    ServerObjectPlacementState& st = cache->state;
+    st.valid = true;
+    st.special = true;
+    st.origin = pose->entrance;
+    st.angles = pose->entranceAngles;
+    st.specialOrigin = pose->exit;
+    st.specialAngles = pose->exitAngles;
+    st.parentHandle = ServerScript_SurfaceParentHandle(pose->entrance, entranceNormal, owner);
+    st.specialParentHandle = ServerScript_SurfaceParentHandle(pose->exit, exitNormal, owner);
+    st.specialResult = 0;
+    cache->hasValidSpot = true;
+    source = "client";
+}
+
+static void ServerScript_LogTossVerdict(void* pWeapon, CPlayer* owner, int commandNumber, const char* source)
+{
+    const ServerPlacementCache* const cache = s_serverPlacementCache.Find(pWeapon);
+    if (!cache)
+        return;
+
+    const QAngle eyeAngles = ServerScript_PlayerPlacementEyeAngles(owner);
+    const Vector3D eyeOrigin = ServerScript_PlayerEyeOrigin(owner);
+    const ServerObjectPlacementState& st = cache->state;
+    Msg(eDLL_T::SERVER,
+        "[OPL-TOSS] cmd=%d src=%s valid=%d lkg=%d result=%d entrance=<%.1f %.1f %.1f> exit=<%.1f %.1f %.1f> "
+        "eye=<%.1f %.1f %.1f> ang=<%.1f %.1f %.1f>\n",
+        commandNumber, source, st.valid ? 1 : 0, cache->isLastKnownGood ? 1 : 0, st.specialResult,
+        st.origin.x, st.origin.y, st.origin.z,
+        st.specialOrigin.x, st.specialOrigin.y, st.specialOrigin.z,
+        eyeOrigin.x, eyeOrigin.y, eyeOrigin.z,
+        eyeAngles.x, eyeAngles.y, eyeAngles.z);
+}
+
 static bool ServerScript_GetWeaponPlacement(
     void* pWeapon,
     const bool specialRequested,
@@ -4743,6 +4991,35 @@ static bool ServerScript_GetWeaponPlacement(
 {
     if (!sv_alter_portal_pred_store.GetBool())
         return ServerScript_CalcWeaponPlacement(pWeapon, specialRequested, out);
+
+    // The toss anim event fires inside PlayerRunCommand, before the post-cmd
+    // hold store. Refresh at the cmd in flight so the toss reads this cmd's aim.
+    if (CPlayer* const owner = ServerScript_GetWeaponOwnerPlayer(pWeapon))
+    {
+        if (owner->HasCurrentUserCommand())
+        {
+            const CUserCmd* const cmd = owner->GetPlacementUserCommand();
+            if (cmd && cmd->command_number > 0)
+            {
+                const ServerPlacementCache* const prior = s_serverPlacementCache.Find(pWeapon);
+                const bool firstGetThisCmd = !prior || prior->cmdNumber != cmd->command_number;
+                if (firstGetThisCmd)
+                {
+                    // Surface this compute's reject reasons even when the shared budget is spent.
+                    const int savedBudget = s_serverPlacementDiagBudget;
+                    if (sv_alter_toss_log.GetBool())
+                        s_serverPlacementDiagBudget = 64;
+                    ServerScript_StoreWeaponPlacement(pWeapon, owner, cmd->command_number);
+                    s_serverPlacementDiagBudget = savedBudget;
+
+                    const char* source = "server";
+                    ServerScript_ApplyClientPlacementPose(pWeapon, owner, cmd->command_number, source);
+                    if (sv_alter_toss_log.GetBool())
+                        ServerScript_LogTossVerdict(pWeapon, owner, cmd->command_number, source);
+                }
+            }
+        }
+    }
 
     if (ServerPlacementCache* const cache = s_serverPlacementCache.Find(pWeapon))
     {
@@ -5401,6 +5678,13 @@ static SQRESULT Script_IsWeaponActivated(HSQUIRRELVM v)
 
 void Script_RegisterDedicatedWeaponNatives(void)
 {
+    static bool s_bPoseWireArmed = false;
+    if (!s_bPoseWireArmed)
+    {
+        s_bPoseWireArmed = true;
+        sv_bridge_opl_pose_wire.SetValue(1);
+    }
+
 	if (!g_serverScriptWeaponStruct)
 		return;
 

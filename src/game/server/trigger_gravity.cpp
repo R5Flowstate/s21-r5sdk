@@ -555,6 +555,17 @@ static bool TriggerGravity_CanBlackholeSeePlayer(void* pPlayer, const float trig
 	return false;
 }
 
+bool TriggerGravity_TraceLine(const Vector3D& start, const Vector3D& end, unsigned int nMask,
+	const void* pIgnore, int nCollisionGroup, CGameTrace* pTrace, int nDetail, int nTraceType)
+{
+	if (!v_UTIL_TraceLine_IgnoreEntity_WithDetail || !pTrace)
+		return false;
+
+	v_UTIL_TraceLine_IgnoreEntity_WithDetail(&start, &end, nMask,
+		reinterpret_cast<const IHandleEntity*>(pIgnore), nCollisionGroup, nDetail, nTraceType, pTrace, nullptr);
+	return true;
+}
+
 static bool TriggerGravity_ValidateNonNegFinite(const float* pVals, int nCount, const char* pszWhere)
 {
 	for (int i = 0; i < nCount; ++i)

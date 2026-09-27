@@ -41,10 +41,14 @@ struct PlayerExtendWire
 	int32_t m_tempShieldHealth;
 	int32_t m_turret;
 	int32_t m_unspoofedHardware;
+	int32_t m_activateGlide;
+	int32_t m_touchedGroundSinceLastGlide;
 
 	float m_armoredLeapStartTime;
 	float m_bleedoutStartTime;
 	float m_dragReviveOutroStartTime;
+	float m_jetpackDeactivateTime;
+	float m_prevJumpPressTime;
 	float m_jumpPadDebounceExpireTime;
 	float m_lastSprintPressTime;
 	float m_playerVehicleUseTime;
@@ -55,8 +59,12 @@ struct PlayerExtendWire
 	float m_skywardLaunchSlowEndTime;
 	float m_skywardLaunchSlowSpeed;
 	float m_skywardLaunchSlowStartTime;
+	float m_skywardDeployEndTime;
+	float m_skywardDeploySpeed;
+	float m_skywardOffsetSpeed;
 	float m_stickySprintForwardDisableTime;
 	float m_stickySprintForwardEnableTime;
+	float m_glideUpwardsBoostEndTime;
 
 	int64_t m_EadpUserId;
 	int64_t m_progressionUserId;
@@ -68,6 +76,7 @@ struct PlayerExtendWire
 	float m_ragdollCreationOrigin[3];
 	float m_skywardObstacleAvoidanceEndPos[3];
 	float m_skywardOffset[3];
+	float m_skywardDeployStartPos[3];
 };
 
 struct BCCExtendWire

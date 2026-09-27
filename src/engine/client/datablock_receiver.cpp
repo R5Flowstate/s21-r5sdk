@@ -136,7 +136,7 @@ bool ClientDataBlockReceiver::ProcessDataBlock(const double startTime, const sho
 		// NOTE: the engine's implementation of this function does NOT free
 		// this buffer when a malformed/corrupt LZ4 packet is sent to the
 		// receiver; wrapped buffer in unique_ptr to make sure it never leaks!
-		std::unique_ptr<char> encodedDataBuf(new char[SNAPSHOT_SCRATCH_BUFFER_SIZE]);
+		std::unique_ptr<char[]> encodedDataBuf(new char[SNAPSHOT_SCRATCH_BUFFER_SIZE]);
 
 		char* const pEncodedDataBuf = encodedDataBuf.get();
 		char* const dataLocation = m_pScratchBuffer + sizeof(ClientDataBlockHeader_s);

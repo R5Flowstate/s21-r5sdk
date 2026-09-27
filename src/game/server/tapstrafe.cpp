@@ -9,6 +9,7 @@
 #include "tapstrafe.h"
 #include "mantle_boost.h"
 #include "trigger_cannon.h"
+#include "jetpack.h"
 #include "player.h"
 
 //-----------------------------------------------------------------------------
@@ -61,11 +62,13 @@ static __int64 __fastcall Hook_CGameMovement_AirMove(void* ctx, float flFrameTim
 	uint32_t  nSaved   = 0;
 	uint8_t*  pLockedMove = nullptr;
 	float     savedDir[3] = {};
+	bool      bJetpackDrag = false;
 
 	if (ctx)
 	{
 		CPlayer* const player = *reinterpret_cast<CPlayer**>(
 			reinterpret_cast<uintptr_t>(ctx) + TS_CTX_OFF_PLAYER);
+		bJetpackDrag = Jetpack_AirMoveBegin(player);
 		uint8_t* const mv = *reinterpret_cast<uint8_t**>(
 			reinterpret_cast<uintptr_t>(ctx) + TS_CTX_OFF_MOVEDATA);
 
@@ -96,6 +99,9 @@ static __int64 __fastcall Hook_CGameMovement_AirMove(void* ctx, float flFrameTim
 
 	if (pLockedMove)
 		TriggerCannon_EndFlightLock(pLockedMove, savedDir);
+
+	if (bJetpackDrag)
+		Jetpack_AirMoveEnd();
 
 	return ret;
 }

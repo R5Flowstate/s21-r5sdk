@@ -14,10 +14,15 @@
 #include "game/shared/vscript_gamedll_defs.h"
 #include "game/shared/weapon_script_vars.h"
 #include "game/server/jetdrive.h"
+#include "game/server/offhand_jump_toggle.h"
+#include "game/server/glide.h"
+#include "game/server/skyward.h"
 #include "game/server/akimbo.h"
 #include "game/server/player_launch.h"
+#include "game/server/mantle_boost_vm_probe.h"
 #include "game/server/trigger_cannon.h"
 #include "game/server/melee_activity_trace.h"
+#include "game/server/weapon_custom_activity.h"
 #include "game/shared/collisionproperty.h"
 #include "game/shared/activity.h"
 #include <cstdint>
@@ -26,6 +31,7 @@
 #include "vscript/languages/squirrel_re/include/squirrel.h"
 #include "vscript_server.h"
 #include "vscript_server_placement.h"
+#include "engine/server/demo_record_sv.h"
 #include "game/shared/dt_extend.h"
 #include "game/shared/sdk_entity_state.h"
 #include "game/shared/deathfield_system.h"
@@ -76,15 +82,11 @@ static constexpr ptrdiff_t PLAYER_OFF_DUCK_HULL_MAX = 0x6620;
 static constexpr ptrdiff_t PLAYER_OFF_STAND_HULL_MIN = 0x65FC;
 static constexpr ptrdiff_t PLAYER_OFF_STAND_HULL_MAX = 0x6608;
 static constexpr ptrdiff_t PLAYER_OFF_ACTIVE_MAINHAND = 0x16CC; // inventory + activeWeapons[0]
-static constexpr ptrdiff_t WEAPON_OFF_CUSTOM_ACT_FLAGS = 0x1254; // m_customActivityFlags
-static constexpr ptrdiff_t WEAPON_OFF_ACTIVE_SLOT = 0x2930; // m_latestActiveInventorySlot
 static constexpr unsigned int WEAP_STATE_IDLE = 0;
 static constexpr unsigned int WEAP_STATE_HOLSTERED = 2;
 static constexpr unsigned int WEAP_STATE_CUSTOM_ACTIVITY = 12;
 static constexpr unsigned int WEAP_STATE_TOSS = 14; // S3 TOSS; S21 goes POST_TOSS_LOOP here
 static constexpr unsigned int WEAP_STATE_POST_TOSS_LOOP = 19;
-static constexpr unsigned char WCAF_PLAYRAISE_S3 = 2;
-static constexpr unsigned char WCAF_PLAYRAISE_S21 = 0x80;
 static constexpr unsigned int ACT_VM_IDLE_S3 = 468;
 static constexpr unsigned int ACT_VM_HOLSTER_S3 = 453;
 static constexpr int kMoveTypeWalk = 2; // MOVETYPE_WALK
@@ -326,14 +328,17 @@ static void Translocation_EndTossLoop(void* pWeapon, bool bRestoreState)
 		stateOut = prevState;
 	}
 
-	const bool bDoHolster = bRestoreState && bWasInLoop
+	// A custom activity (drop-click HITCENTER) owns the weapon until it ends
+	// on its own; holstering here cuts the viewmodel mid-animation.
+	const bool bCustomActivity = stateIn == WEAP_STATE_CUSTOM_ACTIVITY;
+	const bool bDoHolster = bRestoreState && bWasInLoop && !bCustomActivity
 		&& v_WeaponX_HolsterInternal && Translocation_OwnerAlive(pWeapon);
 
 	// Log before the clear so the line reports the flag as it was on entry.
 	if (bWasInLoop)
 		Translocation_LogTossLoop("end", pWeapon, stateIn, stateOut, held, bDoHolster ? 1 : 0);
 
-	if (bRestoreState)
+	if (bRestoreState && !bCustomActivity)
 		Translocation_ClearOneHand(pWeapon);
 
 	if (bRestoreState && bWasInLoop)
@@ -470,6 +475,8 @@ static void Translocation_BindLiveProjectile(void* pWeapon, void* pProj)
 	s_tossProjHandle[pWeapon] = SDKEntityState_GetHandle(pProj);
 	if (void* const pOwner = Translocation_WeaponOwner(pWeapon))
 		s_tossWeaponByOwner[pOwner] = SDKEntityState_GetHandle(pWeapon);
+	if (Translocation_WeaponState(pWeapon) == WEAP_STATE_CUSTOM_ACTIVITY)
+		return;
 	Translocation_BeginTossLoop(pWeapon, WEAP_STATE_IDLE);
 	Translocation_ApplyOneHand(pWeapon);
 }
@@ -1390,7 +1397,9 @@ void Translocation_RegisterWeaponFuncs(ScriptClassDescriptor_t* weaponStruct)
 static void Hook_PlayerRunCommand(CPlayer* pPlayer, CUserCmd* pUserCmd, IMoveHelper* pMover)
 {
 	Translocation_FlushDeadToss();
-	JetDrive_TickHolds(pPlayer);
+	JetDrive_PreRunCommand(pPlayer);
+	Glide_PreRunCommand(pPlayer, pUserCmd);
+	SkywardBridge_PreRunCommand(pPlayer);
 	if (pPlayer && pUserCmd && Translocation_ShouldEatAttack(pPlayer))
 	{
 		Translocation_LatchCmdBits(pPlayer, pUserCmd->buttons & kDropClickBits);
@@ -1398,6 +1407,8 @@ static void Hook_PlayerRunCommand(CPlayer* pPlayer, CUserCmd* pUserCmd, IMoveHel
 	}
 	CPlayer__PlayerRunCommand(pPlayer, pUserCmd, pMover);
 	CmdRecorder_OnRunCommand(pPlayer, pUserCmd);
+	MantleBoostVmProbe_PostRunCommand(pPlayer);
+	DemoSv_OnUserCmd(pPlayer, pUserCmd);
 	if (pPlayer)
 	{
 		if (Translocation_ShouldEatAttack(pPlayer))
@@ -1422,20 +1433,16 @@ static SQRESULT Hook_IsInputCommandPressed(HSQUIRRELVM v)
 
 static char Hook_HolsterInternal(void* pWeapon, bool bDoFastHolster)
 {
+	OffhandJumpToggle_OnHolster(pWeapon, bDoFastHolster, _ReturnAddress());
 	const unsigned int weapState = Translocation_WeaponState(pWeapon);
 	const char* const pszName = pWeapon
 		? reinterpret_cast<const char*>(
 			reinterpret_cast<uintptr_t>(pWeapon) + WEAPON_CLASSNAME_OFFSET)
 		: "?";
 	static int s_nHolsterLog = 16;
-	static int s_nLaunchHolsterLog = 32;
-	const bool bLaunchName = pszName && strstr(pszName, "companion_launch") != nullptr;
-	if (s_nHolsterLog > 0 || (bLaunchName && s_nLaunchHolsterLog > 0))
+	if (s_nHolsterLog > 0)
 	{
-		if (bLaunchName && s_nLaunchHolsterLog > 0)
-			--s_nLaunchHolsterLog;
-		if (s_nHolsterLog > 0)
-			--s_nHolsterLog;
+		--s_nHolsterLog;
 		Msg(eDLL_T::SERVER,
 			"[TRANSLOC] HolsterInternal '%s' state=%u fast=%d flag=%d\n",
 			pszName && pszName[0] ? pszName : "?", weapState,
@@ -1443,9 +1450,7 @@ static char Hook_HolsterInternal(void* pWeapon, bool bDoFastHolster)
 			Translocation_WeaponHasTossPostLoop(pWeapon) ? 1 : 0);
 	}
 
-	const bool bJdHold = JetDrive_ShouldHoldOffhand(pWeapon)
-		|| JetDrive_NoteOffhandHolster(pWeapon);
-	if (Translocation_ShouldHoldOffhand(pWeapon) || bJdHold)
+	if (Translocation_ShouldHoldOffhand(pWeapon))
 	{
 		Msg(eDLL_T::SERVER, "[TRANSLOC] skipped holster weapon=%p (hold)\n", pWeapon);
 		return 0;
@@ -1468,18 +1473,6 @@ static char Hook_HolsterInternal(void* pWeapon, bool bDoFastHolster)
 	if (pWeapon && s_tossLoopWeapons.Find(pWeapon))
 		Translocation_EndTossLoop(pWeapon, false);
 
-	// S3 skips the holster VM on bit 2; S21 skips it on 0x80.
-	if (pWeapon && weapState == WEAP_STATE_CUSTOM_ACTIVITY)
-	{
-		uint8_t* const pFlags = reinterpret_cast<uint8_t*>(
-			reinterpret_cast<uintptr_t>(pWeapon) + WEAPON_OFF_CUSTOM_ACT_FLAGS);
-		if ((*pFlags & WCAF_PLAYRAISE_S21)
-			&& !(*pFlags & WCAF_PLAYRAISE_S3))
-		{
-			*pFlags |= WCAF_PLAYRAISE_S3;
-		}
-	}
-
 	const char result = v_WeaponX_HolsterInternal(pWeapon, bDoFastHolster);
 	Translocation_ClearOneHand(pWeapon);
 	// Partner cascade only when this holster actually ran: the switch think
@@ -1490,67 +1483,8 @@ static char Hook_HolsterInternal(void* pWeapon, bool bDoFastHolster)
 	return result;
 }
 
-void Translocation_HolsterWeaponOriginal(void* pWeapon)
-{
-	if (!pWeapon || !v_WeaponX_HolsterInternal)
-		return;
-	v_WeaponX_HolsterInternal(pWeapon, true);
-}
-
-static void Translocation_FinishPlayRaise(void* pWeapon)
-{
-	if (!pWeapon)
-		return;
-
-	Msg(eDLL_T::SERVER, "[TRANSLOC] playraise complete -> holster weapon=%p\n", pWeapon);
-
-	if (v_WeaponX_HolsterInternal)
-	{
-		uint8_t* const pFlags = reinterpret_cast<uint8_t*>(
-			reinterpret_cast<uintptr_t>(pWeapon) + WEAPON_OFF_CUSTOM_ACT_FLAGS);
-		if ((*pFlags & WCAF_PLAYRAISE_S21)
-			&& !(*pFlags & WCAF_PLAYRAISE_S3))
-		{
-			*pFlags |= WCAF_PLAYRAISE_S3;
-		}
-		v_WeaponX_HolsterInternal(pWeapon, true);
-	}
-
-	void* const pOwner = Translocation_WeaponOwner(pWeapon);
-	if (pOwner && v_Weapon_SetSelectedOffhandCleared)
-	{
-		const unsigned int slot = *reinterpret_cast<const unsigned int*>(
-			reinterpret_cast<uintptr_t>(pWeapon) + WEAPON_OFF_ACTIVE_SLOT);
-		if (slot < 3)
-			v_Weapon_SetSelectedOffhandCleared(pOwner, slot);
-		else
-		{
-			v_Weapon_SetSelectedOffhandCleared(pOwner, 0);
-			v_Weapon_SetSelectedOffhandCleared(pOwner, 1);
-		}
-	}
-
-	Translocation_ClearOneHand(pWeapon);
-}
-
 static __int64 Hook_SetWeaponState(void* pWeapon, unsigned int state)
 {
-	// S3 ends custom activity on bit 2 -> IDLE. S21 ends 0x80 -> holster.
-	if (pWeapon && state == WEAP_STATE_IDLE
-		&& Translocation_WeaponState(pWeapon) == WEAP_STATE_CUSTOM_ACTIVITY)
-	{
-		const uint8_t flags = *reinterpret_cast<const uint8_t*>(
-			reinterpret_cast<uintptr_t>(pWeapon) + WEAPON_OFF_CUSTOM_ACT_FLAGS);
-		if (flags & WCAF_PLAYRAISE_S21)
-		{
-			Translocation_FinishPlayRaise(pWeapon);
-			return 1;
-		}
-	}
-
-	if (JetDrive_FilterWeaponState(pWeapon, state))
-		return 1;
-
 	if (pWeapon && Translocation_WeaponHasTossPostLoop(pWeapon)
 		&& Translocation_OwnerAlive(pWeapon))
 	{
@@ -1584,9 +1518,6 @@ static __int64 Hook_SetWeaponState(void* pWeapon, unsigned int state)
 
 static char Hook_SetIdealWeaponActivity(void* pWeapon, unsigned int activity)
 {
-	if (JetDrive_FilterIdealActivity(pWeapon, activity))
-		return 0;
-
 	if (pWeapon && s_tossLoopWeapons.Find(pWeapon))
 	{
 		if (Translocation_IsEndTossActivity(activity))
@@ -1603,15 +1534,7 @@ static char Hook_SetIdealWeaponActivity(void* pWeapon, unsigned int activity)
 
 static char Hook_StartCustomActivity(void* pWeapon, unsigned int activity, unsigned char flags)
 {
-	// S3 RegisterEnum: PLAYRAISEONCOMPLETE=2. S21 is 0x80. The byte is
-	// networked; 2 makes the client SLOBYTE>=0 path IDLE/deploy the tac.
-	if (flags & WCAF_PLAYRAISE_S3)
-	{
-		flags = static_cast<unsigned char>((flags & ~WCAF_PLAYRAISE_S3) | WCAF_PLAYRAISE_S21);
-		Msg(eDLL_T::SERVER,
-			"[TRANSLOC] playraise flags 2 -> 0x80 act=%u weapon=%p\n",
-			activity, pWeapon);
-	}
+	WeaponCustomAct_OnEngineStart(pWeapon);
 
 	if (pWeapon && s_tossLoopWeapons.Find(pWeapon)
 		&& Translocation_IsEndTossActivity(activity))
@@ -1622,6 +1545,28 @@ static char Hook_StartCustomActivity(void* pWeapon, unsigned int activity, unsig
 	const char result = v_WeaponX_StartCustomActivity(pWeapon, activity, flags);
 	MeleeActivityTrace_OnStart(pWeapon, activity, flags, result, _ReturnAddress());
 	return result;
+}
+
+void Translocation_SetMoveType(void* pEnt, int moveType)
+{
+	if (!pEnt)
+		return;
+	if (!v_CBaseEntity_SetMoveType)
+	{
+		static bool s_bWarned = false;
+		if (!s_bWarned)
+		{
+			s_bWarned = true;
+			Warning(eDLL_T::SERVER, "[TRANSLOC] SetMoveType unresolved -- Translocation_SetMoveType no-op\n");
+		}
+		return;
+	}
+	v_CBaseEntity_SetMoveType(pEnt, moveType, 0);
+}
+
+bool Translocation_SetMoveTypeResolved(void)
+{
+	return v_CBaseEntity_SetMoveType != nullptr;
 }
 
 void Translocation_LevelShutdown(void)

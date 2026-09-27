@@ -26,6 +26,10 @@
 #include "engine/server/server.h"
 #include "game/server/gameinterface.h"
 #include "game/server/util_server.h"
+#include "game/shared/sdk_entity_state.h"
+#include <string>
+#include <utility>
+#include <vector>
 
 //-----------------------------------------------------------------------------
 // CPlayer fields, read off the _setClassVarServer dispatch.
@@ -54,6 +58,14 @@ static bool s_bClassVarResolved = false;
 static bool s_bClassVarUsable = false;
 
 static FnCommandCallback_t s_fnSetClassVarServerOrig = nullptr;
+
+// Returns true when the player's settings changed and the block was rebuilt.
+static bool(__fastcall* v_CPlayer_ApplySettingsChange)(void* pPlayer, bool bForce) = nullptr;
+
+// Script writes per player, put back after every block rebuild (legend change).
+using ClassVarStickyList_t = std::vector<std::pair<std::string, std::string>>;
+static SDKEntityMap<ClassVarStickyList_t> s_classVarSticky(ESide::Server, "classvar.sticky");
+static constexpr size_t CLASSVAR_STICKY_MAX = 128;
 
 static ConVar bridge_classvar_log("bridge_classvar_log", "0", FCVAR_DEVELOPMENTONLY,
 	"Log every Player_SetClassVar key/value applied on the dedi.");
@@ -212,6 +224,69 @@ static const char* ServerScript_ClassVarFormat(const uintptr_t nAddr,
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: remember a script write so it survives the next settings rebuild
+//-----------------------------------------------------------------------------
+static void ServerScript_ClassVarRemember(void* pPlayer, const char* pszKey, const char* pszValue)
+{
+	ClassVarStickyList_t& list = s_classVarSticky[pPlayer];
+	for (auto& entry : list)
+	{
+		if (V_stricmp(entry.first.c_str(), pszKey) == 0)
+		{
+			entry.second = pszValue;
+			return;
+		}
+	}
+
+	if (list.size() >= CLASSVAR_STICKY_MAX)
+	{
+		Warning(eDLL_T::SERVER, "[CLASSVAR] sticky list full (%zu) -- '%s' will not survive a settings rebuild\n",
+			CLASSVAR_STICKY_MAX, pszKey);
+		return;
+	}
+	list.emplace_back(pszKey, pszValue);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: engine rebuilt the block from the new settings; put script values back
+//-----------------------------------------------------------------------------
+static bool __fastcall Hook_CPlayer_ApplySettingsChange(void* pPlayer, bool bForce)
+{
+	const bool bRebuilt = v_CPlayer_ApplySettingsChange(pPlayer, bForce);
+	if (!bRebuilt)
+		return bRebuilt;
+
+	const ClassVarStickyList_t* const pList = s_classVarSticky.Find(pPlayer);
+	if (!pList || pList->empty())
+		return bRebuilt;
+
+	ServerScript_ResolveClassVar();
+	if (!s_bClassVarUsable)
+		return bRebuilt;
+
+	const uintptr_t nPlayer = reinterpret_cast<uintptr_t>(pPlayer);
+	int nApplied = 0;
+	for (const auto& entry : *pList)
+	{
+		uintptr_t nBase = 0;
+		uint16_t nType = 0;
+		uint16_t nOffset = 0;
+		if (!ServerScript_ClassVarResolveKey(nPlayer, entry.first.c_str(), &nBase, &nType, &nOffset))
+			continue;
+		v_ClassVar_Write(nBase, 0, 0, nType, nOffset, entry.second.c_str());
+		nApplied++;
+	}
+
+	if (nApplied)
+		v_ClassVar_Apply(pPlayer);
+
+	if (bridge_classvar_log.GetBool())
+		Msg(eDLL_T::SERVER, "[CLASSVAR] settings rebuild -- replayed %d/%zu\n", nApplied, pList->size());
+
+	return bRebuilt;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Player_SetClassVar(entity player, string key, string value)
 //-----------------------------------------------------------------------------
 static SQRESULT ServerScript_SetClassVar(HSQUIRRELVM v)
@@ -236,7 +311,7 @@ static SQRESULT ServerScript_SetClassVar(HSQUIRRELVM v)
 	}
 
 	void* const pPlayer = ServerScript_EntityPtrFromStackIdx(v, 2);
-	if (!pPlayer)
+	if (!pPlayer || !ServerScript_EntityIsPlayer(pPlayer))
 	{
 		Warning(eDLL_T::SERVER,
 			"[CLASSVAR] refused: no player entity for '%s'\n", pszKey);
@@ -259,6 +334,7 @@ static SQRESULT ServerScript_SetClassVar(HSQUIRRELVM v)
 
 	v_ClassVar_Write(nBase, 0, 0, nType, nOffset, pszValue);
 	v_ClassVar_Apply(pPlayer);
+	ServerScript_ClassVarRemember(pPlayer, pszKey, pszValue);
 
 	if (bridge_classvar_log.GetBool())
 	{
@@ -539,4 +615,23 @@ void ClassVar_BindShipped(void)
 	pCmd->m_fnCommandCallback = ClassVar_SetClassVarServer_f;
 
 	Msg(eDLL_T::SERVER, "[CLASSVAR] _setClassVarServer: cheat-gated, wrapped\n");
+}
+
+void VClassVarNatives::GetAdr(void) const
+{
+	LogFunAdr("CPlayer_ApplySettingsChange", v_CPlayer_ApplySettingsChange);
+}
+
+void VClassVarNatives::GetFun(void) const
+{
+	// Server half: the block pointer at +0x5F08 is the CPlayer class-var block.
+	Module_FindPattern(g_GameDll,
+		"40 53 57 41 56 48 83 EC 60 48 8B 99 08 5F 00 00 48 8B F9 84 D2")
+		.GetPtr(v_CPlayer_ApplySettingsChange);
+}
+
+void VClassVarNatives::Detour(const bool bAttach) const
+{
+	if (v_CPlayer_ApplySettingsChange)
+		DetourSetup(&v_CPlayer_ApplySettingsChange, &Hook_CPlayer_ApplySettingsChange, bAttach);
 }

@@ -16,6 +16,7 @@
 #include "tier1/cvar.h"
 #include "game/shared/dt_extend.h"
 #include "game/shared/sdk_entity_state.h"
+#include "game/server/melee_activity_trace.h"
 #include <cstring>
 
 static ConVar bridge_anim_anchor_proxy("bridge_anim_anchor_proxy", "1",
@@ -116,6 +117,8 @@ static bool AnimAnchorProxy_Latch(const void* pStruct, const int objectID)
 		s_aapLastSeq[objectID]      = seq;
 	}
 	s_aapPrevQCyc[objectID] = qCyc;
+	MeleeActivityTrace_OnAnchorEncode(pStruct, objectID, seq, nowT, qCyc,
+		s_aapHeldStart[objectID], s_aapHeldStartCyc[objectID], seqChanged || cycleRestart);
 	return true;
 }
 

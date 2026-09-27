@@ -978,8 +978,13 @@ void ConVar::ChangeStringValue(const char* tempVal)
 {
 	Assert(!(m_nFlags & FCVAR_NEVER_AS_STRING));
 
-	char* pszOldValue = (char*)stackalloc(m_Value.m_iStringLength);
-	memcpy(pszOldValue, m_Value.m_pszString, m_Value.m_iStringLength);
+	// The old value is kept for the change callbacks; a long previous value must not size a stack allocation.
+	char szOldStack[512];
+	szOldStack[0] = '\0';
+	const size_t nOldLen = m_Value.m_iStringLength;
+	char* const pszOldValue = nOldLen <= sizeof(szOldStack) ? szOldStack : new char[nOldLen];
+	if (nOldLen && m_Value.m_pszString)
+		memcpy(pszOldValue, m_Value.m_pszString, nOldLen);
 
 	const size_t len = V_strlen(tempVal) + 1;
 
@@ -1008,7 +1013,8 @@ void ConVar::ChangeStringValue(const char* tempVal)
 		g_pCVar->CallGlobalChangeCallbacks(this, pszOldValue);
 	}
 
-	stackfree(pszOldValue);
+	if (pszOldValue != szOldStack)
+		delete[] pszOldValue;
 }
 
 //-----------------------------------------------------------------------------
@@ -2094,8 +2100,13 @@ void ConVar::ChangeStringValue(const char* tempVal)
 {
 	Assert(!(m_nFlags & FCVAR_NEVER_AS_STRING));
 
-	char* pszOldValue = (char*)stackalloc(m_Value.m_iStringLength);
-	memcpy(pszOldValue, m_Value.m_pszString, m_Value.m_iStringLength);
+	// The old value is kept for the change callbacks; a long previous value must not size a stack allocation.
+	char szOldStack[512];
+	szOldStack[0] = '\0';
+	const size_t nOldLen = m_Value.m_iStringLength;
+	char* const pszOldValue = nOldLen <= sizeof(szOldStack) ? szOldStack : new char[nOldLen];
+	if (nOldLen && m_Value.m_pszString)
+		memcpy(pszOldValue, m_Value.m_pszString, nOldLen);
 
 	const size_t len = V_strlen(tempVal) + 1;
 
@@ -2124,7 +2135,8 @@ void ConVar::ChangeStringValue(const char* tempVal)
 		g_pCVar->CallGlobalChangeCallbacks(this, pszOldValue);
 	}
 
-	stackfree(pszOldValue);
+	if (pszOldValue != szOldStack)
+		delete[] pszOldValue;
 }
 
 //-----------------------------------------------------------------------------

@@ -42,6 +42,27 @@ ConVar spire_matchmaking_insecure("spire_matchmaking_insecure", "0", FCVAR_RELEA
 //          &outGameServer - 
 // Output : true on success, false on failure.
 //-----------------------------------------------------------------------------
+// Listings are server-authored; the browser rescans these lists every frame.
+static void Spire_ReadModIdList(const rapidjson::Value& value, const char* const pszKey, vector<string>& outList)
+{
+    constexpr size_t kMaxModIds = 64;
+    constexpr size_t kMaxModIdLen = 64;
+
+    rapidjson::Document::ConstMemberIterator it;
+    if (!JSON_GetIterator(value, rapidjson::StringRef(pszKey), JSONFieldType_e::kArray, it))
+        return;
+
+    outList.clear();
+    for (const rapidjson::Value& item : it->value.GetArray())
+    {
+        if (outList.size() >= kMaxModIds)
+            break;
+
+        if (item.IsString() && item.GetStringLength() && item.GetStringLength() <= kMaxModIdLen)
+            outList.emplace_back(item.GetString(), item.GetStringLength());
+    }
+}
+
 static bool GetServerListingFromJSON(const rapidjson::Value& value, NetGameServer_t& outGameServer)
 {
     if (JSON_GetValue(value, "name",        outGameServer.name)        &&
@@ -62,34 +83,8 @@ static bool GetServerListingFromJSON(const rapidjson::Value& value, NetGameServe
         JSON_GetValue(value, "modsProfile", outGameServer.modsProfile);
         JSON_GetValue(value, "region",      outGameServer.region);
 
-        // requiredMods (optional): parse manually from array of strings
-        rapidjson::Document::ConstMemberIterator itReq;
-        if (JSON_GetIterator(value, "requiredMods", JSONFieldType_e::kArray, itReq))
-        {
-            outGameServer.requiredMods.clear();
-            const rapidjson::Value& arr = itReq->value;
-            for (const rapidjson::Value& item : arr.GetArray())
-            {
-                if (item.IsString())
-                {
-                    outGameServer.requiredMods.emplace_back(std::string(item.GetString(), item.GetStringLength()));
-                }
-            }
-        }
-
-        rapidjson::Document::ConstMemberIterator itAllow;
-        if (JSON_GetIterator(value, "allowedMods", JSONFieldType_e::kArray, itAllow))
-        {
-            outGameServer.allowedMods.clear();
-            const rapidjson::Value& arrAllow = itAllow->value;
-            for (const rapidjson::Value& item : arrAllow.GetArray())
-            {
-                if (item.IsString())
-                {
-                    outGameServer.allowedMods.emplace_back(std::string(item.GetString(), item.GetStringLength()));
-                }
-            }
-        }
+        Spire_ReadModIdList(value, "requiredMods", outGameServer.requiredMods);
+        Spire_ReadModIdList(value, "allowedMods", outGameServer.allowedMods);
         return true;
     }
 

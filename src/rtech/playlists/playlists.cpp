@@ -9,12 +9,14 @@
 #include "playlists.h"
 #include "pluginsystem/modsystem.h"
 #include "filesystem/filesystem.h"
+#include "tier0/commandline.h"
 
 static ConVar playlist_debug("playlist_debug", "0", FCVAR_DEVELOPMENTONLY, "Enable debug logging for playlist mod system");
 
 KeyValues** g_pPlaylistKeyValues = nullptr; // The KeyValue for the playlist file.
 char* g_pPlaylistMapToLoad = nullptr;
 int64_t* g_pPlaylistOverrideCount = nullptr;
+bool* g_pPlaylistOverridesDirty = nullptr;
 char* g_pPlaylistOverrideTable = nullptr;
 
 CUtlVector<CUtlString> g_vecAllPlaylists;   // Cached playlists entries.
@@ -46,8 +48,8 @@ static bool Playlists_MakeExePlatformPath(char* path, const size_t n, const char
 		return false;
 
 	slash[1] = '\0';
-	V_strncat(path, "platform\\", n);
-	V_strncat(path, pszFile, n);
+	V_strcat_sized(path, "platform\\", n);
+	V_strcat_sized(path, pszFile, n);
 	return true;
 }
 
@@ -206,6 +208,52 @@ void Playlists_LoadOverlayCatalog(void)
 #endif // CLIENT_DLL
 }
 
+// Each enabled mod's playlist patch, parsed at most once per merge. The orphan
+// checks run once per base entry, so reloading the file per entry is quadratic.
+struct ModPatchCache_t
+{
+	CUtlVector<CUtlString> ids;
+	CUtlVector<KeyValues*> patches;
+
+	~ModPatchCache_t()
+	{
+		FOR_EACH_VEC(patches, i)
+			delete patches[i];
+	}
+
+	KeyValues* Get(const CModSystem::ModInstance_t* const pMod)
+	{
+		FOR_EACH_VEC(ids, i)
+		{
+			if (!V_strcmp(ids[i].String(), pMod->id.String()))
+				return patches[i];
+		}
+
+		static const char* const kPatchFiles[] = { "playlists_r5_patch.txt", "playlist_r5_patch.txt" };
+
+		KeyValues* pLoaded = nullptr;
+		for (int j = 0; j < Q_ARRAYSIZE(kPatchFiles); ++j)
+		{
+			CUtlString patchPath = pMod->GetBasePath();
+			patchPath += kPatchFiles[j];
+			if (!FileSystem()->FileExists(patchPath.Get(), "GAME"))
+				continue;
+
+			pLoaded = new KeyValues("playlists");
+			if (!pLoaded->LoadFromFile(FileSystem(), patchPath.Get(), "GAME"))
+			{
+				delete pLoaded;
+				pLoaded = nullptr;
+			}
+			break;
+		}
+
+		ids.AddToTail(pMod->id);
+		patches.AddToTail(pLoaded);
+		return pLoaded;
+	}
+};
+
 //-----------------------------------------------------------------------------
 // Purpose: Merges mod playlist patches into the base playlist file at startup
 //-----------------------------------------------------------------------------
@@ -223,6 +271,7 @@ void MergeModPlaylistsIntoFile()
 	}
 
 	bool hasChanges = false;
+	ModPatchCache_t patchCache;
 
 	// First, clean up orphaned mod playlists from the base file
 	KeyValues* pBasePlaylists = pBaseKV->FindKey("Playlists");
@@ -265,36 +314,15 @@ void MergeModPlaylistsIntoFile()
 					FOR_EACH_VEC(ModSystem()->GetModList(), i)
 					{
 						CModSystem::ModInstance_t* const pMod = ModSystem()->GetModList()[i];
-						if (pMod && pMod->IsEnabled() && V_strcmp(pMod->name.String(), forMod) == 0)
+						if (pMod && pMod->IsEnabled() && V_strcmp(pMod->id.String(), forMod) == 0)
 						{
-							// Check if this mod still provides this specific playlist
-							static const char* kPatchFiles[] = {
-								"playlists_r5_patch.txt",
-								"playlist_r5_patch.txt"
-							};
-
-							for (int j = 0; j < Q_ARRAYSIZE(kPatchFiles); ++j)
+							KeyValues* const pModKV = patchCache.Get(pMod);
+							KeyValues* const pModSection = pModKV ? pModKV->FindKey("Playlists") : nullptr;
+							if (pModSection && pModSection->FindKey(playlistName, false))
 							{
-								CUtlString patchPath = pMod->GetBasePath();
-								patchPath += kPatchFiles[j];
-
-								if (!FileSystem()->FileExists(patchPath.Get(), "GAME"))
-									continue;
-
-								// Load mod's playlist patch to check if it still provides this playlist
-								KeyValues* pModKV = new KeyValues("playlists");
-								if (pModKV->LoadFromFile(FileSystem(), patchPath.Get(), "GAME"))
-								{
-									KeyValues* pModPlaylists = pModKV->FindKey("Playlists");
-									if (pModPlaylists && pModPlaylists->FindKey(playlistName, false))
-									{
-										playlistStillProvided = true;
-										if (playlist_debug.GetBool())
-											Msg(eDLL_T::ENGINE, "Mod '%s' still provides playlist '%s', keeping it\n", forMod, playlistName);
-									}
-								}
-								delete pModKV;
-								break; // Only check first found patch file
+								playlistStillProvided = true;
+								if (playlist_debug.GetBool())
+									Msg(eDLL_T::ENGINE, "Mod '%s' still provides playlist '%s', keeping it\n", forMod, playlistName);
 							}
 							break;
 						}
@@ -307,6 +335,7 @@ void MergeModPlaylistsIntoFile()
 					Msg(eDLL_T::ENGINE, "Removing orphaned playlist '%s' (mod '%s' no longer provides it)\n", 
 						playlistName, forMod);
 					pBasePlaylists->RemoveSubKey(pPlaylist);
+					pPlaylist->DeleteThis();
 					hasChanges = true;
 				}
 			}
@@ -352,36 +381,15 @@ void MergeModPlaylistsIntoFile()
 					FOR_EACH_VEC(ModSystem()->GetModList(), i)
 					{
 						CModSystem::ModInstance_t* const pMod = ModSystem()->GetModList()[i];
-						if (pMod && pMod->IsEnabled() && V_strcmp(pMod->name.String(), forMod) == 0)
+						if (pMod && pMod->IsEnabled() && V_strcmp(pMod->id.String(), forMod) == 0)
 						{
-							// Check if this mod still provides this specific gamemode
-							static const char* kPatchFiles[] = {
-								"playlists_r5_patch.txt",
-								"playlist_r5_patch.txt"
-							};
-
-							for (int j = 0; j < Q_ARRAYSIZE(kPatchFiles); ++j)
+							KeyValues* const pModKV = patchCache.Get(pMod);
+							KeyValues* const pModSection = pModKV ? pModKV->FindKey("Gamemodes") : nullptr;
+							if (pModSection && pModSection->FindKey(gamemodeName, false))
 							{
-								CUtlString patchPath = pMod->GetBasePath();
-								patchPath += kPatchFiles[j];
-
-								if (!FileSystem()->FileExists(patchPath.Get(), "GAME"))
-									continue;
-
-								// Load mod's playlist patch to check if it still provides this gamemode
-								KeyValues* pModKV = new KeyValues("playlists");
-								if (pModKV->LoadFromFile(FileSystem(), patchPath.Get(), "GAME"))
-								{
-									KeyValues* pModGamemodes = pModKV->FindKey("Gamemodes");
-									if (pModGamemodes && pModGamemodes->FindKey(gamemodeName, false))
-									{
-										gamemodeStillProvided = true;
-										if (playlist_debug.GetBool())
-											Msg(eDLL_T::ENGINE, "Mod '%s' still provides gamemode '%s', keeping it\n", forMod, gamemodeName);
-									}
-								}
-								delete pModKV;
-								break; // Only check first found patch file
+								gamemodeStillProvided = true;
+								if (playlist_debug.GetBool())
+									Msg(eDLL_T::ENGINE, "Mod '%s' still provides gamemode '%s', keeping it\n", forMod, gamemodeName);
 							}
 							break;
 						}
@@ -394,6 +402,7 @@ void MergeModPlaylistsIntoFile()
 					Msg(eDLL_T::ENGINE, "Removing orphaned gamemode '%s' (mod '%s' no longer provides it)\n", 
 						gamemodeName, forMod);
 					pBaseGamemodes->RemoveSubKey(pGamemode);
+					pGamemode->DeleteThis();
 					hasChanges = true;
 				}
 			}
@@ -465,18 +474,20 @@ void MergeModPlaylistsIntoFile()
 					if (!forMod || !forMod[0])
 					{
 						Warning(eDLL_T::ENGINE, "Mod '%s': Playlist '%s' missing required 'for_mod' variable - skipping\n", 
-							pMod->name.String(), playlistName);
+							pMod->id.String(), playlistName);
 						pModPlaylists->RemoveSubKey(pPlaylist);
+						pPlaylist->DeleteThis();
 						pPlaylist = pNext;
 						continue;
 					}
 					
 					// Check if for_mod matches this mod's name
-					if (V_strcmp(forMod, pMod->name.String()) != 0)
+					if (V_strcmp(forMod, pMod->id.String()) != 0)
 					{
 						Warning(eDLL_T::ENGINE, "Mod '%s': Playlist '%s' has for_mod='%s' but should be '%s' - skipping\n", 
-							pMod->name.String(), playlistName, forMod, pMod->name.String());
+							pMod->id.String(), playlistName, forMod, pMod->id.String());
 						pModPlaylists->RemoveSubKey(pPlaylist);
+						pPlaylist->DeleteThis();
 						pPlaylist = pNext;
 						continue;
 					}
@@ -501,8 +512,18 @@ void MergeModPlaylistsIntoFile()
 						{
 							// This is a base game playlist, don't override it
 							Warning(eDLL_T::ENGINE, "Mod '%s': Cannot override base game playlist '%s' - skipping\n", 
-								pMod->name.String(), playlistName);
+								pMod->id.String(), playlistName);
 							pModPlaylists->RemoveSubKey(pPlaylist);
+							pPlaylist->DeleteThis();
+							pPlaylist = pNext;
+							continue;
+						}
+						else if (V_strcmp(existingForMod, pMod->id.String()) != 0)
+						{
+							Warning(eDLL_T::ENGINE, "Mod '%s': playlist '%s' belongs to mod '%s' - skipping\n",
+								pMod->id.String(), playlistName, existingForMod);
+							pModPlaylists->RemoveSubKey(pPlaylist);
+							pPlaylist->DeleteThis();
 							pPlaylist = pNext;
 							continue;
 						}
@@ -510,8 +531,9 @@ void MergeModPlaylistsIntoFile()
 						{
 							// Remove existing mod playlist so this one replaces it
 							pBasePlaylists->RemoveSubKey(pExistingPlaylist);
+							pExistingPlaylist->DeleteThis();
 							Msg(eDLL_T::ENGINE, "Replacing existing mod playlist '%s' with version from mod '%s'\n", 
-								playlistName, pMod->name.String());
+								playlistName, pMod->id.String());
 						}
 					}
 					
@@ -544,18 +566,20 @@ void MergeModPlaylistsIntoFile()
 					if (!forMod || !forMod[0])
 					{
 						Warning(eDLL_T::ENGINE, "Mod '%s': Gamemode '%s' missing required 'for_mod' variable - skipping\n", 
-							pMod->name.String(), gamemodeName);
+							pMod->id.String(), gamemodeName);
 						pModGamemodes->RemoveSubKey(pGamemode);
+						pGamemode->DeleteThis();
 						pGamemode = pNext;
 						continue;
 					}
 					
 					// Check if for_mod matches this mod's name
-					if (V_strcmp(forMod, pMod->name.String()) != 0)
+					if (V_strcmp(forMod, pMod->id.String()) != 0)
 					{
 						Warning(eDLL_T::ENGINE, "Mod '%s': Gamemode '%s' has for_mod='%s' but should be '%s' - skipping\n", 
-							pMod->name.String(), gamemodeName, forMod, pMod->name.String());
+							pMod->id.String(), gamemodeName, forMod, pMod->id.String());
 						pModGamemodes->RemoveSubKey(pGamemode);
+						pGamemode->DeleteThis();
 						pGamemode = pNext;
 						continue;
 					}
@@ -580,8 +604,18 @@ void MergeModPlaylistsIntoFile()
 						{
 							// This is a base game gamemode, don't override it
 							Warning(eDLL_T::ENGINE, "Mod '%s': Cannot override base game gamemode '%s' - skipping\n", 
-								pMod->name.String(), gamemodeName);
+								pMod->id.String(), gamemodeName);
 							pModGamemodes->RemoveSubKey(pGamemode);
+							pGamemode->DeleteThis();
+							pGamemode = pNext;
+							continue;
+						}
+						else if (V_strcmp(existingForMod, pMod->id.String()) != 0)
+						{
+							Warning(eDLL_T::ENGINE, "Mod '%s': gamemode '%s' belongs to mod '%s' - skipping\n",
+								pMod->id.String(), gamemodeName, existingForMod);
+							pModGamemodes->RemoveSubKey(pGamemode);
+							pGamemode->DeleteThis();
 							pGamemode = pNext;
 							continue;
 						}
@@ -589,12 +623,51 @@ void MergeModPlaylistsIntoFile()
 						{
 							// Remove existing mod gamemode so this one replaces it
 							pBaseGamemodes->RemoveSubKey(pExistingGamemode);
+							pExistingGamemode->DeleteThis();
 							Msg(eDLL_T::ENGINE, "Replacing existing mod gamemode '%s' with version from mod '%s'\n", 
-								gamemodeName, pMod->name.String());
+								gamemodeName, pMod->id.String());
 						}
 					}
 					
 					pGamemode = pNext;
+				}
+			}
+
+			// A patch contributes playlists and gamemodes only; any other section
+			// (KVFileOverrides and the like) would reach past its own content.
+			// Only the first section of each name was validated above; a repeated one would merge unchecked.
+			for (KeyValues* pSection = pModKV->GetFirstSubKey(); pSection; )
+			{
+				KeyValues* const pNextSection = pSection->GetNextKey();
+				const char* const pszSection = pSection->GetName();
+				if (!(pSection == pModPlaylists && pBasePlaylists) && !(pSection == pModGamemodes && pBaseGamemodes))
+				{
+					Warning(eDLL_T::ENGINE, "Mod '%s': playlist patch section '%s' is not allowed - dropped\n",
+						pMod->id.String(), pszSection);
+					pModKV->RemoveSubKey(pSection);
+					pSection->DeleteThis();
+				}
+				pSection = pNextSection;
+			}
+
+			// Engines divide by max_teams as a byte.
+			for (KeyValues* pSection = pModKV->GetFirstTrueSubKey(); pSection; pSection = pSection->GetNextTrueSubKey())
+			{
+				for (KeyValues* pEntry = pSection->GetFirstTrueSubKey(); pEntry; pEntry = pEntry->GetNextTrueSubKey())
+				{
+					KeyValues* const pVars = pEntry->FindKey("vars");
+					KeyValues* const pMaxTeams = pVars ? pVars->FindKey("max_teams") : nullptr;
+					if (!pMaxTeams)
+						continue;
+
+					const unsigned long nTeams = strtoul(pMaxTeams->GetString(), nullptr, 10);
+					if (nTeams < 1 || nTeams > 255)
+					{
+						Warning(eDLL_T::ENGINE, "Mod '%s': '%s' max_teams '%s' out of range - dropped\n",
+							pMod->id.String(), pEntry->GetName(), pMaxTeams->GetString());
+						pVars->RemoveSubKey(pMaxTeams);
+						pMaxTeams->DeleteThis();
+					}
 				}
 			}
 
@@ -603,7 +676,7 @@ void MergeModPlaylistsIntoFile()
 			delete pModKV;
 			hasChanges = true;
 			
-			Msg(eDLL_T::ENGINE, "Merged playlist patch from mod '%s' into base file\n", pMod->name.String());
+			Msg(eDLL_T::ENGINE, "Merged playlist patch from mod '%s' into base file\n", pMod->id.String());
 			break; // Only use first found patch file per mod
 		}
 	}
@@ -668,6 +741,206 @@ static void Host_ReloadPlaylists_f()
 static ConCommand playlist_reload("playlist_reload", Host_ReloadPlaylists_f, "Reloads the playlists file", FCVAR_RELEASE);
 
 //-----------------------------------------------------------------------------
+// Purpose: reads a var from a playlist's own vars block, following its
+//          inherit chain; returns nullptr when no playlist in the chain sets it
+//-----------------------------------------------------------------------------
+const char* Playlists_FindVar(const char* pszPlaylist, const char* pszVar)
+{
+	if (!pszPlaylist || !pszPlaylist[0] || !pszVar || !pszVar[0])
+		return nullptr;
+
+	KeyValues* const pRoot = Playlists_GetRootKV();
+	KeyValues* const pPlaylists = pRoot ? pRoot->FindKey("Playlists") : nullptr;
+	if (!pPlaylists)
+		return nullptr;
+
+	KeyValues* pPl = pPlaylists->FindKey(pszPlaylist);
+	for (int depth = 0; pPl && depth < 16; depth++)
+	{
+		KeyValues* const pVars = pPl->FindKey("vars");
+		KeyValues* const pVal = pVars ? pVars->FindKey(pszVar) : nullptr;
+		if (pVal)
+			return pVal->GetString();
+
+		const char* const pszParent = pPl->GetString("inherit", "");
+		if (!pszParent[0])
+			break;
+		pPl = pPlaylists->FindKey(pszParent);
+	}
+
+	return nullptr;
+}
+
+bool Playlists_IsSettingDeclName(const char* pszVar)
+{
+	return pszVar && V_strnicmp(pszVar, PLAYLIST_SETTING_PREFIX, sizeof(PLAYLIST_SETTING_PREFIX) - 1) == 0;
+}
+
+const char* Playlists_FindSettingDecl(const char* pszPlaylist, const char* pszVar)
+{
+	if (!pszVar || !pszVar[0] || Playlists_IsSettingDeclName(pszVar))
+		return nullptr;
+
+	char szDeclName[256];
+	V_snprintf(szDeclName, sizeof(szDeclName), PLAYLIST_SETTING_PREFIX "%s", pszVar);
+
+	const char* const pszDecl = Playlists_FindVar(pszPlaylist, szDeclName);
+	return (pszDecl && pszDecl[0]) ? pszDecl : nullptr;
+}
+
+static bool Playlists_ParseNumber(const char* psz, const bool bInteger, double& out)
+{
+	if (!psz || !psz[0])
+		return false;
+
+	char* pEnd = nullptr;
+	if (bInteger)
+		out = static_cast<double>(strtoll(psz, &pEnd, 10));
+	else
+		out = strtod(psz, &pEnd);
+
+	return pEnd && *pEnd == '\0' && isfinite(out);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: checks a value against a setting declaration ("<type> [args]|<label>")
+//-----------------------------------------------------------------------------
+bool Playlists_ValidateSetting(const char* pszDecl, const char* pszValue, char* pszReason, size_t nReasonSize)
+{
+	char szScratch[4];
+	if (!pszReason || !nReasonSize)
+	{
+		pszReason = szScratch;
+		nReasonSize = sizeof(szScratch);
+	}
+	pszReason[0] = '\0';
+
+	if (!pszDecl || !pszValue || !pszValue[0])
+	{
+		V_snprintf(pszReason, nReasonSize, "empty value");
+		return false;
+	}
+
+	// Values are plain tokens; anything else could smuggle separators into the
+	// command buffer or the wire table.
+	for (const char* p = pszValue; *p; p++)
+	{
+		const char c = *p;
+		if (!isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '.' && c != '-' && c != '+')
+		{
+			V_snprintf(pszReason, nReasonSize, "value has a character outside [A-Za-z0-9_.+-]");
+			return false;
+		}
+	}
+
+	char szSpec[256];
+	V_strncpy(szSpec, pszDecl, sizeof(szSpec));
+	if (char* const pBar = strchr(szSpec, '|'))
+		*pBar = '\0';
+
+	const char* apszTok[32];
+	int nTok = 0;
+	char* pCtx = nullptr;
+	for (char* pTok = strtok_s(szSpec, " \t", &pCtx); pTok && nTok < 32; pTok = strtok_s(nullptr, " \t", &pCtx))
+		apszTok[nTok++] = pTok;
+
+	if (nTok == 0)
+	{
+		V_snprintf(pszReason, nReasonSize, "declaration has no type");
+		return false;
+	}
+
+	const char* const pszType = apszTok[0];
+
+	if (!V_stricmp(pszType, "bool"))
+	{
+		if (!V_strcmp(pszValue, "0") || !V_strcmp(pszValue, "1"))
+			return true;
+		V_snprintf(pszReason, nReasonSize, "expected 0 or 1");
+		return false;
+	}
+
+	if (!V_stricmp(pszType, "choice"))
+	{
+		for (int i = 1; i < nTok; i++)
+		{
+			if (!V_strcmp(apszTok[i], pszValue))
+				return true;
+		}
+		V_snprintf(pszReason, nReasonSize, "not one of the declared choices");
+		return false;
+	}
+
+	const bool bInteger = !V_stricmp(pszType, "int");
+	if (!bInteger && V_stricmp(pszType, "float"))
+	{
+		V_snprintf(pszReason, nReasonSize, "unknown setting type '%s'", pszType);
+		return false;
+	}
+
+	double flMin, flMax, flValue;
+	if (nTok < 3 || !Playlists_ParseNumber(apszTok[1], bInteger, flMin) || !Playlists_ParseNumber(apszTok[2], bInteger, flMax))
+	{
+		V_snprintf(pszReason, nReasonSize, "declaration needs '%s <min> <max>'", pszType);
+		return false;
+	}
+	if (!Playlists_ParseNumber(pszValue, bInteger, flValue))
+	{
+		V_snprintf(pszReason, nReasonSize, "expected %s", bInteger ? "an integer" : "a number");
+		return false;
+	}
+	if (flValue < flMin || flValue > flMax)
+	{
+		V_snprintf(pszReason, nReasonSize, "outside %s..%s", apszTok[1], apszTok[2]);
+		return false;
+	}
+
+	return true;
+}
+
+#if !defined(CLIENT_DLL)
+//-----------------------------------------------------------------------------
+// Purpose: "Label value, Label value" for the active overrides that are declared
+//          settings of the current playlist; empty when there are none
+//-----------------------------------------------------------------------------
+void Playlists_DescribeActiveSettings(char* pszOut, const size_t nOutSize)
+{
+	if (!pszOut || !nOutSize)
+		return;
+	pszOut[0] = '\0';
+
+	if (!g_pPlaylistOverrideCount || !g_pPlaylistOverrideTable)
+		return;
+
+	const char* const pszPlaylist = Playlists_GetCurrentName();
+	const int64_t count = *g_pPlaylistOverrideCount;
+	size_t used = 0;
+
+	for (int64_t i = 0; i < count && i < PLAYLIST_OVERRIDE_MAX_ENTRIES; i++)
+	{
+		const char* const pszName = g_pPlaylistOverrideTable + i * PLAYLIST_OVERRIDE_STRIDE;
+		const char* const pszValue = pszName + PLAYLIST_OVERRIDE_VALUE_OFFSET;
+		const char* const pszDecl = Playlists_FindSettingDecl(pszPlaylist, pszName);
+		if (!pszDecl)
+			continue;
+
+		const char* const pszBar = strchr(pszDecl, '|');
+		const char* const pszLabel = (pszBar && pszBar[1]) ? pszBar + 1 : pszName;
+		const bool bBool = !V_strnicmp(pszDecl, "bool", 4);
+		const char* const pszShown = bBool ? (!V_strcmp(pszValue, "1") ? "on" : "off") : pszValue;
+
+		const int n = V_snprintf(pszOut + used, nOutSize - used, "%s%s %s", used ? ", " : "", pszLabel, pszShown);
+		if (n < 0 || used + n >= nOutSize)
+		{
+			pszOut[used] = '\0';
+			break;
+		}
+		used += n;
+	}
+}
+#endif // !CLIENT_DLL
+
+//-----------------------------------------------------------------------------
 // Purpose: server-authoritative playlist var overrides. Wire nameLen < 128, valueLen < 64.
 //-----------------------------------------------------------------------------
 #define PLAYLIST_OVERRIDE_NAME_MAX 127
@@ -678,22 +951,56 @@ static int Playlist_GetVarOverrideCount(void)
 	return g_pPlaylistOverrideCount ? (int)*g_pPlaylistOverrideCount : -1;
 }
 
-static void CC_Playlist_SetVarOverride_f(const CCommand& args)
+//-----------------------------------------------------------------------------
+// Purpose: writes an override into the engine table. The engine helper only
+//          authors once the server is active; before that it sends a clc to a
+//          server that does not exist yet and drops the write, which loses every
+//          launch-time override. The table survives level load, so write it here.
+//-----------------------------------------------------------------------------
+static void Playlist_AuthorVarOverride(const char* const pszName, const char* const pszValue)
 {
-	if (args.ArgC() != 3)
+#if !defined(CLIENT_DLL)
+	if (g_pPlaylistOverrideCount && g_pPlaylistOverrideTable && g_pPlaylistOverridesDirty)
 	{
-		Msg(eDLL_T::ENGINE, "usage: playlist_override_set <var> <value>\n");
+		const int64_t count = *g_pPlaylistOverrideCount;
+		char* pszEntry = nullptr;
+
+		for (int64_t i = 0; i < count && i < PLAYLIST_OVERRIDE_MAX_ENTRIES; i++)
+		{
+			char* const pszSlot = g_pPlaylistOverrideTable + i * PLAYLIST_OVERRIDE_STRIDE;
+			if (V_stricmp(pszSlot, pszName) == 0)
+			{
+				pszEntry = pszSlot;
+				break;
+			}
+		}
+
+		if (!pszEntry)
+		{
+			if (count < 0 || count >= PLAYLIST_OVERRIDE_MAX_ENTRIES)
+				return;
+
+			pszEntry = g_pPlaylistOverrideTable + count * PLAYLIST_OVERRIDE_STRIDE;
+			V_strncpy(pszEntry, pszName, PLAYLIST_OVERRIDE_VALUE_OFFSET);
+			*g_pPlaylistOverrideCount = count + 1;
+		}
+
+		V_strncpy(pszEntry + PLAYLIST_OVERRIDE_VALUE_OFFSET, pszValue, PLAYLIST_OVERRIDE_STRIDE - PLAYLIST_OVERRIDE_VALUE_OFFSET);
+		*g_pPlaylistOverridesDirty = true;
 		return;
 	}
+#endif // !CLIENT_DLL
 
+	v_Playlist_SetVarOverride(pszName, pszValue);
+}
+
+static void Playlist_ApplyVarOverride(const char* const pszName, const char* const pszValue)
+{
 	if (!v_Playlist_SetVarOverride)
 	{
 		Warning(eDLL_T::ENGINE, "[PLO] Playlist_SetVarOverride unresolved -- overrides unavailable\n");
 		return;
 	}
-
-	const char* const pszName = args.Arg(1);
-	const char* const pszValue = args.Arg(2);
 
 	if (!pszName[0] || V_strlen(pszName) > PLAYLIST_OVERRIDE_NAME_MAX)
 	{
@@ -706,8 +1013,31 @@ static void CC_Playlist_SetVarOverride_f(const CCommand& args)
 		return;
 	}
 
+	if (Playlists_IsSettingDeclName(pszName))
+	{
+		Warning(eDLL_T::ENGINE, "[PLO] '%s' is a setting declaration and cannot be overridden\n", pszName);
+		return;
+	}
+
+	const char* const pszPlaylist = Playlists_GetCurrentName();
+	const char* const pszDecl = Playlists_FindSettingDecl(pszPlaylist, pszName);
+	if (pszDecl)
+	{
+		char szReason[128];
+		if (!Playlists_ValidateSetting(pszDecl, pszValue, szReason, sizeof(szReason)))
+		{
+			Warning(eDLL_T::ENGINE, "[PLO] '%s' = '%s' rejected for playlist '%s': %s\n", pszName, pszValue, pszPlaylist, szReason);
+			return;
+		}
+	}
+	else if (pszPlaylist[0])
+	{
+		Warning(eDLL_T::ENGINE, "[PLO] '%s' is not a declared setting of playlist '%s'; the server uses it, "
+			"clients only if their bridge_playlist_override_allow lists it\n", pszName, pszPlaylist);
+	}
+
 	const int before = Playlist_GetVarOverrideCount();
-	v_Playlist_SetVarOverride(pszName, pszValue);
+	Playlist_AuthorVarOverride(pszName, pszValue);
 	const int after = Playlist_GetVarOverrideCount();
 
 	// A new name that did not raise the count means the engine hit its 64-entry
@@ -716,6 +1046,68 @@ static void CC_Playlist_SetVarOverride_f(const CCommand& args)
 		Warning(eDLL_T::ENGINE, "[PLO] override table full (%d) -- '%s' not added\n", after, pszName);
 	else
 		Msg(eDLL_T::ENGINE, "[PLO] override '%s' = '%s' (%d active)\n", pszName, pszValue, after);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: the engine runs every "+playlist_override_set" launch token with the
+//          single token after the FIRST occurrence, so each run sees the first
+//          var name and no value. Apply every pair from the launch line once.
+//-----------------------------------------------------------------------------
+static bool Playlist_ApplyLaunchOverrides(const char* const pszName)
+{
+	static bool s_bApplied = false;
+	if (!CommandLine() || !pszName || !pszName[0])
+		return false;
+
+	const int nParms = CommandLine()->ParmCount();
+	bool bNamed = false;
+	for (int i = 0; i + 1 < nParms; i++)
+	{
+		const char* const pszParm = CommandLine()->GetParm(i);
+		const char* const pszParmName = CommandLine()->GetParm(i + 1);
+		if (pszParm && pszParmName && V_stricmp(pszParm, "+playlist_override_set") == 0 && V_stricmp(pszParmName, pszName) == 0)
+		{
+			bNamed = true;
+			break;
+		}
+	}
+	if (!bNamed)
+		return false;
+	if (s_bApplied)
+		return true;
+	s_bApplied = true;
+
+	for (int i = 0; i + 2 < nParms; i++)
+	{
+		const char* const pszParm = CommandLine()->GetParm(i);
+		if (!pszParm || V_stricmp(pszParm, "+playlist_override_set") != 0)
+			continue;
+
+		const char* const pszParmName = CommandLine()->GetParm(i + 1);
+		const char* const pszValue = CommandLine()->GetParm(i + 2);
+		if (!pszParmName || !pszValue || pszParmName[0] == '+' || pszValue[0] == '+')
+		{
+			Warning(eDLL_T::ENGINE, "[PLO] launch-line override at token %d has no <var> <value> pair\n", i);
+			continue;
+		}
+
+		Playlist_ApplyVarOverride(pszParmName, pszValue);
+	}
+	return true;
+}
+
+static void CC_Playlist_SetVarOverride_f(const CCommand& args)
+{
+	if (args.ArgC() == 2 && Playlist_ApplyLaunchOverrides(args.Arg(1)))
+		return;
+
+	if (args.ArgC() != 3)
+	{
+		Msg(eDLL_T::ENGINE, "usage: playlist_override_set <var> <value>\n");
+		return;
+	}
+
+	Playlist_ApplyVarOverride(args.Arg(1), args.Arg(2));
 }
 
 static void CC_Playlist_ClearVarOverrides_f(const CCommand& args)
@@ -791,7 +1183,9 @@ void Playlists_SDKInit(void)
 		{
 			g_vecAllPlaylists.Purge();
 
-			for (KeyValues* pSubKey = pPlaylists->GetFirstTrueSubKey(); pSubKey != nullptr; pSubKey = pSubKey->GetNextTrueSubKey())
+			// Same cap as the other fill path: the browser rescans this list every frame.
+			int nSafety = 0;
+			for (KeyValues* pSubKey = pPlaylists->GetFirstTrueSubKey(); pSubKey != nullptr && nSafety++ < 4096; pSubKey = pSubKey->GetNextTrueSubKey())
 			{
 				g_vecAllPlaylists.AddToTail(pSubKey->GetName());
 			}

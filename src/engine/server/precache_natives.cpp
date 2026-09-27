@@ -935,6 +935,44 @@ static SQRESULT Script_PushTriggersByClassesInRealms(HSQUIRRELVM v,
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
+// Every entity whose realm mask is exactly this realm: what a realm-scoped
+// mode owns there and must destroy when the realm is released.
+static SQRESULT Script_GetEntitiesInRealmExclusive(HSQUIRRELVM v)
+{
+	SQInteger realm = -1;
+	if (SQ_FAILED(sq_getinteger(v, 2, &realm)))
+		return SQ_ERROR;
+
+	sq_newarray(v, 0);
+	if (realm < 0 || realm >= 64 || !g_serverEntityList || !v_CSquirrelVM_PushEntity_Server)
+		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+
+	const uint64_t wanted = 1ull << realm;
+
+	int safety = 0;
+	for (const CEntInfo* info = g_serverEntityList->FirstEntInfo();
+		info && safety++ < 20000;
+		info = g_serverEntityList->NextEntInfo(info))
+	{
+		if (!Trigger_IsUserPtr(info))
+			break;
+
+		CBaseEntity* const ent = reinterpret_cast<CBaseEntity*>(info->m_pEntity);
+		if (!ent || !Trigger_IsUserPtr(ent))
+			continue;
+
+		uint64_t entMask = 0;
+		memcpy(&entMask, reinterpret_cast<const uint8_t*>(ent) + kCBaseEntity_RealmsBitMask, sizeof(entMask));
+		if (entMask != wanted)
+			continue;
+
+		v_CSquirrelVM_PushEntity_Server(v, ent);
+		sq_arrayappend(v, -2);
+	}
+
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
 // Point/segment form: same params as hull variant but mins/maxs = origin.
 SQRESULT Script_GetTriggersByClassesInRealms(HSQUIRRELVM v)
 {
@@ -1520,6 +1558,12 @@ void Script_RegisterPrecacheServerNatives(CSquirrelVM* s)
 		"array< string > classes, vector start, vector end, "
 		"array< int > realms, int contentMask, vector mins, vector maxs",
 		false, Script_GetTriggersByClassesInRealms_HullSize);
+
+	Script_RegisterFuncNamed(s, "GetEntitiesInRealmExclusive",
+		"Script_GetEntitiesInRealmExclusive",
+		"Get every entity whose realms are exactly the given realm.",
+		"array< entity >", "int realm",
+		false, Script_GetEntitiesInRealmExclusive);
 
 	Script_RegisterFuncNamed(s, "ODL_FindAsset",
 		"Script_ODL_FindAsset",

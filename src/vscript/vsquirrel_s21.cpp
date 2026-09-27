@@ -12,6 +12,7 @@
 #include "tier0/commandline.h"
 #include "game/client/scriptnetdata_client.h"
 #include "vscript/vscript_s21_override.h"
+#include "vscript/script_wraps.h"
 
 extern void Cvar_ForceCommandLineDevModeForScripts();
 
@@ -792,13 +793,21 @@ static int __fastcall sq_compile_topfn_S21(
 	const size_t origLen = strlen(orig);
 
 	size_t newLen = 0;
+	// null = OOM or already has prelude -- compile original
 	char* const newBuf = DevInject_BuildSourceWithPrelude(
 		orig, origLen, devValue, &newLen);
-	// null = OOM or already has prelude -- compile original
-	if (!newBuf)
+
+	// The script VM keeps its context at +0x60 (0 server, 1 client, 2 ui).
+	const int vmContext = a1 ? *reinterpret_cast<const uint8_t*>(
+		reinterpret_cast<uintptr_t>(a1) + 0x60) : -1;
+	size_t wrappedLen = 0;
+	char* const wrappedBuf = ScriptWraps_RewriteSource(vmContext,
+		newBuf ? newBuf : orig, newBuf ? newLen : origLen, sourceName, &wrappedLen);
+
+	if (!newBuf && !wrappedBuf)
 		return v_sq_compile_topfn_s21(a1, a2, a3, sourceName, mode);
 
-	*a2 = newBuf;
+	*a2 = wrappedBuf ? wrappedBuf : newBuf;
 
 	static volatile LONG s_n = 0;
 	if (InterlockedIncrement(&s_n) <= 8)
@@ -807,6 +816,7 @@ static int __fastcall sq_compile_topfn_S21(
 
 	const int result = v_sq_compile_topfn_s21(a1, a2, a3, sourceName, mode);
 	*a2 = const_cast<char*>(orig);
+	free(wrappedBuf);
 	free(newBuf);
 	return result;
 }

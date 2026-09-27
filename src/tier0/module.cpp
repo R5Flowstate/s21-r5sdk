@@ -96,6 +96,50 @@ void CModule::LoadSections()
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: copies .text once so later scans see the bytes as they were before
+//          any detour or patch was applied
+//-----------------------------------------------------------------------------
+void CModule::CapturePristineCode(void)
+{
+	if (m_pPristineText)
+		return;
+
+	const ModuleSections_t* const pText = FindSectionByName(".text");
+	if (!pText || !pText->IsSectionValid())
+		return;
+
+	// The SIMD scan loads 16 bytes past the last candidate; pad so it never
+	// reads off the end of the heap block.
+	constexpr size_t nPad = 64;
+	uint8_t* const pCopy = new (std::nothrow) uint8_t[pText->m_nSectionSize + nPad];
+	if (!pCopy)
+		return;
+
+	memcpy(pCopy, reinterpret_cast<const void*>(pText->m_pSectionBase), pText->m_nSectionSize);
+	memset(pCopy + pText->m_nSectionSize, 0, nPad);
+
+	m_nPristineTextBase = pText->m_pSectionBase;
+	m_nPristineTextSize = pText->m_nSectionSize;
+	m_pPristineText = pCopy;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: returns the snapshot bytes for a live range, or nullptr when the
+//          range is not fully inside the captured .text
+//-----------------------------------------------------------------------------
+const uint8_t* CModule::GetPristineView(const QWORD nAddress, const size_t nLen) const
+{
+	if (!m_pPristineText || nAddress < m_nPristineTextBase)
+		return nullptr;
+
+	const QWORD nOffset = nAddress - m_nPristineTextBase;
+	if (nOffset > m_nPristineTextSize || nLen > m_nPristineTextSize - nOffset)
+		return nullptr;
+
+	return m_pPristineText + nOffset;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: find array of bytes in process memory using SIMD instructions
 // Input: *pPattern - 
 // *szMask - 
@@ -119,7 +163,28 @@ CMemory CModule::FindPatternSIMD(const uint8_t* pPattern, const char* pMask, con
 	const QWORD nSize = bSectionValid ?
 		moduleSection->m_nSectionSize : executableCode.m_nSectionSize;
 
-	const uint8_t* pData = reinterpret_cast<uint8_t*>(nBase);
+	const uint8_t* const pPristine = GetPristineView(nBase, nSize);
+	if (pPristine)
+	{
+		const CMemory hit = ScanSIMD(pPristine, nSize, pPattern, pMask, nPatternLen, nOccurrence);
+		if (hit)
+			return CMemory(nBase + (hit.GetPtr() - reinterpret_cast<uintptr_t>(pPristine)));
+	}
+
+	// Live bytes: sections without a snapshot, and patterns that match SDK-patched code.
+	return ScanSIMD(reinterpret_cast<const uint8_t*>(nBase), nSize, pPattern, pMask, nPatternLen, nOccurrence);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: SIMD pattern scan over [pData, pData + nSize); returns an address
+//          inside that range
+//-----------------------------------------------------------------------------
+CMemory CModule::ScanSIMD(const uint8_t* pData, const size_t nSize, const uint8_t* pPattern,
+	const char* pMask, const size_t nPatternLen, const size_t nOccurrence) const
+{
+	if (nSize < nPatternLen)
+		return nullptr;
+
 	const uint8_t* pEnd = pData + nSize - nPatternLen;
 
 	size_t nOccurrenceCount = 0;

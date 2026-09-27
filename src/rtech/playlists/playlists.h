@@ -15,6 +15,20 @@ void Playlists_LoadOverlayCatalog(void);
 // server-only), so the client half reads S21's own playlist state instead.
 const char* Playlists_GetCurrentName(void);
 
+// Host settings: a playlist opens a var to runtime overrides by declaring
+//   vars { r5f_setting_<var> "<type> [args]|<label>" }
+// with type int <min> <max>, float <min> <max>, bool, or choice <a> <b> ...
+// Both engines accept an override of a declared var only when the value fits.
+#define PLAYLIST_SETTING_PREFIX "r5f_setting_"
+
+const char* Playlists_FindVar(const char* pszPlaylist, const char* pszVar);
+const char* Playlists_FindSettingDecl(const char* pszPlaylist, const char* pszVar);
+bool Playlists_ValidateSetting(const char* pszDecl, const char* pszValue, char* pszReason, size_t nReasonSize);
+bool Playlists_IsSettingDeclName(const char* pszVar);
+#if !defined(CLIENT_DLL)
+void Playlists_DescribeActiveSettings(char* pszOut, const size_t nOutSize);
+#endif // !CLIENT_DLL
+
 ///////////////////////////////////////////////////////////////////////////////
 inline bool(*v_Playlists_Load)(const char* pszPlaylist);
 inline bool(*v_Playlists_Parse)(const char* pszPlaylist);
@@ -35,6 +49,7 @@ inline void(*v_Playlist_ClearVarOverrides)(void);
 extern KeyValues** g_pPlaylistKeyValues;
 extern char* g_pPlaylistMapToLoad;
 extern int64_t* g_pPlaylistOverrideCount;
+extern bool* g_pPlaylistOverridesDirty;
 extern char* g_pPlaylistOverrideTable;
 
 extern CUtlVector<CUtlString> g_vecAllPlaylists;
@@ -54,6 +69,7 @@ class VPlaylists : public IDetour
 		LogVarAdr("g_pPlaylistKeyValues", g_pPlaylistKeyValues);
 		LogVarAdr("g_pPlaylistMapToLoad", g_pPlaylistMapToLoad);
 		LogVarAdr("g_pPlaylistOverrideCount", g_pPlaylistOverrideCount);
+		LogVarAdr("g_pPlaylistOverridesDirty", g_pPlaylistOverridesDirty);
 		LogVarAdr("g_pPlaylistOverrideTable", g_pPlaylistOverrideTable);
 	}
 	virtual void GetFun(void) const
@@ -84,7 +100,11 @@ class VPlaylists : public IDetour
 		// Playlist_ClearVarOverrides opens with `cmp qword [rip+disp32], 0` (8 bytes incl.
 		// the imm8) on the override count.
 		if (v_Playlist_ClearVarOverrides)
+		{
 			g_pPlaylistOverrideCount = CMemory(v_Playlist_ClearVarOverrides).ResolveRelativeAddressSelf(0x3, 0x8).RCast<int64_t*>();
+			// +0x15: `mov byte [rip+disp32], 1` on the rebroadcast dirty flag.
+			g_pPlaylistOverridesDirty = CMemory(v_Playlist_ClearVarOverrides).OffsetSelf(0x15).ResolveRelativeAddressSelf(0x2, 0x7).RCast<bool*>();
+		}
 
 		// First `lea rax, [rip+disp32]` in Playlist_SetVarOverride is the table base on the
 		// append path (the earlier lea in the at-capacity warning targets rcx, not rax).

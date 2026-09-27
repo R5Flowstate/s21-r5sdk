@@ -41,7 +41,7 @@ static const ScriptConVarDef_t s_ScriptConVars[] =
 	{ "script_enable_twitch_drops_clawback", "0", "S21 entitlements twitch drops clawback", true , 0.f, true , 1.f },
 	{ "script_ftue_skip_orientation_ab_test", "0", "S21 FTUE orientation A/B skip", true , 0.f, true , 1.f },
 	{ "script_ftue_skip_training_ab_test", "0", "S21 FTUE training A/B skip", true , 0.f, true , 1.f },
-	{ "script_mover_traversal_mover_support", "0", "S21 shield-throw / traversal mover support", true , 0.f, true , 1.f },
+	{ "script_mover_traversal_mover_support", "1", "S21 shield-throw / traversal mover support", true , 0.f, true , 1.f },
 	{ "mtx_progression_modifier_dev_boosts_enabled", "0", "", true , 0.f, true , 1.f },
 	{ "hover_vehicle_air_acceleration", "250.0", "", true , 0.0f, true , 2000.0f },
 	{ "hover_vehicle_deceleration_powerbreaking", "1000.0", "", true , 0.0f, true , 2000.0f },
@@ -103,6 +103,45 @@ static const ScriptConVarDef_t s_ScriptConVars[] =
 	{ "threat_detection_view_dist_snipe", "0", "S21 threat detection snipe dist (S3 stub)", true , 0.f, true , 10000.f },
 };
 
+#if defined(CLIENT_DLL)
+//-----------------------------------------------------------------------------
+// The client injects before the S21 exe registers its static ConVars, so
+// FindCommandBase cannot see them yet. They wait on the exe's own pending
+// list; a stub made under one of those names becomes the registered parent
+// and the native (with its flags, e.g. FCVAR_USERINFO) is linked beneath it.
+//-----------------------------------------------------------------------------
+static constexpr ptrdiff_t PENDING_CVAR_OFF_NEXT = 0x08;
+static constexpr ptrdiff_t PENDING_CVAR_OFF_NAME = 0x18;
+
+static bool ScriptConVar_ExePendingHas(const char* pszName)
+{
+	// Static ConVar initializer: mov rax,[head]; mov [cv+8],rax; ... mov [head],rsi.
+	static const CMemory s_headLoad = Module_FindPattern(g_GameDll,
+		"48 8B 05 ?? ?? ?? ?? 48 89 05 ?? ?? ?? ?? C6 05 ?? ?? ?? ?? 00 48 C7 05 ?? ?? ?? ?? 00 00 00 00 C7 05 ?? ?? ?? ?? 00 02 00 01 48 89 35");
+	if (!s_headLoad)
+	{
+		static bool s_bWarned = false;
+		if (!s_bWarned)
+		{
+			s_bWarned = true;
+			Warning(eDLL_T::CLIENT, "[CVAR-STUB] exe pending ConVar list unresolved -- script stubs may shadow natives\n");
+		}
+		return false;
+	}
+
+	const uintptr_t* const pHead = s_headLoad.ResolveRelativeAddress(3, 7).RCast<const uintptr_t*>();
+	uintptr_t node = *pHead;
+	for (int safety = 0; node && safety < 32768; ++safety)
+	{
+		const char* const pszNode = *reinterpret_cast<const char* const*>(node + PENDING_CVAR_OFF_NAME);
+		if (pszNode && !V_strcmp(pszNode, pszName))
+			return true;
+		node = *reinterpret_cast<const uintptr_t*>(node + PENDING_CVAR_OFF_NEXT);
+	}
+	return false;
+}
+#endif // CLIENT_DLL
+
 void ConVarStubs_InitScriptConVars()
 {
 	if (!g_pCVar)
@@ -112,6 +151,10 @@ void ConVarStubs_InitScriptConVars()
 	{
 		if (g_pCVar->FindCommandBase(def.pszName))
 			continue;
+#if defined(CLIENT_DLL)
+		if (ScriptConVar_ExePendingHas(def.pszName))
+			continue;
+#endif // CLIENT_DLL
 
 		// Owned by the engine's ConVar list for the life of the process.
 		new ConVar(def.pszName, def.pszDefault, FCVAR_ARCHIVE | FCVAR_RELEASE,

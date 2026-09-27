@@ -11,10 +11,16 @@ LONG Detour_GetNullSkipCount(void);
 void Detour_OnNullTarget(void* ppPointer);
 void Detour_OnInvalidTarget(void* pFn, const char* reason);
 
-// Records which detour claimed a target during the current attach pass and
-// reports loudly when a second one claims the same address -- the later attach
-// wins the entry jmp and the earlier hook is silently orphaned.
-void Detour_NoteAttachTarget(void* pFn, void* pDetour);
+// Records every detour that claims a target during the current attach pass and
+// reports when a second one claims the same address: one transaction gives the
+// target a single entry jmp (the first attach), so the rest are dead until linked.
+void Detour_NoteAttachTarget(void* pFn, void* pDetour, void** ppPointer);
+
+// Call right after committing a single-transaction attach pass: chains every hook
+// on a shared target (entry hook -> next claimant -> ... -> original).
+void Detour_LinkSharedTargets(void);
+// Call before the detach pass: gives each linked hook back its own trampoline.
+void Detour_UnlinkSharedTargets(void);
 
 // Names the V-class in every report above. Set around each Detour(true) call.
 void Detour_SetAttachingClass(const char* pszClass);
@@ -77,7 +83,8 @@ public:
 
 		if (bAttach)
 		{
-			Detour_NoteAttachTarget(reinterpret_cast<void*>(*ppPointer), reinterpret_cast<void*>(pDetour));
+			Detour_NoteAttachTarget(reinterpret_cast<void*>(*ppPointer), reinterpret_cast<void*>(pDetour),
+				reinterpret_cast<void**>(ppPointer));
 			return DetourAttach(ppPointer, pDetour);
 		}
 		else

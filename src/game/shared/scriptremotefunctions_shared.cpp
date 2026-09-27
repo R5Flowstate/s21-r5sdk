@@ -35,6 +35,12 @@ bool ScriptRemoteServer_RegisterFunction(const char* pszName, int nParamCount,
 		return false;
 	}
 
+	if (strlen(pszName) >= sizeof(s_allowlist[0].szName))
+	{
+		Warning(eDLL_T::SERVER, "ScriptRemoteServer: function name too long\n");
+		return false;
+	}
+
 	if (nParamCount < 0 || nParamCount > SCRIPT_REMOTE_SERVER_MAX_PARAMS)
 	{
 		Warning(eDLL_T::SERVER, "ScriptRemoteServer: '%s' has %d params (max %d)\n",

@@ -14,6 +14,7 @@
 #include "core/logdef.h"
 #ifndef CLIENT_DLL
 #include "engine/host_state.h"
+#include "engine/agent_link.h"
 #include "game/shared/scriptremotefunctions_server.h"
 #endif // !CLIENT_DLL
 
@@ -381,7 +382,7 @@ SQRESULT Script_PrintFunc(HSQUIRRELVM v, SQChar* fmt, ...)
 #ifdef DEDICATED
 	// WriteConsole hitches sim. Mute info only while HS_RUN; load/status still
 	// console even when the cvar is 0. SCRIPT ERROR still promotes.
-	if (type == LogType_t::SQ_INFO && script_show_output.GetInt() <= 0)
+	if (type == LogType_t::SQ_INFO && script_show_output.GetInt() <= 0 && !AgentLink_IsCapturing())
 	{
 		const bool bInGame = g_pHostState && g_pHostState->IsRunning();
 		if (bInGame)

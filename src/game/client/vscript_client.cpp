@@ -28,6 +28,8 @@
 #include "localize/localize_disk.h"
 #include "ebisusdk/EbisuSDK.h"
 #include "networksystem/listmanager.h"
+#include "engine/client/bridge_join_auth.h"
+#include "engine/client/launcher_handoff.h"
 #include "networksystem/hostmanager.h"
 #include "pluginsystem/modsystem.h"
 #include "engine/client/bridge_connect_password.h"
@@ -186,6 +188,7 @@ static void UIScript_DrainServerListCompletion(void)
 	s_serverListMessage = s_serverListPendingMessage;
 	const bool success = s_serverListPendingSuccess;
 	const int count = static_cast<int>(s_serverListPendingCount);
+	s_serverListRequestInFlight.store(false, std::memory_order_release);
 
 	UIScript_FireServerListCompleted(success, s_serverListMessage, count);
 }
@@ -254,7 +257,7 @@ static bool Script_ServerIndexValid(SQInteger iServer)
 static void Internal_UIScript_RequestForServerBrowserListThreaded()
 {
     string responseMsg;
-    size_t serverCount;
+    size_t serverCount = 0;
 
     const bool success = g_ServerListManager.RefreshServerList(responseMsg, serverCount);
 
@@ -262,7 +265,8 @@ static void Internal_UIScript_RequestForServerBrowserListThreaded()
     s_serverListPendingSuccess = success;
     s_serverListPendingCount = serverCount;
     s_serverListPendingMessage = std::move(responseMsg);
-    s_serverListRequestInFlight.store(false, std::memory_order_release);
+    // In-flight stays set until the main thread has copied the result, so a new
+    // request cannot overwrite the pending fields while they are being read.
     s_serverListComplete.store(true, std::memory_order_release);
 }
 
@@ -271,6 +275,8 @@ static void Internal_UIScript_RequestForServerBrowserListThreaded()
 //-----------------------------------------------------------------------------
 static SQRESULT UIScript_RequestServerList(HSQUIRRELVM v)
 {
+    UIScript_DrainServerListCompletion();
+
     if (s_serverListRequestInFlight.exchange(true))
         SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 
@@ -535,6 +541,45 @@ static SQRESULT UIScript_GetServerMissingMods(HSQUIRRELVM v)
     SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
+static SQRESULT UIScript_LauncherHandoffAvailable(HSQUIRRELVM v)
+{
+    sq_pushbool(v, LauncherHandoff_IsAvailable());
+    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT UIScript_LauncherHandoffJoinListedServer(HSQUIRRELVM v)
+{
+    char szTarget[288];
+    szTarget[0] = '\0';
+    {
+        AUTO_LOCK(g_ServerListManager.m_Mutex);
+
+        SQInteger iServer = -1;
+        sq_getinteger(v, 2, &iServer);
+
+        if (Script_ServerIndexValid(iServer))
+        {
+            const NetGameServer_t& server = g_ServerListManager.m_vServerList[iServer];
+            const char* const pszHost = server.address.c_str();
+            if (server.port > 0 && server.port <= 65535)
+            {
+                const bool bBareV6 = pszHost[0] != '[' && strchr(pszHost, ':');
+                V_snprintf(szTarget, sizeof(szTarget), bBareV6 ? "[%s]:%d" : "%s:%d", pszHost, server.port);
+            }
+        }
+    }
+
+    sq_pushbool(v, szTarget[0] && LauncherHandoff_RequestModJoin(szTarget));
+    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT UIScript_LauncherHandoffRejoinLastServer(HSQUIRRELVM v)
+{
+    const char* const pszLast = Bridge_LastConnectHost();
+    sq_pushbool(v, pszLast && pszLast[0] && LauncherHandoff_RequestModJoin(pszLast));
+    SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
 static SQRESULT UIScript_ServerListHasRequiredMods(HSQUIRRELVM v)
 {
     AUTO_LOCK(g_ServerListManager.m_Mutex);
@@ -624,7 +669,6 @@ static void Internal_UIScript_RequestEULAThreaded_S21()
         s_eulaPendingVersion = 0;
     }
 
-    s_eulaRequestInFlight.store(false, std::memory_order_release);
     s_eulaComplete.store(true, std::memory_order_release);
 }
 
@@ -635,10 +679,13 @@ static void UIScript_DrainEULACompletion()
 
     s_eulaContents = std::move(s_eulaPendingContents);
     s_eulaVersion = s_eulaPendingVersion;
+    s_eulaRequestInFlight.store(false, std::memory_order_release);
 }
 
 static SQRESULT UIScript_RequestEULAContents(HSQUIRRELVM v)
 {
+    UIScript_DrainEULACompletion();
+
     if (s_eulaRequestInFlight.exchange(true))
         SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 
@@ -706,6 +753,9 @@ void Script_RegisterServerBrowserUI(CSquirrelVM* s)
         { "GetServerRegion",                  (void*)UIScript_GetServerRegion,                   "string",         "int index" },
         { "GetServerMissingMods",             (void*)UIScript_GetServerMissingMods,              "string",         "int index" },
         { "ServerListHasRequiredMods",        (void*)UIScript_ServerListHasRequiredMods,         "bool",           "int index" },
+        { "LauncherHandoff_IsAvailable",      (void*)UIScript_LauncherHandoffAvailable,          "bool",           "" },
+        { "LauncherHandoff_JoinListedServer", (void*)UIScript_LauncherHandoffJoinListedServer,   "bool",           "int index" },
+        { "LauncherHandoff_RejoinLastServer", (void*)UIScript_LauncherHandoffRejoinLastServer,   "bool",           "" },
         { "GetServerListMessage",             (void*)UIScript_GetServerListMessage,              "string",         "" },
         { "IsServerListRequestInFlight",      (void*)UIScript_IsServerListRequestInFlight,       "bool",           "" },
         { "GetServerRequiredMods",            (void*)UIScript_GetServerRequiredMods,             "array< string >", "int index" },

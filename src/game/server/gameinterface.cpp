@@ -7,9 +7,10 @@
 
 #include "core/stdafx.h"
 #include "game/server/cmd_recorder.h"
+#include "engine/server/demo_record_sv.h"
 #include "game/server/mapedit_paks.h"
-#include "game/server/agent_link.h"
 #include "game/server/bot_cmd.h"
+#include "game/server/vscript_server_placement.h"
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -50,12 +51,18 @@
 #include "game/server/player_launch.h"
 #include "game/server/trigger_gravity.h"
 #include "game/server/trigger_updraft.h"
+#include "game/server/jetpack.h"
+#include "game/server/glide.h"
+#include "game/server/armored_leap.h"
+#include "game/server/script_mover_traversal.h"
+#include "game/server/skyward.h"
 #include "engine/server/precache_natives.h"
 #include "engine/server/skinnames_table_inject.h"
 #include "engine/server/snapshot_diag.h"
 #include "game/shared/dt_extend.h"
 #include "game/shared/player_extend_sidecar.h"
 #include "game/server/translocation.h"
+#include "game/server/weapon_custom_activity.h"
 #include "game/server/extended_range_use.h"
 #include "game/server/vscript_server.h"
 #include "game/server/vscript_server_natives.h"
@@ -149,6 +156,11 @@ void ServerGameDLL_RunSdkLevelReset(const char* pszReason)
 	PlayerExtend_LevelShutdown();
 	TriggerGravity_Wire_LevelShutdown();
 	UpdraftBridge_Wire_LevelShutdown();
+	Jetpack_LevelShutdown();
+	Glide_LevelShutdown();
+	ArmoredLeap_LevelShutdown();
+	ScriptMoverTraversal_LevelShutdown();
+	SkywardBridge_LevelShutdown();
 	WeaponHeat_LevelShutdown();
 	WeaponAmmoPoolMod_LevelShutdown();
 	OffhandSlotsExt_LevelShutdown();
@@ -158,6 +170,7 @@ void ServerGameDLL_RunSdkLevelReset(const char* pszReason)
 	ScriptNetDataExt_LevelShutdown();
 	SNDC_ExtensionLevelShutdown();
 	Translocation_LevelShutdown();
+	WeaponCustomAct_LevelShutdown();
 	ServerScript_PlacementLevelShutdown();
 	BreachTrace_LevelShutdown();
 	PrecacheNativesDedi_LevelShutdown();
@@ -173,6 +186,7 @@ void ServerGameDLL_RunSdkLevelReset(const char* pszReason)
 	SnapshotDiag_LevelShutdown();
 	BotCmd_LevelShutdown();
 	CmdRecorder_LevelShutdown();
+	DemoSv_LevelShutdown();
 	MapEditPaks_LevelShutdown();
 	// Clear the SkinNames inject guard; string tables are recreated per-map.
 	SkinNamesInject_LevelShutdown();
@@ -722,6 +736,15 @@ void CServerGameClients::_ProcessUserCmds(CServerGameClients* thisp, edict_t edi
 	{
 		to = &cmds[i];
 		ReadUserCmd(buf, to, from);
+
+		// The bridge client flags an object-placement pose trailer with this
+		// otherwise unused S3 bool.
+		uint8_t* const pPoseTrailerFlag = reinterpret_cast<uint8_t*>(to) + 0x18C;
+		if (*pPoseTrailerFlag)
+		{
+			*pPoseTrailerFlag = 0;
+			ServerScript_ReadPlacementPoseTrailer(buf, edict, to->command_number);
+		}
 		from = to;
 	}
 
@@ -821,13 +844,15 @@ __int64 CServerGameDLL::GameFrame(void* thisptr, unsigned char simulating)
 	else
 		s_bFreezeCurLatched = false;
 
-	AgentLink_Think();
 	const __int64 nRet = CServerGameDLL__GameFrame(thisptr, simulating);
 	if (bFreeze)
 	{
 		gpGlobals->frameTime = flSavedFrame;
 		gpGlobals->curTime = s_flFreezeCurTime;
 	}
+	// After the thinks: a segment issued at the think time would never advance.
+	if (simulating)
+		ScriptMoverTraversal_Frame();
 	return nRet;
 }
 

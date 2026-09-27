@@ -229,6 +229,7 @@ static void* (__fastcall* v_C_WeaponX_GetAkimboPartner)(void* pWeapon) = nullptr
 static constexpr uintptr_t kNetworkableToEntity = 0x18;
 static constexpr uintptr_t kEntityRefHandleOffset = 0x8;
 static constexpr uintptr_t kWeaponInfoOffset = 0x17A8;
+static constexpr uintptr_t kEntityScriptInstanceOffset = 0xB0;
 static constexpr uintptr_t kPlayerActiveWeaponsOffset = 0x1930;
 static constexpr int kAkimboWireSlots = 256;
 
@@ -273,9 +274,15 @@ static void __fastcall Hook_C_Player_AkimboSetState(void* pPlayer, char newState
 		Msg(eDLL_T::CLIENT, "[AKIMBO-CL] client SetState %d -> %d player=%p\n", oldState, static_cast<int>(newState), pPlayer);
 }
 
+// SetState hands the weapon's script instance to OnWeaponAkimboStateChanged;
+// a weapon created by this packet has none yet and the script sees a null entity.
 static bool AkimboClient_WeaponReady(const void* pWeapon)
 {
-	return pWeapon && *reinterpret_cast<void* const*>(reinterpret_cast<const char*>(pWeapon) + kWeaponInfoOffset) != nullptr;
+	if (!pWeapon)
+		return false;
+	const char* const p = reinterpret_cast<const char*>(pWeapon);
+	return *reinterpret_cast<void* const*>(p + kWeaponInfoOffset) != nullptr
+		&& *reinterpret_cast<void* const*>(p + kEntityScriptInstanceOffset) != nullptr;
 }
 
 // The wire writes m_akimboState straight into the player, so the client's
