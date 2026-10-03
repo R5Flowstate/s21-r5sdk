@@ -1136,6 +1136,12 @@ static bool Pak_StartLoadingPak(PakLoadedInfo_s* const loadedInfo)
     if (pakFile->memoryData.patchSrcSize && !Pak_ProcessPakFile(pakFile))
         return false;
 
+    if (!Pak_ValidateAlignments(pakFile))
+    {
+        loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+        return false;
+    }
+
     PakSlabDescriptor_s slabDesc = {};
 
     Pak_StubInvalidAssetBinds(pakFile, &slabDesc);
@@ -1556,6 +1562,12 @@ static bool Pak_SetupBuffersAndLoad(const PakHandle_t pakId)
 
     PakGuidDescriptor_s* const guidBuf = (PakGuidDescriptor_s*)loadedInfo->allocator->Alloc(sizeof(PakGuidDescriptor_s) * pakHdr.usesCount + 8, 8);
     loadedInfo->guidDestriptors = guidBuf;
+    if (!guidBuf)
+    {
+        Warning(eDLL_T::RTECH, "[PAK-PARSE] guid descriptor alloc failed (uses %u)\n", pakHdr.usesCount);
+        loadedInfo->status = PAK_STATUS_ERROR;
+        return false;
+    }
 
     guidBuf->unk1 = 0;
     guidBuf->unk2 = 0;
@@ -2813,6 +2825,12 @@ static bool Pak_StartLoadingPak(PakLoadedInfo_s* const loadedInfo)
     if (pakFile->memoryData.patchSrcSize && !Pak_ProcessPakFile(pakFile))
         return false;
 
+    if (!Pak_ValidateAlignments(pakFile))
+    {
+        loadedInfo->status = PakStatus_e::PAK_STATUS_ERROR;
+        return false;
+    }
+
     PakSlabDescriptor_s slabDesc = {};
 
     Pak_StubInvalidAssetBinds(pakFile, &slabDesc);
@@ -3220,6 +3238,12 @@ static bool Pak_SetupBuffersAndLoad(const PakHandle_t pakId)
 
     PakGuidDescriptor_s* const guidBuf = (PakGuidDescriptor_s*)loadedInfo->allocator->Alloc(sizeof(PakGuidDescriptor_s) * pakHdr.usesCount + 8, 8);
     loadedInfo->guidDestriptors = guidBuf;
+    if (!guidBuf)
+    {
+        Warning(eDLL_T::RTECH, "[PAK-PARSE] guid descriptor alloc failed (uses %u)\n", pakHdr.usesCount);
+        loadedInfo->status = PAK_STATUS_ERROR;
+        return false;
+    }
 
     guidBuf->unk1 = 0;
     guidBuf->unk2 = 0;

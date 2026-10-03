@@ -9,6 +9,35 @@
 #include "pakalloc.h"
 
 //-----------------------------------------------------------------------------
+// rejects a pak whose page or slab alignment is not a power of two; ALIGN_VALUE
+// with 0 collapses the running slab size and later pages overrun the buffer
+//-----------------------------------------------------------------------------
+bool Pak_ValidateAlignments(const PakFile_s* const pak)
+{
+    for (uint32_t i = 0; i < pak->GetPageCount(); ++i)
+    {
+        const uint32_t align = pak->memoryData.pageHeaders[i].pageAlignment;
+        if (align == 0 || align > PAK_MAX_ALIGNMENT || !IsPowerOfTwo(align))
+        {
+            Warning(eDLL_T::RTECH, "[PAK-SLAB] page %u has alignment %u in '%s'\n", i, align, pak->GetName());
+            return false;
+        }
+    }
+
+    for (uint16_t i = 0; i < pak->GetSlabCount(); ++i)
+    {
+        const int align = pak->GetSlabHeader(i)->dataAlignment;
+        if (align <= 0 || align > PAK_MAX_ALIGNMENT || !IsPowerOfTwo(align))
+        {
+            Warning(eDLL_T::RTECH, "[PAK-SLAB] slab %hu has alignment %d in '%s'\n", i, align, pak->GetName());
+            return false;
+        }
+    }
+
+    return true;
+}
+
+//-----------------------------------------------------------------------------
 // aligns the slab headers for each asset type
 //-----------------------------------------------------------------------------
 void Pak_AlignSlabHeaders(PakFile_s* const pak, PakSlabDescriptor_s* const desc)

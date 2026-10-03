@@ -635,6 +635,43 @@ SQRESULT Script_SetNonRewindMusicPack(HSQUIRRELVM v)
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
+#ifndef CLIENT_DLL
+//-----------------------------------------------------------------------------
+// Purpose: mode init scripts write before the entity exists; reads prefer the entity
+//-----------------------------------------------------------------------------
+void GlobalNonRewind_ApplyPendingToEntity()
+{
+	if (!g_pScriptNetDataNonRewindEnt)
+		return;
+
+	int applied = 0;
+	for (const auto& entry : s_nonRewindVars)
+	{
+		const char* name = entry.first.c_str();
+		const NonRewindVar_t& var = entry.second;
+
+		bool ok = false;
+		switch (var.type)
+		{
+		case NonRewindVar_t::BOOL:  ok = EntitySetBool(name, var.bVal); break;
+		case NonRewindVar_t::INT:   ok = EntitySetInt(name, var.iVal); break;
+		case NonRewindVar_t::FLOAT:
+		case NonRewindVar_t::TIME:  ok = EntitySetFloat(name, var.fVal); break;
+		default: break;
+		}
+
+		if (ok)
+		{
+			++applied;
+			DevMsg(eDLL_T::SERVER, "[GNR-PENDING] applied '%s'\n", name);
+		}
+	}
+
+	if (applied)
+		DevMsg(eDLL_T::SERVER, "[GNR-PENDING] %d pre-entity write(s) applied to the non-rewind entity\n", applied);
+}
+#endif // !CLIENT_DLL
+
 //-----------------------------------------------------------------------------
 // Level shutdown
 //-----------------------------------------------------------------------------

@@ -44,6 +44,9 @@ struct PlayerExtendWire
 	int32_t m_activateGlide;
 	int32_t m_touchedGroundSinceLastGlide;
 
+	int32_t m_hPortalEnvironment;
+	int32_t m_bPitchReorientation;
+
 	float m_armoredLeapStartTime;
 	float m_bleedoutStartTime;
 	float m_dragReviveOutroStartTime;

@@ -54,6 +54,8 @@ LRESULT CGame::WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		SetCursor(LoadCursor(nullptr, IDC_ARROW));
 		return TRUE;
 	}
+	if (uMsg == WM_MOUSEWHEEL)
+		DemoPlay_OnMouseWheel(GET_WHEEL_DELTA_WPARAM(wParam));
 
 	if (ImguiSystem()->IsInitialized())
 		ImguiWindowProc(hWnd, uMsg, wParam, lParam);

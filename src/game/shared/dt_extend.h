@@ -204,6 +204,8 @@ struct S21ClassSlot {
 
 using DTExtendProxyFn = void(__fastcall*)(void*, void*, void*, void*, int, int);
 typedef void** (__fastcall* PFN_GetEntityFactory)();
+typedef void (__fastcall* PFN_ActivateEntity)(__int64 classID, __int64 entity);
+typedef __int64 (__fastcall* PFN_DispatchSpawn)(__int64 entity);
 
 extern const DTExtendProp s_extendProps[];
 extern const int kNumExtendProps;
@@ -214,6 +216,8 @@ extern int s_assignedCount;
 extern bool s_applied;
 extern uintptr_t* g_pFactoryListHead;
 extern PFN_GetEntityFactory v_GetEntityFactory;
+extern PFN_ActivateEntity v_ActivateEntity;
+extern PFN_DispatchSpawn v_DispatchSpawn;
 extern void (*v_SendTable_BuildPrecalc)(void* precalc, unsigned char bServerSide);
 extern const S21ClassDef s_s21Classes[];
 extern const int kNumS21Classes;
@@ -258,6 +262,7 @@ bool DTExtend_AppendSuppressedByRename(const char* tableName, const char* propNa
 bool DTExtend_AppendSuppressedByWireLever(const char* tableName, const char* propName);
 int PatchEntityCreateAllocImm(uintptr_t createFn, uint32_t targetSize, const char* tag,
 	uint32_t expectedNativeSize = 0);
+int DTExtend_ReadEntityCreateAllocImm(uintptr_t createFn);
 uint8_t* DeepCloneSendTable(const void* srcTable, ClonePool& pool);
 void CanonDiscoverTable(uintptr_t table, int depth);
 uintptr_t CanonS3TableFind(const char* name);

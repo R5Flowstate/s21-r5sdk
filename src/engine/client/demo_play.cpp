@@ -27,11 +27,19 @@
 #include "windows/input.h"
 #include "inputsystem/inputsystem.h"
 #include "game/client/pred_authority.h"
+#include "game/client/cliententitylist.h"
+#if defined(SDK_WIP)
+#include "game/client/cubemap_capture.h"
+#endif // SDK_WIP
 #include "vscript/languages/squirrel_re/vsquirrel.h"
 #include <algorithm>
 
 static ConVar demo_timescale("demo_timescale", "1", FCVAR_RELEASE,
 	"Demo playback speed; the world and the packet feed slow down together.", true, 0.05f, true, 4.f);
+// A near-zero game timescale freezes the rendered view, so a paused replay
+// keeps game time running and only stops the packet feed.
+static ConVar demo_pause_timescale("demo_pause_timescale", "1", FCVAR_DEVELOPMENTONLY,
+	"Game timescale while the replay is paused (the packet feed stops either way).", true, 0.001f, true, 1.f);
 static ConVar demo_feed_max_per_frame("demo_feed_max_per_frame", "8", FCVAR_RELEASE,
 	"Demo packets fed per frame during normal playback.", true, 1.f, true, 64.f);
 // The engine keeps every snapshot newer than its interpolation base until the
@@ -44,13 +52,43 @@ static ConVar demo_ff_budget_ms("demo_ff_budget_ms", "40", FCVAR_RELEASE,
 static ConVar demo_seek_restart("demo_seek_restart", "0", FCVAR_RELEASE,
 	"1 = rewind by reconnecting to the demo instead of restarting from the nearest full snapshot.");
 static ConVar demo_freecam_speed("demo_freecam_speed", "400", FCVAR_RELEASE,
-	"Free camera speed in units per second (Shift = x3).", true, 10.f, true, 5000.f);
+	"Free camera speed in units per second (Shift = x3, Ctrl = x0.3; +/- or right mouse + wheel change it).",
+	true, 10.f, true, 5000.f);
+static ConVar demo_freecam_accel("demo_freecam_accel", "6", FCVAR_RELEASE,
+	"How quickly the free camera reaches and leaves its speed, per second; 0 = instant.", true, 0.f, true, 50.f);
+static ConVar demo_freecam_follow_turn("demo_freecam_follow_turn", "0", FCVAR_RELEASE,
+	"1 = a following free camera (T) orbits with the player's facing; 0 keeps its world direction.");
+static ConVar demo_freecam_follow_smooth("demo_freecam_follow_smooth", "4", FCVAR_RELEASE,
+	"How quickly a following free camera turns after the player's facing, per second; 0 = rigid.", true, 0.f, true, 50.f);
+static ConVar demo_freecam_roll("demo_freecam_roll", "0", FCVAR_RELEASE,
+	"Free camera roll in degrees. Mouse wheel while the free camera is on; middle click resets.", true, -180.f, true, 180.f);
+static ConVar demo_freecam_fov("demo_freecam_fov", "0", FCVAR_RELEASE,
+	"Free camera field of view in degrees, 0 = the game's. Ctrl + mouse wheel while the free camera is on; "
+	"Ctrl + middle click resets.", true, 0.f, true, 150.f);
+static ConVar demo_freecam_dof("demo_freecam_dof", "0", FCVAR_RELEASE,
+	"Free camera depth of field: the distance in focus, 0 = off. Shift + mouse wheel while the free camera is on; "
+	"Shift + middle click turns it off.", true, 0.f, true, 20000.f);
+static ConVar demo_freecam_dof_range("demo_freecam_dof_range", "150", FCVAR_RELEASE,
+	"Free camera depth of field: the depth that stays sharp around the focus distance; blur ramps in over the same depth.",
+	true, 10.f, true, 10000.f);
+static ConVar demo_freecam_wheel_step("demo_freecam_wheel_step", "2", FCVAR_RELEASE,
+	"Degrees of roll or field of view per mouse wheel notch.", true, 0.1f, true, 45.f);
+static ConVar demo_campath_speed("demo_campath_speed", "250", FCVAR_RELEASE,
+	"Camera path flight speed in units per second; a segment also lasts at least the replay time between its keys.",
+	true, 10.f, true, 5000.f);
+static ConVar demo_campath_keys("demo_campath_keys", "1", FCVAR_RELEASE,
+	"Camera path keys while the free camera is on: K adds or replaces the keyframe at the current time, "
+	"J / L jump to the previous / next one, Delete removes the one at the current time, P plays the path.");
 static ConVar demo_hud("demo_hud", "1", FCVAR_RELEASE,
-	"Demo HUD: 0 = stock, 1 = coaching overlay, 2 = none.", true, 0.f, true, 2.f);
+	"Demo HUD: 0 = stock, 1 = coaching overlay, 2 = clean view (no HUD, outlines, hit markers or damage numbers).",
+	true, 0.f, true, 2.f);
 static ConVar demo_diag("demo_diag", "0", FCVAR_DEVELOPMENTONLY,
 	"Log every chunk the demo player feeds.");
 static ConVar demo_fuzz_dir("demo_fuzz_dir", "", FCVAR_DEVELOPMENTONLY,
 	"Directory of .r5dem files to play in turn for 5 s each (fuzz harness). Cleared when done.");
+static ConVar demo_input_diag("demo_input_diag", "0", FCVAR_DEVELOPMENTONLY,
+	"While a replay plays, log once a second the engine and free camera angles, the camera guard, the "
+	"pointer layer, input blocking and focus; the overlay script also logs each replay key it handles.");
 static ConVar demo_focus_diag("demo_focus_diag", "0", FCVAR_DEVELOPMENTONLY,
 	"While a replay plays, log each change of the foreground window, the engine's active-app flag and "
 	"the cursor, plus slow-frame summaries.");
@@ -65,6 +103,10 @@ static constexpr ptrdiff_t kPlayerObserverMode   = 0x3534;
 static constexpr ptrdiff_t kPlayerObserverTarget = 0x3540;
 static constexpr ULONGLONG kConnectTimeoutMs   = 30000;
 static constexpr ULONGLONG kFuzzSliceMs        = 5000;
+static constexpr size_t    kCamMaxKeys         = 256;
+static constexpr double    kCamPathMinSegMs    = 500.0;
+static constexpr float     kCamMinFov          = 10.0f;
+static constexpr float     kCamMaxFov          = 150.0f;
 
 enum class DemoPlayState_t
 {
@@ -85,6 +127,16 @@ struct DemoViewAt_s
 {
 	uint32_t    wallMs;
 	R5DemView_s view;
+};
+
+// One camera path keyframe: a free camera pose and the replay time it was set at.
+struct DemoCamKey_s
+{
+	double tMs;
+	float  pos[3];
+	float  ang[3];      // pitch, yaw, roll
+	float  fov;
+	float  dof;         // focus distance, 0 = off
 };
 
 struct DemoPlayer_s
@@ -122,7 +174,37 @@ struct DemoPlayer_s
 	uint32_t        nSavedObsTarget = 0xFFFFFFFFu;
 	bool            bCamInit = false;
 	float           camOrigin[3] = {};
+	float           camAngles[3] = {};    // pitch, yaw, roll
+	float           camVel[3] = {};       // free camera velocity, units per second
+	// Follow (T): the camera keeps its offset from the watched player, optionally
+	// in the frame of the player's smoothed facing.
+	bool            bCamFollow = false;
+	bool            bFollowYawInit = false;
+	float           flFollowYaw = 0.0f;
+	float           camFollowOff[3] = {};
+	float           flFollowRelYaw = 0.0f;
+	float           followAnchor[3] = {};
+	float           flFollowSnapTime = -1.0f;  // world time of the newest snapshot seen
+	LARGE_INTEGER   followSnapQpc = {};       // when it was first seen
 	LARGE_INTEGER   camQpc = {};
+	// The next camera init keeps camOrigin / camAngles: a restart or pov switch
+	// leaves the free camera where it was.
+	bool            bCamCarry = false;
+	float           flCamStockFov = 0.0f;  // the game's field of view, last seen
+	// The engine's depth-of-field override convars before the free camera took them.
+	bool            bDofOwned = false;
+	float           flDofApplied = -1.0f;
+	float           flDofRangeApplied = -1.0f;
+	int             nSavedDofOverride = 0;
+	float           flSavedDof[4] = {};
+	bool            bPathPlaying = false;
+	std::vector<DemoCamKey_s> camKeys;    // in path order
+	std::vector<double> camPathMs;        // each key's time on the path clock
+	double          flPathMs = 0.0;        // path clock while it plays
+	double          flPathUntilMs = 0.0;   // replay time the playing shot ends
+	int             nCamEditKey = -1;      // the key J/L/goto landed on; K replaces it there
+	char            szCamKeysPath[260] = {}; // replay camKeys belong to
+	int             nCamKeysPrev = 0;      // GetAsyncKeyState edges, one bit per key
 	int             nCamMode = 0;          // DemoCamMode_t
 	// thirdperson_override before the own-pov third person camera took it.
 	bool            bThirdPerson = false;
@@ -131,6 +213,7 @@ struct DemoPlayer_s
 
 	int             nSavedPredict = -1;
 	int             nSavedDrawHud = -1;
+	int             nSavedHighlight = -1;
 	bool            bOverlayStarted = false;
 
 	// A restart requested while stopping.
@@ -167,8 +250,15 @@ static DemoPlayer_s s_demo;
 static void DemoPlay_CursorPump(void);
 static void DemoPlay_RecoverPump(void);
 static void DemoPlay_MutePump(void);
+static void DemoCam_Pump(void);
 static volatile bool s_bDemoGate = false;
 static volatile LONG s_nSnapDropped = 0;
+static volatile LONG s_nCamWheel = 0;   // WM_MOUSEWHEEL delta since the last frame
+static volatile LONG s_nCamMouseX = 0;  // raw mouse counts since the last frame
+static volatile LONG s_nCamMouseY = 0;
+static volatile LONG s_nCamMouseSeen = 0; // raw mouse counts for demo_input_diag
+static LONG s_nCamViewCalls = 0;            // roaming view calls for demo_input_diag
+static float s_flCamLastDt = 0.0f;
 static std::vector<uint8_t> s_chunkScratch;
 
 struct DemoFuzz_s
@@ -187,6 +277,10 @@ typedef uintptr_t (__fastcall* PFN_GetLocalPlayer)(int nSlot);
 
 static PFN_PlayerRoamingView   v_Player_RoamingView = nullptr;
 static PFN_PlayerRoamingView   v_Player_CalcView = nullptr;
+static void (__fastcall* v_View_Build)(void* pView) = nullptr;
+// Saved camera the view builder copies back over the player view: origin, a
+// second origin, then pitch/yaw/roll.
+static float* g_pBuiltCamOrigin = nullptr;
 static PFN_EngineGetViewAngles v_Engine_GetViewAngles = nullptr;
 static float* g_pEngineViewAngles = nullptr;              // split-screen slot 0; stride below
 static void*  g_pSplitScreenMgr = nullptr;
@@ -229,6 +323,24 @@ int DemoPlay_LocalObserverMode(void)
 }
 
 static void DemoPlay_SetThirdPerson(const bool bOn);
+static void DemoCam_LoadKeys(void);
+static void DemoCam_ReleaseDof(void);
+static void DemoCam_UpdateDof(void);
+
+// Back to the recorded player's own eyes with no camera state kept.
+static void DemoPlay_ResetCamera(void)
+{
+	s_demo.nViewPov = -1;
+	s_demo.bFreecam = false;
+	s_demo.nCamMode = DEMO_CAM_FIRST;
+	s_demo.bCamInit = false;
+	s_demo.bCamCarry = false;
+	s_demo.bPathPlaying = false;
+	s_demo.camKeys.clear();
+	s_demo.camPathMs.clear();
+	s_demo.nCamEditKey = -1;
+	s_demo.szCamKeysPath[0] = '\0';
+}
 
 static void DemoPlay_SetState(const DemoPlayState_t state)
 {
@@ -685,6 +797,7 @@ static bool DemoPlay_OpenPath(const char* pszPath, const int nPov, const float f
 			s_demo.flPendingSeekSec = static_cast<float>(clipStart);
 	}
 	DemoPlay_LoadBookmarks();
+	DemoCam_LoadKeys();
 	s_demo.nStepBudget = 0;
 	s_demo.bCamInit = false;
 	s_demo.bViewDirty = false;
@@ -734,6 +847,7 @@ static void DemoPlay_Finalize(void)
 {
 	s_bDemoGate = false;
 	DemoPlay_SetThirdPerson(false);
+	DemoCam_ReleaseDof();
 
 	ConVar* const pPredict = g_pCVar ? g_pCVar->FindVar("cl_predict") : nullptr;
 	if (pPredict && s_demo.nSavedPredict >= 0)
@@ -744,6 +858,11 @@ static void DemoPlay_Finalize(void)
 	if (pDrawHud && s_demo.nSavedDrawHud >= 0)
 		pDrawHud->SetValue(s_demo.nSavedDrawHud);
 	s_demo.nSavedDrawHud = -1;
+
+	ConVar* const pHighlight = g_pCVar ? g_pCVar->FindVar("highlight_draw") : nullptr;
+	if (pHighlight && s_demo.nSavedHighlight >= 0)
+		pHighlight->SetValue(s_demo.nSavedHighlight);
+	s_demo.nSavedHighlight = -1;
 
 	ConVar* const pFocusSleep = g_pCVar ? g_pCVar->FindVar("not_focus_sleep") : nullptr;
 	if (pFocusSleep && s_demo.nSavedFocusSleep >= 0)
@@ -758,9 +877,18 @@ static void DemoPlay_Finalize(void)
 	s_demo.bMouseLayer = false;
 	DemoPlay_CursorPump();
 
-	s_demo.nViewPov = -1;
-	s_demo.bFreecam = false;
-	s_demo.nCamMode = DEMO_CAM_FIRST;
+	// A restart (hard rewind, pov switch) keeps the camera the viewer chose: the
+	// free camera where it stood, or the own-pov third person camera.
+	if (s_demo.bRestart)
+	{
+		if (!s_demo.bFreecam && s_demo.nViewPov >= 0)
+			s_demo.nCamMode = DEMO_CAM_FIRST;
+		s_demo.nViewPov = -1;
+		// A path that was playing keeps playing: the reload is the rewind to
+		// its first key, and the camera follows the replay once that lands.
+	}
+	else
+		DemoPlay_ResetCamera();
 	s_demo.bookmarks.clear();
 	s_demo.bPaused = false;
 	DemoPlay_CloseReader();
@@ -774,6 +902,8 @@ static void DemoPlay_Finalize(void)
 		strncpy_s(szPath, s_demo.szPath, _TRUNCATE);
 		if (DemoPlay_OpenPath(szPath, s_demo.nRestartPov, s_demo.flRestartSeek))
 			DemoPlay_SetState(DemoPlayState_t::WAIT_DISCONNECT);
+		else
+			DemoPlay_ResetCamera();
 	}
 }
 
@@ -786,6 +916,7 @@ bool DemoPlay_Stop(const char* pszReason)
 	if (s_demo.state == DemoPlayState_t::WAIT_DISCONNECT)
 	{
 		s_demo.bRestart = false;
+		DemoPlay_ResetCamera();
 		DemoPlay_CloseReader();
 		DemoPlay_SetState(DemoPlayState_t::IDLE);
 		return true;
@@ -807,6 +938,7 @@ static bool DemoPlay_StartPath(const char* pszPath, const int nPov, const float 
 		Warning(eDLL_T::ENGINE, "[DEMO] a demo is already playing -- demo_stop first\n");
 		return false;
 	}
+	DemoPlay_ResetCamera();
 	if (!DemoPlay_OpenPath(pszPath, nPov, flSeekSec))
 		return false;
 
@@ -835,6 +967,8 @@ bool DemoPlay_Start(const char* pszName, const int nPov, const float flSeekSec)
 // Reconnect to the same file (pov switch, hard rewind).
 static void DemoPlay_Restart(const int nPov, const float flSeekSec)
 {
+	if (s_demo.bFreecam && s_demo.bCamInit)
+		s_demo.bCamCarry = true;
 	s_demo.bRestart = true;
 	s_demo.nRestartPov = nPov;
 	s_demo.flRestartSeek = flSeekSec;
@@ -1159,7 +1293,7 @@ bool DemoPlay_TimescaleOverride(float* pOut)
 	if (s_demo.nSeekTargetMs >= 0)
 		*pOut = 1.0f;
 	else if (s_demo.bPaused || s_demo.bEnded)
-		*pOut = 0.001f; // 0 is clamped to 1 by the garbage guard
+		*pOut = demo_pause_timescale.GetFloat();
 	else
 		*pOut = demo_timescale.GetFloat();
 	return true;
@@ -1330,6 +1464,17 @@ bool DemoPlay_GetEngineViewAngles(float* pAngles)
 		return false;
 	v_Engine_GetViewAngles(nullptr, pAngles);
 	return pAngles[0] == pAngles[0] && pAngles[1] == pAngles[1];
+}
+
+bool DemoPlay_SetEngineViewAngles(const float* pAngles)
+{
+	float* const p = pAngles ? DemoPlay_ViewAnglesSlot() : nullptr;
+	if (!p)
+		return false;
+	p[0] = pAngles[0];
+	p[1] = pAngles[1];
+	p[2] = pAngles[2];
+	return true;
 }
 
 static void __fastcall Hook_Engine_GetViewAngles(void* pUnused, float* pAngles)
@@ -1626,9 +1771,9 @@ static void DemoPlay_ClockProbe(const double dtMs)
 			__except (EXCEPTION_EXECUTE_HANDLER) {}
 		}
 		const float flTick = S21Bridge_IntervalPerTick();
-		Warning(eDLL_T::ENGINE, "[DEMO-CLOCK] t=%.2f fed{tick=%u rel=%.2f} snap=%u curtime=%.3f pair{cur=%.3f fut=%.3f lerpMax=%.2f} "
+		Warning(eDLL_T::ENGINE, "[DEMO-CLOCK] t=%.2f x%.2f fed{tick=%u rel=%.2f} snap=%u curtime=%.3f pair{cur=%.3f fut=%.3f lerpMax=%.2f} "
 			"drift{srv=%d cli=%d ahead=%.3f scale=%.3f} srvTime=%.3f frames=%d extrap=%d collapsed=%d avg=%.1fms%s\n",
-			s_demo.flDemoMs / 1000.0, s_demo.nLastFedTick, s_demo.nLastFedRelMs / 1000.0, S21Bridge_LastSnapshotTick(),
+			s_demo.flDemoMs / 1000.0, demo_timescale.GetFloat(), s_demo.nLastFedTick, s_demo.nLastFedRelMs / 1000.0, S21Bridge_LastSnapshotTick(),
 			PredNative_CurTime(), flCur, flFut, s_flLerpMax, nSrv, nCli, flAhead, flScale, nSrv * flTick,
 			s_nFrames, s_nExtrap, s_nCollapsed, s_nFrames ? s_flFrameMs / s_nFrames : 0.0,
 			s_demo.nSeekTargetMs >= 0 ? " seeking" : "");
@@ -1655,6 +1800,7 @@ void DemoPlay_OnHostFrame(void)
 		else if (GetTickCount64() - s_demo.nStateSinceMs > kConnectTimeoutMs)
 		{
 			Warning(eDLL_T::ENGINE, "[DEMO] the previous connection never closed -- playback cancelled\n");
+			DemoPlay_ResetCamera();
 			DemoPlay_CloseReader();
 			DemoPlay_SetState(DemoPlayState_t::IDLE);
 		}
@@ -1700,9 +1846,12 @@ void DemoPlay_OnHostFrame(void)
 	QueryPerformanceCounter(&s_demo.ffFrameStartQpc);
 	DemoPlay_ClockProbe(dtMs);
 	DemoPlay_CursorPump();
+	DemoCam_Pump();
+	DemoCam_UpdateDof();
 	DemoPlay_ApplyView();
 
-	// demo_hud 2 hides the whole HUD; 0 and 1 keep the stock HUD and the
+	// demo_hud 2 is the clean view: no HUD and no outlines (the scripts drop the
+	// hit markers and damage numbers); 0 and 1 keep the stock HUD and the
 	// overlay script reads demo_hud itself.
 	ConVar* const pDrawHud = g_pCVar ? g_pCVar->FindVar("cl_drawhud") : nullptr;
 	if (pDrawHud)
@@ -1712,6 +1861,15 @@ void DemoPlay_OnHostFrame(void)
 		const int nWant = demo_hud.GetInt() == 2 ? 0 : s_demo.nSavedDrawHud;
 		if (pDrawHud->GetInt() != nWant)
 			pDrawHud->SetValue(nWant);
+	}
+	ConVar* const pHighlight = g_pCVar ? g_pCVar->FindVar("highlight_draw") : nullptr;
+	if (pHighlight)
+	{
+		if (s_demo.nSavedHighlight < 0)
+			s_demo.nSavedHighlight = pHighlight->GetInt();
+		const int nWant = demo_hud.GetInt() == 2 ? 0 : s_demo.nSavedHighlight;
+		if (pHighlight->GetInt() != nWant)
+			pHighlight->SetValue(nWant);
 	}
 
 	DemoPlay_LockView();
@@ -1753,6 +1911,8 @@ void DemoPlay_Step(void)
 void DemoPlay_SetTimescale(const float flScale)
 {
 	demo_timescale.SetValue(flScale);
+	// A speed change gets the same clock probe window as a seek (demo_focus_diag).
+	s_demo.nClockProbeUntilMs = GetTickCount64() + 15000;
 }
 
 float DemoPlay_GetTimescale(void)
@@ -2041,9 +2201,16 @@ void DemoPlay_SetFreecam(const bool bOn)
 		Warning(eDLL_T::ENGINE, "[DEMO] free camera unavailable (roaming view unresolved) -- use demo_view\n");
 		return;
 	}
+	// Already on: a mode refresh (after a seek, say) leaves the camera where it
+	// is. Turning it on starts at the eyes being watched.
+	if (bOn && s_demo.bFreecam)
+		return;
 	s_demo.bFreecam = bOn;
 	s_demo.nCamMode = bOn ? DEMO_CAM_FREE : DEMO_CAM_FIRST;
 	s_demo.bCamInit = false;
+	s_demo.bCamFollow = false;
+	s_demo.bCamCarry = false;
+	s_demo.bPathPlaying = false;
 	DemoPlay_ApplyView();
 }
 
@@ -2171,24 +2338,998 @@ static bool DemoPlay_WindowFocused(void)
 	return pid == GetCurrentProcessId();
 }
 
+// The free camera's angles become the engine's, so leaving it keeps the facing.
+static void DemoCam_WriteEngineAngles(const float* pAngles)
+{
+	if (s_demo.state != DemoPlayState_t::PLAYING)
+		return;
+	float* const p = DemoPlay_ViewAnglesSlot();
+	if (!p)
+		return;
+	p[0] = pAngles[0];
+	p[1] = pAngles[1];
+}
+
+static float DemoCam_ClampFov(const float flFov)
+{
+	return flFov < kCamMinFov ? kCamMinFov : (flFov > kCamMaxFov ? kCamMaxFov : flFov);
+}
+
+// The field of view the free camera shows: the override, else the game's.
+static float DemoCam_CurrentFov(void)
+{
+	const float flFov = demo_freecam_fov.GetFloat();
+	if (flFov >= kCamMinFov)
+		return DemoCam_ClampFov(flFov);
+	return s_demo.flCamStockFov;
+}
+
+// A keyframe's field of view as the override convar holds it: 0 when it is the game's.
+static void DemoCam_SetFovConVar(const float flFov)
+{
+	const bool bStock = !(flFov >= kCamMinFov)
+		|| (s_demo.flCamStockFov > 0.0f && fabsf(flFov - s_demo.flCamStockFov) < 0.5f);
+	demo_freecam_fov.SetValue(bStock ? 0.0f : DemoCam_ClampFov(flFov));
+}
+
+// Each key's time on the path clock. A segment is the replay time between its
+// keys, so the camera is on a point when the replay is. Keys placed in the
+// same moment have no replay span; those still get a short flight.
+static void DemoCam_SortKeys(void)
+{
+	std::stable_sort(s_demo.camKeys.begin(), s_demo.camKeys.end(),
+		[](const DemoCamKey_s& a, const DemoCamKey_s& b) { return a.tMs < b.tMs; });
+	s_demo.camPathMs.clear();
+}
+
+// Points more than half a minute apart are separate shots. Play the shot the
+// replay is in, otherwise the one just passed, otherwise the first.
+static bool DemoCam_PickShot(const double nowMs, double& t0, double& t1)
+{
+	const std::vector<DemoCamKey_s>& k = s_demo.camKeys;
+	t0 = t1 = 0.0;
+	if (k.size() < 2)
+		return false;
+	struct Shot { double a, b; };
+	std::vector<Shot> shots;
+	size_t begin = 0;
+	for (size_t i = 1; i <= k.size(); ++i)
+	{
+		const bool bSplit = i == k.size() || (k[i].tMs - k[i - 1].tMs) > 30000.0;
+		if (!bSplit)
+			continue;
+		if (i - 1 > begin)
+			shots.push_back(Shot{ k[begin].tMs, k[i - 1].tMs });
+		begin = i;
+	}
+	if (shots.empty())
+	{
+		t0 = k.front().tMs;
+		t1 = k.back().tMs;
+		return t1 > t0;
+	}
+	for (const Shot& shot : shots)
+	{
+		if (nowMs >= shot.a && nowMs <= shot.b)
+		{
+			t0 = shot.a;
+			t1 = shot.b;
+			return true;
+		}
+	}
+	for (size_t i = shots.size(); i-- > 0; )
+	{
+		if (shots[i].b <= nowMs)
+		{
+			t0 = shots[i].a;
+			t1 = shots[i].b;
+			return true;
+		}
+	}
+	t0 = shots.front().a;
+	t1 = shots.front().b;
+	return true;
+}
+
+static void DemoCam_BuildPathTimes(void)
+{
+	DemoCam_SortKeys();
+	const std::vector<DemoCamKey_s>& k = s_demo.camKeys;
+	s_demo.camPathMs.assign(k.size(), 0.0);
+	const float flSpeed = fmaxf(10.0f, demo_campath_speed.GetFloat());
+	for (size_t i = 1; i < k.size(); ++i)
+	{
+		const DemoCamKey_s& a = k[i - 1];
+		const DemoCamKey_s& b = k[i];
+		const double flGap = b.tMs - a.tMs;
+		double flSegMs = flGap;
+		if (!(flSegMs > 0.0))
+		{
+			const float dx = b.pos[0] - a.pos[0], dy = b.pos[1] - a.pos[1], dz = b.pos[2] - a.pos[2];
+			const double flFlyMs = sqrtf(dx * dx + dy * dy + dz * dz) / flSpeed * 1000.0;
+			flSegMs = fmax(kCamPathMinSegMs, flFlyMs);
+		}
+		s_demo.camPathMs[i] = s_demo.camPathMs[i - 1] + flSegMs;
+	}
+}
+
+// True when every key is later in the replay than the one before it, so the
+// path clock above is just the replay time minus the first key.
+static bool DemoCam_PathUsesReplay(void)
+{
+	const std::vector<DemoCamKey_s>& k = s_demo.camKeys;
+	if (k.size() < 2)
+		return false;
+	for (size_t i = 1; i < k.size(); ++i)
+		if (!(k[i].tMs > k[i - 1].tMs))
+			return false;
+	return true;
+}
+
+// Where the spline is sampled: the replay's own time between the keys, or the
+// path clock when the keys share a timestamp.
+static double DemoCam_PathSampleMs(void)
+{
+	if (!DemoCam_PathUsesReplay())
+		return s_demo.flPathMs;
+	double t = static_cast<double>(DemoPlay_GetTime()) * 1000.0 - s_demo.camKeys.front().tMs;
+	if (t < 0.0)
+		t = 0.0;
+	return t;
+}
+
+// The camera path's pose at a time on the path clock; holds the first and last
+// keys outside it. False with fewer than two keys.
+static bool DemoCam_EvalPath(const double tMs, float* pPos, float* pAng, float* pFov, float* pDof = nullptr)
+{
+	const std::vector<DemoCamKey_s>& k = s_demo.camKeys;
+	if (k.size() < 2)
+		return false;
+	if (s_demo.camPathMs.size() != k.size())
+		DemoCam_BuildPathTimes();
+	const std::vector<double>& T = s_demo.camPathMs;
+
+	const DemoCamKey_s* pHold = nullptr;
+	if (tMs <= T.front())
+		pHold = &k.front();
+	else if (tMs >= T.back())
+		pHold = &k.back();
+	if (pHold)
+	{
+		for (int i = 0; i < 3; ++i)
+		{
+			pPos[i] = pHold->pos[i];
+			pAng[i] = pHold->ang[i];
+		}
+		*pFov = pHold->fov;
+		if (pDof)
+			*pDof = pHold->dof;
+		return true;
+	}
+
+	const size_t i2 = static_cast<size_t>(std::upper_bound(T.begin(), T.end(), tMs) - T.begin());
+	const size_t i1 = i2 - 1;
+	const DemoCamKey_s& b = k[i1];
+	const DemoCamKey_s& c = k[i2];
+	const double tb = T[i1], tc = T[i2];
+	float u = static_cast<float>((tMs - tb) / (tc - tb));
+	if (u < 0.0f) u = 0.0f;
+	if (u > 1.0f) u = 1.0f;
+
+	for (int i = 0; i < 3; ++i)
+		pPos[i] = b.pos[i] + (c.pos[i] - b.pos[i]) * u;
+
+	// Pitch, yaw and roll turn the short way, and they move the whole time
+	// between the keys instead of sitting on the first one.
+	for (int i = 0; i < 3; ++i)
+	{
+		const float d = remainderf(c.ang[i] - b.ang[i], 360.0f);
+		const float y = remainderf(b.ang[i] + (std::isfinite(d) ? d : 0.0f) * u, 360.0f);
+		pAng[i] = std::isfinite(y) ? y : b.ang[i];
+	}
+	if (pAng[0] > 89.0f) pAng[0] = 89.0f;
+	if (pAng[0] < -89.0f) pAng[0] = -89.0f;
+
+	*pFov = DemoCam_ClampFov(b.fov + (c.fov - b.fov) * u);
+	if (pDof)
+	{
+		if (b.dof > 0.0f && c.dof > 0.0f)
+			*pDof = b.dof + (c.dof - b.dof) * u;
+		else
+			*pDof = u < 1.0f ? b.dof : c.dof;
+	}
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Camera path keyframes, kept in <file>.campath beside the replay
+//-----------------------------------------------------------------------------
+static bool DemoCam_KeysFile(char* pszOut, const size_t nOutLen)
+{
+	return s_demo.szPath[0] && _snprintf_s(pszOut, nOutLen, _TRUNCATE, "%s.campath", s_demo.szPath) > 0;
+}
+
+static bool DemoCam_KeyValid(const DemoCamKey_s& k)
+{
+	for (int i = 0; i < 3; ++i)
+	{
+		if (!std::isfinite(k.pos[i]) || fabsf(k.pos[i]) > 65535.0f || !std::isfinite(k.ang[i]) || fabsf(k.ang[i]) > 720.0f)
+			return false;
+	}
+	return std::isfinite(k.tMs) && k.tMs >= 0.0 && k.tMs < 86400000.0
+		&& std::isfinite(k.fov) && k.fov >= kCamMinFov && k.fov <= kCamMaxFov && fabsf(remainderf(k.ang[0], 360.0f)) <= 90.0f
+		&& std::isfinite(k.dof) && k.dof >= 0.0f && k.dof <= 20000.0f;
+}
+
+static void DemoCam_LoadKeys(void)
+{
+	// A restart of the same replay keeps the keys in memory.
+	if (!_stricmp(s_demo.szCamKeysPath, s_demo.szPath))
+		return;
+	s_demo.camKeys.clear();
+	s_demo.camPathMs.clear();
+	s_demo.bPathPlaying = false;
+	strncpy_s(s_demo.szCamKeysPath, s_demo.szPath, _TRUNCATE);
+
+	char szPath[280];
+	if (!DemoCam_KeysFile(szPath, sizeof(szPath)))
+		return;
+	const HANDLE h = CreateFileA(szPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+		FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (h == INVALID_HANDLE_VALUE)
+		return;
+	std::vector<char> buf(64 * 1024);
+	DWORD n = 0;
+	const BOOL bRead = ReadFile(h, buf.data(), static_cast<DWORD>(buf.size() - 1), &n, nullptr);
+	CloseHandle(h);
+	if (!bRead)
+		return;
+	buf[n] = '\0';
+
+	char* pCtx = nullptr;
+	for (char* pLine = strtok_s(buf.data(), "\r\n", &pCtx); pLine && s_demo.camKeys.size() < kCamMaxKeys;
+		pLine = strtok_s(nullptr, "\r\n", &pCtx))
+	{
+		DemoCamKey_s k = {};
+		// The focus distance column is optional.
+		const int nFields = sscanf_s(pLine, "%lf %f %f %f %f %f %f %f %f", &k.tMs, &k.pos[0], &k.pos[1], &k.pos[2],
+			&k.ang[0], &k.ang[1], &k.ang[2], &k.fov, &k.dof);
+		if (nFields < 8 || !DemoCam_KeyValid(k))
+			continue;
+		for (int i = 0; i < 3; ++i)
+			k.ang[i] = remainderf(k.ang[i], 360.0f);
+		s_demo.camKeys.push_back(k);
+	}
+	s_demo.camPathMs.clear();
+	s_demo.nCamEditKey = -1;
+	if (!s_demo.camKeys.empty())
+		Msg(eDLL_T::ENGINE, "[DEMO] %zu camera keyframes from %s\n", s_demo.camKeys.size(), szPath);
+}
+
+static void DemoCam_SaveKeys(void)
+{
+	char szPath[280];
+	if (!DemoCam_KeysFile(szPath, sizeof(szPath)))
+		return;
+	if (s_demo.camKeys.empty())
+	{
+		DeleteFileA(szPath);
+		return;
+	}
+
+	std::string out = "# ms x y z pitch yaw roll fov dof\r\n";
+	for (const DemoCamKey_s& k : s_demo.camKeys)
+	{
+		char szLine[192];
+		const int n = snprintf(szLine, sizeof(szLine), "%.1f %.3f %.3f %.3f %.3f %.3f %.3f %.2f %.1f\r\n",
+			k.tMs, k.pos[0], k.pos[1], k.pos[2], k.ang[0], k.ang[1], k.ang[2], k.fov, k.dof);
+		if (n > 0 && n < static_cast<int>(sizeof(szLine)))
+			out.append(szLine, static_cast<size_t>(n));
+	}
+
+	const HANDLE h = CreateFileA(szPath, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+	DWORD nWritten = 0;
+	const bool bOk = h != INVALID_HANDLE_VALUE
+		&& WriteFile(h, out.data(), static_cast<DWORD>(out.size()), &nWritten, nullptr) && nWritten == out.size();
+	if (h != INVALID_HANDLE_VALUE)
+		CloseHandle(h);
+	if (!bOk)
+		Warning(eDLL_T::ENGINE, "[DEMO] camera keyframes could not be saved to %s\n", szPath);
+}
+
+// Puts the free camera at a keyframe's pose.
+static void DemoCam_SetPose(const DemoCamKey_s& k)
+{
+	for (int i = 0; i < 3; ++i)
+	{
+		s_demo.camOrigin[i] = k.pos[i];
+		s_demo.camAngles[i] = k.ang[i];
+	}
+	demo_freecam_roll.SetValue(remainderf(k.ang[2], 360.0f));
+	DemoCam_SetFovConVar(k.fov);
+	demo_freecam_dof.SetValue(k.dof);
+	QueryPerformanceCounter(&s_demo.camQpc);
+	s_demo.bCamInit = true;
+	s_demo.bCamCarry = false;
+	DemoCam_WriteEngineAngles(s_demo.camAngles);
+}
+
+static bool DemoCam_Ready(void)
+{
+	return s_demo.state == DemoPlayState_t::PLAYING && s_demo.bFreecam && s_demo.bCamInit && s_demo.bClockStarted;
+}
+
+bool DemoPlay_CamKeyAdd(void)
+{
+	if (!DemoCam_Ready())
+	{
+		Warning(eDLL_T::ENGINE, "[DEMO] camera keyframes need the free camera\n");
+		return false;
+	}
+	if (s_demo.bPathPlaying)
+	{
+		Warning(eDLL_T::ENGINE, "[DEMO] stop the camera path (P) before adding keyframes\n");
+		return false;
+	}
+	DemoCamKey_s k = {};
+	k.tMs = static_cast<double>(DemoPlay_GetTime()) * 1000.0;
+	for (int i = 0; i < 3; ++i)
+	{
+		k.pos[i] = s_demo.camOrigin[i];
+		k.ang[i] = s_demo.camAngles[i];
+	}
+	// The roll as set now, not as the last view drew it.
+	if (!s_demo.bPathPlaying)
+		k.ang[2] = demo_freecam_roll.GetFloat();
+	for (int i = 0; i < 3; ++i)
+		k.ang[i] = remainderf(k.ang[i], 360.0f);
+	k.fov = DemoCam_CurrentFov();
+	if (!(k.fov >= kCamMinFov))
+		k.fov = 90.0f;
+	k.fov = DemoCam_ClampFov(k.fov);
+	k.dof = demo_freecam_dof.GetFloat();
+	if (!DemoCam_KeyValid(k))
+		return false;
+
+	// K on a key that J/L/goto landed on adjusts it; anywhere else it adds the
+	// next point of the path.
+	std::vector<DemoCamKey_s>& keys = s_demo.camKeys;
+	const int nEdit = s_demo.nCamEditKey;
+	const bool bReplace = nEdit >= 0 && nEdit < static_cast<int>(keys.size())
+		&& fabs(keys[nEdit].tMs - k.tMs) < 250.0;
+	if (bReplace)
+	{
+		k.tMs = keys[nEdit].tMs;
+		keys[nEdit] = k;
+	}
+	else
+	{
+		if (keys.size() >= kCamMaxKeys)
+		{
+			Warning(eDLL_T::ENGINE, "[DEMO] a camera path holds at most %zu keyframes\n", kCamMaxKeys);
+			return false;
+		}
+		keys.push_back(k);
+	}
+	s_demo.nCamEditKey = -1;
+	s_demo.camPathMs.clear();
+	DemoCam_SaveKeys();
+	Msg(eDLL_T::ENGINE, "[DEMO] camera keyframe %d %s at %.2f s (%zu in the path)\n",
+		bReplace ? nEdit + 1 : static_cast<int>(keys.size()), bReplace ? "updated" : "added", k.tMs / 1000.0, keys.size());
+	return true;
+}
+
+bool DemoPlay_CamKeyRemove(const int nIndex)
+{
+	if (nIndex < 0 || nIndex >= static_cast<int>(s_demo.camKeys.size()))
+		return false;
+	const double tMs = s_demo.camKeys[nIndex].tMs;
+	s_demo.camKeys.erase(s_demo.camKeys.begin() + nIndex);
+	s_demo.camPathMs.clear();
+	s_demo.nCamEditKey = -1;
+	if (s_demo.camKeys.size() < 2)
+		s_demo.bPathPlaying = false;
+	DemoCam_SaveKeys();
+	Msg(eDLL_T::ENGINE, "[DEMO] camera keyframe at %.2f s removed (%zu left)\n", tMs / 1000.0, s_demo.camKeys.size());
+	return true;
+}
+
+// The key J/L/goto landed on while the replay is still there, else the one at
+// the current replay time give or take a quarter second; -1 if none.
+static int DemoCam_KeyAtNow(void)
+{
+	const double tMs = static_cast<double>(DemoPlay_GetTime()) * 1000.0;
+	const int nEdit = s_demo.nCamEditKey;
+	if (nEdit >= 0 && nEdit < static_cast<int>(s_demo.camKeys.size()) && fabs(s_demo.camKeys[nEdit].tMs - tMs) < 250.0)
+		return nEdit;
+	int best = -1;
+	double bestD = 250.0;
+	for (size_t i = 0; i < s_demo.camKeys.size(); ++i)
+	{
+		const double d = fabs(s_demo.camKeys[i].tMs - tMs);
+		if (d <= bestD)
+		{
+			bestD = d;
+			best = static_cast<int>(i);
+		}
+	}
+	return best;
+}
+
+void DemoPlay_CamKeyClear(void)
+{
+	s_demo.camKeys.clear();
+	s_demo.camPathMs.clear();
+	s_demo.nCamEditKey = -1;
+	s_demo.bPathPlaying = false;
+	DemoCam_SaveKeys();
+	Msg(eDLL_T::ENGINE, "[DEMO] camera path cleared\n");
+}
+
+// Pauses on a keyframe with the camera at its pose, ready to be adjusted and
+// stored again with K.
+bool DemoPlay_CamKeyGoto(const int nIndex)
+{
+	if (s_demo.state != DemoPlayState_t::PLAYING || !s_demo.bFreecam
+		|| nIndex < 0 || nIndex >= static_cast<int>(s_demo.camKeys.size()))
+		return false;
+	const DemoCamKey_s k = s_demo.camKeys[nIndex];
+	s_demo.bPathPlaying = false;
+	// The pose first: a seek that has to reconnect carries it.
+	DemoCam_SetPose(k);
+	DemoPlay_SetPaused(true);
+	DemoPlay_Seek(static_cast<float>(k.tMs / 1000.0));
+	s_demo.nCamEditKey = nIndex;
+	Msg(eDLL_T::ENGINE, "[DEMO] camera keyframe %d of %zu at %.2f s\n", nIndex + 1, s_demo.camKeys.size(), k.tMs / 1000.0);
+	return true;
+}
+
+// The previous (nDir < 0) or next keyframe in path order from the one last
+// landed on; from none, J goes to the last key and L to the first.
+bool DemoPlay_CamKeyStep(const int nDir)
+{
+	const int nCount = static_cast<int>(s_demo.camKeys.size());
+	if (nCount == 0)
+		return false;
+	const int nCur = DemoCam_KeyAtNow();
+	int nIndex;
+	if (nCur < 0)
+		nIndex = nDir < 0 ? nCount - 1 : 0;
+	else
+		nIndex = nCur + (nDir < 0 ? -1 : 1);
+	return nIndex >= 0 && nIndex < nCount && DemoPlay_CamKeyGoto(nIndex);
+}
+
+void DemoPlay_GetCamKeyData(std::vector<float>& out)
+{
+	out.clear();
+	for (const DemoCamKey_s& k : s_demo.camKeys)
+	{
+		out.push_back(static_cast<float>(k.tMs / 1000.0));
+		out.push_back(k.ang[2]);
+		out.push_back(k.fov);
+		out.push_back(k.dof);
+	}
+}
+
+int DemoPlay_CamKeyAtNow(void)
+{
+	return DemoCam_KeyAtNow();
+}
+
+void DemoPlay_GetCamKeyTimes(std::vector<float>& out)
+{
+	out.clear();
+	for (const DemoCamKey_s& k : s_demo.camKeys)
+		out.push_back(static_cast<float>(k.tMs / 1000.0));
+}
+
+// The free camera leaves the path where the path left it.
+static void DemoCam_StopPath(void)
+{
+	if (!s_demo.bPathPlaying)
+		return;
+	s_demo.bPathPlaying = false;
+	float pos[3], ang[3], flFov = 0.0f, flDof = 0.0f;
+	if (DemoCam_EvalPath(DemoCam_PathSampleMs(), pos, ang, &flFov, &flDof))
+	{
+		demo_freecam_roll.SetValue(ang[2]);
+		DemoCam_SetFovConVar(flFov);
+		demo_freecam_dof.SetValue(flDof);
+	}
+	Msg(eDLL_T::ENGINE, "[DEMO] camera path stopped at %.2f s\n", s_demo.flDemoMs / 1000.0);
+}
+
+// Flies the free camera through the keys in order while the replay plays from
+// the first key's time.
+bool DemoPlay_SetCamPathPlaying(const bool bOn)
+{
+	if (!bOn)
+	{
+		DemoCam_StopPath();
+		return true;
+	}
+	if (s_demo.state != DemoPlayState_t::PLAYING || !s_demo.bFreecam || s_demo.camKeys.size() < 2)
+	{
+		Warning(eDLL_T::ENGINE, "[DEMO] a camera path needs the free camera and two keyframes\n");
+		return false;
+	}
+	DemoCam_BuildPathTimes();
+	s_demo.flPathMs = 0.0;
+	s_demo.bCamFollow = false;
+	s_demo.nCamEditKey = -1;
+	double t0 = s_demo.camKeys.front().tMs;
+	double t1 = s_demo.camKeys.back().tMs;
+	DemoCam_PickShot(static_cast<double>(DemoPlay_GetTime()) * 1000.0, t0, t1);
+	s_demo.flPathUntilMs = t1;
+	const double nowMs = static_cast<double>(DemoPlay_GetTime()) * 1000.0;
+	if (fabs(nowMs - t0) > 50.0)
+		DemoPlay_Seek(static_cast<float>(t0 / 1000.0));
+	DemoPlay_SetPaused(false);
+	s_demo.bPathPlaying = true;
+	DemoCam_SaveKeys();
+	Msg(eDLL_T::ENGINE, "[DEMO] camera path playing %zu keyframes from %.2f s to %.2f s\n",
+		s_demo.camKeys.size(), t0 / 1000.0, t1 / 1000.0);
+	return true;
+}
+
+bool DemoPlay_IsCamPathPlaying(void)
+{
+	return s_demo.bPathPlaying;
+}
+
+void DemoPlay_SetCamRoll(const float flDegrees)
+{
+	if (std::isfinite(flDegrees))
+		demo_freecam_roll.SetValue(remainderf(flDegrees, 360.0f));
+}
+
+float DemoPlay_GetCamRoll(void)
+{
+	return demo_freecam_roll.GetFloat();
+}
+
+void DemoPlay_SetCamFov(const float flDegrees)
+{
+	if (std::isfinite(flDegrees))
+		demo_freecam_fov.SetValue(flDegrees >= kCamMinFov ? DemoCam_ClampFov(flDegrees) : 0.0f);
+}
+
+float DemoPlay_GetCamFov(void)
+{
+	return DemoCam_CurrentFov();
+}
+
+void DemoPlay_SetCamDof(const float flFocus, const float flRange)
+{
+	if (std::isfinite(flFocus))
+		demo_freecam_dof.SetValue(flFocus);
+	if (std::isfinite(flRange) && flRange > 0.0f)
+		demo_freecam_dof_range.SetValue(flRange);
+}
+
+float DemoPlay_GetCamDof(void)
+{
+	return demo_freecam_dof.GetFloat();
+}
+
+float DemoPlay_GetCamDofRange(void)
+{
+	return demo_freecam_dof_range.GetFloat();
+}
+
+void DemoPlay_OnMouseWheel(const int nDelta)
+{
+	if (s_bDemoGate && s_demo.bFreecam)
+		InterlockedExchangeAdd(&s_nCamWheel, nDelta);
+}
+
+void DemoPlay_OnRawMouse(const int nDx, const int nDy)
+{
+	if (!s_bDemoGate || !s_demo.bFreecam)
+		return;
+	InterlockedExchangeAdd(&s_nCamMouseX, nDx);
+	InterlockedExchangeAdd(&s_nCamMouseY, nDy);
+	InterlockedExchangeAdd(&s_nCamMouseSeen, abs(nDx) + abs(nDy));
+}
+
+static float DemoCam_VarFloat(const char* pszName, const float flDefault)
+{
+	ConVar* const pVar = g_pCVar ? g_pCVar->FindVar(pszName) : nullptr;
+	const float fl = pVar ? pVar->GetFloat() : flDefault;
+	return std::isfinite(fl) ? fl : flDefault;
+}
+
+// Turns the free camera by the mouse motion since the last frame, scaled like
+// the game's own mouse look. Motion while the pointer is up is dropped.
+static void DemoCam_ApplyMouseLook(const bool bLook)
+{
+	const LONG nDx = InterlockedExchange(&s_nCamMouseX, 0);
+	const LONG nDy = InterlockedExchange(&s_nCamMouseY, 0);
+	if (!bLook || (!nDx && !nDy))
+		return;
+
+	const float flSens = fminf(fmaxf(DemoCam_VarFloat("mouse_sensitivity", 5.0f), 0.0f), 100.0f);
+	const float flYaw = DemoCam_VarFloat("m_yaw", 0.022f);
+	float flPitch = DemoCam_VarFloat("m_pitch", 0.022f);
+	if (DemoCam_VarFloat("m_invert_pitch", 0.0f) != 0.0f)
+		flPitch = -flPitch;
+
+	s_demo.camAngles[1] = remainderf(s_demo.camAngles[1] - static_cast<float>(nDx) * flSens * flYaw, 360.0f);
+	s_demo.camAngles[0] = fminf(89.0f, fmaxf(-89.0f, s_demo.camAngles[0] + static_cast<float>(nDy) * flSens * flPitch));
+}
+
+static const char* const s_pszDofVars[4] = { "dof_nearDepthStart", "dof_nearDepthEnd", "dof_farDepthStart", "dof_farDepthEnd" };
+
+// Hands the engine's depth-of-field override back as it was.
+static void DemoCam_ReleaseDof(void)
+{
+	if (!s_demo.bDofOwned)
+		return;
+	s_demo.bDofOwned = false;
+	s_demo.flDofApplied = -1.0f;
+	s_demo.flDofRangeApplied = -1.0f;
+	if (!g_pCVar)
+		return;
+	if (ConVar* const pOverride = g_pCVar->FindVar("dof_overrideParams"))
+		pOverride->SetValue(s_demo.nSavedDofOverride);
+	for (int i = 0; i < 4; ++i)
+		if (ConVar* const pVar = g_pCVar->FindVar(s_pszDofVars[i]))
+			pVar->SetValue(s_demo.flSavedDof[i]);
+}
+
+// The free camera's focus runs the engine's depth-of-field override: sharp for
+// the range around the focus distance, full blur one more range beyond it.
+static void DemoCam_UpdateDof(void)
+{
+	float flFocus = 0.0f;
+	if (s_demo.state == DemoPlayState_t::PLAYING && s_demo.bFreecam)
+	{
+		float pos[3], ang[3], flFov = 0.0f;
+		if (!(s_demo.bPathPlaying && DemoCam_EvalPath(s_demo.flPathMs, pos, ang, &flFov, &flFocus)))
+			flFocus = demo_freecam_dof.GetFloat();
+	}
+	if (!(flFocus >= 1.0f) || !g_pCVar)
+	{
+		DemoCam_ReleaseDof();
+		return;
+	}
+
+	ConVar* const pOverride = g_pCVar->FindVar("dof_overrideParams");
+	ConVar* pVars[4] = {};
+	for (int i = 0; i < 4; ++i)
+		pVars[i] = g_pCVar->FindVar(s_pszDofVars[i]);
+	if (!pOverride || !pVars[0] || !pVars[1] || !pVars[2] || !pVars[3])
+		return;
+
+	if (!s_demo.bDofOwned)
+	{
+		s_demo.nSavedDofOverride = pOverride->GetInt();
+		for (int i = 0; i < 4; ++i)
+			s_demo.flSavedDof[i] = pVars[i]->GetFloat();
+		s_demo.bDofOwned = true;
+	}
+	const float flRange = demo_freecam_dof_range.GetFloat();
+	if (pOverride->GetInt() != 1)
+		pOverride->SetValue(1);
+	if (flFocus == s_demo.flDofApplied && flRange == s_demo.flDofRangeApplied)
+		return;
+	s_demo.flDofApplied = flFocus;
+	s_demo.flDofRangeApplied = flRange;
+
+	const float flHalf = flRange * 0.5f;
+	// A near start past its end turns the near blur off, as the engine reads it.
+	pVars[0]->SetValue(fmaxf(0.0f, flFocus - flHalf - flRange));
+	pVars[1]->SetValue(fmaxf(0.0f, flFocus - flHalf));
+	pVars[2]->SetValue(flFocus + flHalf);
+	pVars[3]->SetValue(flFocus + flHalf + flRange);
+}
+
+// 25% faster per step up, back down the same way.
+static void DemoCam_ScaleSpeed(const float flSteps)
+{
+	const float flSpeed = demo_freecam_speed.GetFloat() * powf(1.25f, flSteps);
+	demo_freecam_speed.SetValue(fminf(5000.0f, fmaxf(10.0f, flSpeed)));
+	Msg(eDLL_T::ENGINE, "[DEMO] free camera speed %.0f\n", demo_freecam_speed.GetFloat());
+}
+
+// S21 C_BaseEntity: the current and next networked snapshot (lerp data) and
+// the abs origin. A snapshot holds world time at +0, origin at +4, angles at +0x10.
+static constexpr ptrdiff_t kClientEntLerpCurrent = 0x110;
+static constexpr ptrdiff_t kClientEntLerpFuture  = 0x118;
+static constexpr ptrdiff_t kClientEntAbsOrigin   = 0x188;
+
+struct DemoCamSnap_s
+{
+	float time;
+	float origin[3];
+	float angles[3];
+};
+
+static bool DemoCam_CoordsValid(const float* p, const int n)
+{
+	for (int i = 0; i < n; ++i)
+		if (!std::isfinite(p[i]) || fabsf(p[i]) > 65535.0f)
+			return false;
+	return true;
+}
+
+// The player the camera follows: the one being watched, else the recorded one.
+static uintptr_t DemoCam_FollowEntity(void)
+{
+	if (s_demo.nViewPov < 0)
+		return DemoPlay_LocalPlayer();
+	const uint32_t eh = s_demo.nViewPov < DemoPlay_GetPovCount()
+		? DemoPlay_PovHandle(s_demo.nViewPov) : static_cast<uint32_t>(s_demo.nViewPov);
+	if (eh == 0xFFFFFFFFu)
+		return 0;
+	return reinterpret_cast<uintptr_t>(ClientEntityList_EntityAt(static_cast<int>(eh & ENT_ENTRY_MASK),
+		static_cast<int>(eh >> NUM_SERIAL_NUM_SHIFT_BITS)));
+}
+
+static bool DemoCam_ReadSnap(const uintptr_t pEnt, const ptrdiff_t nSlot, DemoCamSnap_s& out)
+{
+	__try
+	{
+		const uintptr_t pSnap = *reinterpret_cast<const uintptr_t*>(pEnt + nSlot);
+		if (!pSnap)
+			return false;
+		const float* const p = reinterpret_cast<const float*>(pSnap);
+		out.time = p[0];
+		for (int i = 0; i < 3; ++i)
+		{
+			out.origin[i] = p[1 + i];
+			out.angles[i] = p[4 + i];
+		}
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+	return std::isfinite(out.time) && DemoCam_CoordsValid(out.origin, 3) && DemoCam_CoordsValid(out.angles, 3);
+}
+
+// Where the followed player is now: its networked snapshots, interpolated from
+// the current one to the next on the wall clock. The abs origin is the fallback.
+static bool DemoCam_FollowPose(const LARGE_INTEGER& now, const LARGE_INTEGER& freq, float* pOrigin, float* pYaw)
+{
+	const uintptr_t pEnt = DemoCam_FollowEntity();
+	if (!pEnt)
+		return false;
+	DemoCamSnap_s cur, fut;
+	const bool bCur = DemoCam_ReadSnap(pEnt, kClientEntLerpCurrent, cur);
+	const bool bFut = DemoCam_ReadSnap(pEnt, kClientEntLerpFuture, fut);
+	if (!bCur && !bFut)
+	{
+		__try
+		{
+			const float* const p = reinterpret_cast<const float*>(pEnt + kClientEntAbsOrigin);
+			for (int i = 0; i < 3; ++i)
+				pOrigin[i] = p[i];
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+		*pYaw = 0.0f;
+		return DemoCam_CoordsValid(pOrigin, 3);
+	}
+	if (!bFut)
+		fut = cur;
+	else if (!bCur)
+		cur = fut;
+
+	if (fut.time != s_demo.flFollowSnapTime)
+	{
+		s_demo.flFollowSnapTime = fut.time;
+		s_demo.followSnapQpc = now;
+	}
+	const float flSpan = fut.time - cur.time;
+	float f = 1.0f;
+	if (flSpan > 0.0f && flSpan < 1.0f && freq.QuadPart && !DemoPlay_IsSeeking())
+	{
+		const float flSince = static_cast<float>(now.QuadPart - s_demo.followSnapQpc.QuadPart) / static_cast<float>(freq.QuadPart);
+		f = fminf(1.0f, fmaxf(0.0f, flSince * demo_timescale.GetFloat() / flSpan));
+	}
+	for (int i = 0; i < 3; ++i)
+		pOrigin[i] = cur.origin[i] + (fut.origin[i] - cur.origin[i]) * f;
+	*pYaw = cur.angles[1] + remainderf(fut.angles[1] - cur.angles[1], 360.0f) * f;
+	return true;
+}
+
+void DemoPlay_SetCamFollow(const bool bOn)
+{
+	if (bOn && (s_demo.state != DemoPlayState_t::PLAYING || !s_demo.bFreecam || !s_demo.bCamInit))
+		return;
+	// The offset is taken on the next view from the free camera, not the eyes.
+	s_demo.bCamFollow = bOn;
+	s_demo.bFollowYawInit = false;
+	s_demo.flFollowSnapTime = -1.0f;
+	Msg(eDLL_T::ENGINE, "[DEMO] free camera %s the player\n", bOn ? "follows" : "no longer follows");
+}
+
+bool DemoPlay_IsCamFollow(void)
+{
+	return s_demo.bFreecam && s_demo.bCamFollow;
+}
+
+// Once a frame while playing: the wheel, middle click and path keys.
+static void DemoCam_Pump(void)
+{
+	static const int s_vk[] = { 'K', 'J', 'L', VK_DELETE, 'P', VK_MBUTTON, 'T', VK_OEM_PLUS, VK_ADD, VK_OEM_MINUS, VK_SUBTRACT };
+	int nDown = 0;
+	for (int i = 0; i < static_cast<int>(sizeof(s_vk) / sizeof(s_vk[0])); ++i)
+		if (GetAsyncKeyState(s_vk[i]) & 0x8000)
+			nDown |= 1 << i;
+	const int nPressed = nDown & ~s_demo.nCamKeysPrev;
+	s_demo.nCamKeysPrev = nDown;
+	const LONG nWheel = InterlockedExchange(&s_nCamWheel, 0);
+
+	static ULONGLONG s_nInputDiagMs = 0;
+	if (demo_input_diag.GetBool() && GetTickCount64() - s_nInputDiagMs >= 1000)
+	{
+		s_nInputDiagMs = GetTickCount64();
+		float eng[3] = {};
+		if (v_Engine_GetViewAngles)
+			v_Engine_GetViewAngles(nullptr, eng);
+		Msg(eDLL_T::ENGINE, "[DEMO-INPUT] t=%.2f free=%d path=%d eng=(%.1f %.1f) cam=(%.1f %.1f) org=(%.0f %.0f %.0f) "
+			"mouse=%ld views=%ld dt=%.4f w=%d mouseLayer=%d blockInput=%d focused=%d paused=%d hud=%d keys=0x%X\n",
+			s_demo.flDemoMs / 1000.0, s_demo.bFreecam ? 1 : 0, s_demo.bPathPlaying ? 1 : 0, eng[0], eng[1],
+			s_demo.camAngles[0], s_demo.camAngles[1], s_demo.camOrigin[0], s_demo.camOrigin[1], s_demo.camOrigin[2],
+			InterlockedExchange(&s_nCamMouseSeen, 0), InterlockedExchange(&s_nCamViewCalls, 0), s_flCamLastDt, (GetAsyncKeyState('W') & 0x8000) ? 1 : 0, s_demo.bMouseLayer ? 1 : 0, g_bBlockInput ? 1 : 0,
+			DemoPlay_WindowFocused() ? 1 : 0, s_demo.bPaused ? 1 : 0, demo_hud.GetInt(), nDown);
+		const uintptr_t pEnt = DemoCam_FollowEntity();
+		DemoCamSnap_s cur = {}, fut = {};
+		float abs[3] = {};
+		const bool bCur = pEnt && DemoCam_ReadSnap(pEnt, kClientEntLerpCurrent, cur);
+		const bool bFut = pEnt && DemoCam_ReadSnap(pEnt, kClientEntLerpFuture, fut);
+		if (pEnt)
+		{
+			__try
+			{
+				for (int i = 0; i < 3; ++i)
+					abs[i] = reinterpret_cast<const float*>(pEnt + kClientEntAbsOrigin)[i];
+			}
+			__except (EXCEPTION_EXECUTE_HANDLER) {}
+		}
+		Msg(eDLL_T::ENGINE, "[DEMO-INPUT] follow=%d ent=%p abs=(%.0f %.0f %.0f) snap=%d:%.2f(%.0f %.0f %.0f) next=%d:%.2f(%.0f %.0f %.0f) "
+			"anchor=(%.0f %.0f %.0f) off=(%.0f %.0f %.0f) vel=(%.0f %.0f %.0f) speed=%.0f\n",
+			s_demo.bCamFollow ? 1 : 0, reinterpret_cast<void*>(pEnt), abs[0], abs[1], abs[2],
+			bCur ? 1 : 0, cur.time, cur.origin[0], cur.origin[1], cur.origin[2],
+			bFut ? 1 : 0, fut.time, fut.origin[0], fut.origin[1], fut.origin[2],
+			s_demo.followAnchor[0], s_demo.followAnchor[1], s_demo.followAnchor[2],
+			s_demo.camFollowOff[0], s_demo.camFollowOff[1], s_demo.camFollowOff[2], s_demo.camVel[0],
+			s_demo.camVel[1], s_demo.camVel[2], demo_freecam_speed.GetFloat());
+	}
+
+	if (!s_demo.bFreecam)
+	{
+		s_demo.bPathPlaying = false;
+		return;
+	}
+
+	// The path ends on its last keyframe; the camera stays there. A seek back
+	// to the first key is not the end of the flight.
+	if (s_demo.bPathPlaying && !DemoPlay_IsSeeking() && !s_demo.camPathMs.empty())
+	{
+		const bool bDone = DemoCam_PathUsesReplay()
+			? static_cast<double>(DemoPlay_GetTime()) * 1000.0 >= s_demo.flPathUntilMs
+			: DemoCam_PathSampleMs() >= s_demo.camPathMs.back();
+		if (bDone)
+			DemoCam_StopPath();
+	}
+
+	// Keys typed into the console or a menu are not camera controls.
+	if (!DemoPlay_WindowFocused() || g_bBlockInput)
+		return;
+	const bool bCtrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+	const bool bShift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+
+	// The wheel and middle button belong to the replay controls while their pointer is up.
+	if (!s_demo.bMouseLayer && !s_demo.bPathPlaying)
+	{
+		if (nWheel)
+		{
+			const float flNotches = static_cast<float>(nWheel) / static_cast<float>(WHEEL_DELTA);
+			const float flStep = demo_freecam_wheel_step.GetFloat();
+			if (GetAsyncKeyState(VK_RBUTTON) & 0x8000)
+				DemoCam_ScaleSpeed(flNotches);
+			else if (bShift)
+			{
+				// Wheel forward pulls the focus in, 10% a notch.
+				const float flFocus = demo_freecam_dof.GetFloat() >= 1.0f ? demo_freecam_dof.GetFloat() : 300.0f;
+				demo_freecam_dof.SetValue(fminf(20000.0f, fmaxf(10.0f, flFocus * powf(1.1f, -flNotches))));
+			}
+			else if (bCtrl)
+			{
+				float flFov = DemoCam_CurrentFov();
+				if (!(flFov >= kCamMinFov))
+					flFov = 90.0f;
+				// Wheel forward zooms in.
+				demo_freecam_fov.SetValue(DemoCam_ClampFov(flFov - flNotches * flStep));
+			}
+			else
+				demo_freecam_roll.SetValue(remainderf(demo_freecam_roll.GetFloat() + flNotches * flStep, 360.0f));
+		}
+		if (nPressed & (1 << 5))
+		{
+			if (bShift)
+				demo_freecam_dof.SetValue(0.0f);
+			else if (bCtrl)
+				demo_freecam_fov.SetValue(0.0f);
+			else
+				demo_freecam_roll.SetValue(0.0f);
+		}
+	}
+
+	if (!demo_campath_keys.GetBool())
+		return;
+	if (nPressed & (1 << 0))
+		DemoPlay_CamKeyAdd();
+	if (nPressed & (1 << 1))
+		DemoPlay_CamKeyStep(-1);
+	if (nPressed & (1 << 2))
+		DemoPlay_CamKeyStep(1);
+	if (nPressed & (1 << 3))
+	{
+		const int nIndex = DemoCam_KeyAtNow();
+		if (nIndex >= 0)
+			DemoPlay_CamKeyRemove(nIndex);
+	}
+	if (nPressed & (1 << 4))
+		DemoPlay_SetCamPathPlaying(!s_demo.bPathPlaying);
+	if ((nPressed & (1 << 6)) && !s_demo.bPathPlaying)
+		DemoPlay_SetCamFollow(!s_demo.bCamFollow);
+	if (nPressed & ((1 << 7) | (1 << 8)))
+		DemoCam_ScaleSpeed(1.0f);
+	if (nPressed & ((1 << 9) | (1 << 10)))
+		DemoCam_ScaleSpeed(-1.0f);
+}
+
 static void __fastcall Hook_Player_RoamingView(uintptr_t pPlayer, float* pEyeOrigin, float* pEyeAngles, float* pFov)
 {
-	v_Player_RoamingView(pPlayer, pEyeOrigin, pEyeAngles, pFov);
+	// A playing path owns this view through the rewind. ForceFullUpdate makes
+	// GetLocalPlayer miss, and the stock roaming view on that call is the
+	// recorded camera, so it is not run -- the path pose is written below.
+	const bool bLocal = pPlayer == DemoPlay_LocalPlayer();
+	const bool bPathCam = s_bDemoGate && s_demo.bPathPlaying && pEyeOrigin && pEyeAngles;
+	// Stock roaming view writes the player eyes. Follow keeps the free camera
+	// where it sits, so that call does not run while follow is on.
+	if (v_Player_RoamingView && pPlayer && (!bPathCam || bLocal)
+		&& !(s_demo.bCamFollow && !s_demo.bPathPlaying))
+		v_Player_RoamingView(pPlayer, pEyeOrigin, pEyeAngles, pFov);
 
-	if (!s_bDemoGate || !pEyeOrigin || !pEyeAngles || pPlayer != DemoPlay_LocalPlayer())
+	if (!s_bDemoGate || !pEyeOrigin || !pEyeAngles || (!bLocal && !bPathCam))
 		return;
 
 	LARGE_INTEGER now, freq;
 	QueryPerformanceCounter(&now);
 	QueryPerformanceFrequency(&freq);
 
-	if (!s_demo.bFreecam)
+	// The path still has to write the eyes if freecam was cleared for this call.
+	if (!s_demo.bFreecam && !s_demo.bPathPlaying)
 		return;
+	if (pFov && std::isfinite(*pFov) && *pFov > 1.0f && *pFov < 179.0f)
+		s_demo.flCamStockFov = *pFov;
+
+	float eng[3] = { pEyeAngles[0], pEyeAngles[1], 0.0f };
+	if (v_Engine_GetViewAngles)
+		v_Engine_GetViewAngles(nullptr, eng);
+
 	if (!s_demo.bCamInit)
 	{
-		s_demo.camOrigin[0] = pEyeOrigin[0];
-		s_demo.camOrigin[1] = pEyeOrigin[1];
-		s_demo.camOrigin[2] = pEyeOrigin[2];
+		if (s_demo.bCamCarry)
+		{
+			// A reconnect: the camera stays where it was.
+			Msg(eDLL_T::ENGINE, "[DEMO] free camera kept at (%.0f %.0f %.0f) facing (%.1f %.1f)\n",
+				s_demo.camOrigin[0], s_demo.camOrigin[1], s_demo.camOrigin[2], s_demo.camAngles[0], s_demo.camAngles[1]);
+		}
+		else
+		{
+			s_demo.camOrigin[0] = pEyeOrigin[0];
+			s_demo.camOrigin[1] = pEyeOrigin[1];
+			s_demo.camOrigin[2] = pEyeOrigin[2];
+			s_demo.camAngles[0] = std::isfinite(eng[0]) ? fminf(89.0f, fmaxf(-89.0f, eng[0])) : 0.0f;
+			s_demo.camAngles[1] = std::isfinite(eng[1]) ? eng[1] : 0.0f;
+		}
+		InterlockedExchange(&s_nCamMouseX, 0);
+		InterlockedExchange(&s_nCamMouseY, 0);
+		s_demo.camVel[0] = s_demo.camVel[1] = s_demo.camVel[2] = 0.0f;
+		s_demo.bCamCarry = false;
 		s_demo.camQpc = now;
 		s_demo.bCamInit = true;
 	}
@@ -2196,60 +3337,284 @@ static void __fastcall Hook_Player_RoamingView(uintptr_t pPlayer, float* pEyeOri
 	s_demo.camQpc = now;
 	if (dt < 0.0f || dt > 0.1f)
 		dt = 0.0f;
+	InterlockedIncrement(&s_nCamViewCalls);
+	s_flCamLastDt = dt;
 
-	float ang[3] = { pEyeAngles[0], pEyeAngles[1], 0.0f };
-	if (v_Engine_GetViewAngles)
-		v_Engine_GetViewAngles(nullptr, ang);
-
-	if (DemoPlay_WindowFocused())
+	// Keys on the replay are sampled from the replay clock, which already waits
+	// out seeks and pauses. Only a path whose keys share a timestamp keeps its
+	// own clock, and that one waits too.
+	if (s_demo.bPathPlaying && !s_demo.bPaused && !DemoPlay_IsSeeking() && !DemoCam_PathUsesReplay())
+		s_demo.flPathMs += static_cast<double>(dt) * 1000.0 * demo_timescale.GetFloat();
+	float flPathFov = 0.0f;
+	const bool bPath = s_demo.bPathPlaying
+		&& DemoCam_EvalPath(DemoCam_PathSampleMs(), s_demo.camOrigin, s_demo.camAngles, &flPathFov);
+	static bool s_bPathViewLogged = false;
+	if (!s_demo.bPathPlaying)
+		s_bPathViewLogged = false;
+	else if (bPath && !s_bPathViewLogged)
 	{
-		const float flDeg2Rad = 3.14159265358979f / 180.0f;
-		const float sp = sinf(ang[0] * flDeg2Rad), cp = cosf(ang[0] * flDeg2Rad);
-		const float sy = sinf(ang[1] * flDeg2Rad), cy = cosf(ang[1] * flDeg2Rad);
+		s_bPathViewLogged = true;
+		Msg(eDLL_T::ENGINE, "[DEMO] camera path view at %.2f s, local player %s\n",
+			DemoPlay_GetTime(), bLocal ? "present" : "missing");
+	}
+	const float flDeg2Rad = 3.14159265358979f / 180.0f;
+	// Anchor is the player's networked origin, never the roaming eye. The offset
+	// is the free camera minus that origin at the moment follow starts.
+	float plEye[3] = {};
+	float flSnapYaw = 0.0f;
+	const bool bFollow = !bPath && s_demo.bCamFollow && DemoCam_FollowPose(now, freq, plEye, &flSnapYaw);
+	if (bFollow)
+	{
+		for (int i = 0; i < 3; ++i)
+			s_demo.followAnchor[i] = plEye[i];
+	}
+
+	if (bFollow)
+	{
+		// Yaw-rotate only when the offset was captured in the player's yaw.
+		// The capture frame leaves the camera and its angles where they sit.
+		const bool bTurn = demo_freecam_follow_turn.GetBool();
+		float flTarget = 0.0f;
+		if (bTurn)
+		{
+			float rec[3] = {};
+			flTarget = (s_demo.nViewPov < 0 && DemoPlay_RecordedView(rec) && std::isfinite(rec[1])) ? rec[1] : flSnapYaw;
+			if (!std::isfinite(flTarget))
+				flTarget = 0.0f;
+		}
+		if (!s_demo.bFollowYawInit)
+		{
+			const float d[3] = { s_demo.camOrigin[0] - plEye[0], s_demo.camOrigin[1] - plEye[1], s_demo.camOrigin[2] - plEye[2] };
+			if (bTurn)
+			{
+				const float sy = sinf(-flTarget * flDeg2Rad), cy = cosf(-flTarget * flDeg2Rad);
+				s_demo.camFollowOff[0] = d[0] * cy - d[1] * sy;
+				s_demo.camFollowOff[1] = d[0] * sy + d[1] * cy;
+				s_demo.flFollowRelYaw = remainderf(s_demo.camAngles[1] - flTarget, 360.0f);
+			}
+			else
+			{
+				s_demo.camFollowOff[0] = d[0];
+				s_demo.camFollowOff[1] = d[1];
+			}
+			s_demo.camFollowOff[2] = d[2];
+			s_demo.flFollowYaw = flTarget;
+			s_demo.bFollowYawInit = true;
+			Msg(eDLL_T::ENGINE, "[DEMO] following from (%.0f %.0f %.0f), offset (%.0f %.0f %.0f)\n",
+				s_demo.camOrigin[0], s_demo.camOrigin[1], s_demo.camOrigin[2],
+				s_demo.camFollowOff[0], s_demo.camFollowOff[1], s_demo.camFollowOff[2]);
+		}
+		else if (bTurn)
+		{
+			const float k = demo_freecam_follow_smooth.GetFloat();
+			const float a = k > 0.0f ? 1.0f - expf(-k * dt) : 1.0f;
+			const float dYaw = remainderf(flTarget - s_demo.flFollowYaw, 360.0f);
+			s_demo.flFollowYaw = remainderf(s_demo.flFollowYaw + (std::isfinite(dYaw) ? dYaw : 0.0f) * a, 360.0f);
+			const float sy = sinf(s_demo.flFollowYaw * flDeg2Rad), cy = cosf(s_demo.flFollowYaw * flDeg2Rad);
+			s_demo.camOrigin[0] = plEye[0] + s_demo.camFollowOff[0] * cy - s_demo.camFollowOff[1] * sy;
+			s_demo.camOrigin[1] = plEye[1] + s_demo.camFollowOff[0] * sy + s_demo.camFollowOff[1] * cy;
+			s_demo.camOrigin[2] = plEye[2] + s_demo.camFollowOff[2];
+			s_demo.camAngles[1] = remainderf(s_demo.flFollowYaw + s_demo.flFollowRelYaw, 360.0f);
+		}
+		else
+		{
+			s_demo.camOrigin[0] = plEye[0] + s_demo.camFollowOff[0];
+			s_demo.camOrigin[1] = plEye[1] + s_demo.camFollowOff[1];
+			s_demo.camOrigin[2] = plEye[2] + s_demo.camFollowOff[2];
+		}
+	}
+
+	// The free camera owns its angles and reads the raw mouse itself: playback
+	// does not feed the mouse into the engine's view angles.
+	DemoCam_ApplyMouseLook(!bPath && DemoPlay_WindowFocused() && !s_demo.bMouseLayer && !g_bBlockInput);
+	DemoCam_WriteEngineAngles(s_demo.camAngles);
+	if (!bPath)
+	{
+		s_demo.camAngles[2] = demo_freecam_roll.GetFloat();
+
+		const float sp = sinf(s_demo.camAngles[0] * flDeg2Rad), cp = cosf(s_demo.camAngles[0] * flDeg2Rad);
+		const float sy = sinf(s_demo.camAngles[1] * flDeg2Rad), cy = cosf(s_demo.camAngles[1] * flDeg2Rad);
 		const float fwd[3] = { cp * cy, cp * sy, -sp };
 		const float right[3] = { sy, -cy, 0.0f };
 
 		float f = 0.0f, s = 0.0f, u = 0.0f;
-		if (GetAsyncKeyState('W') & 0x8000) f += 1.0f;
-		if (GetAsyncKeyState('S') & 0x8000) f -= 1.0f;
-		if (GetAsyncKeyState('D') & 0x8000) s += 1.0f;
-		if (GetAsyncKeyState('A') & 0x8000) s -= 1.0f;
-		if (GetAsyncKeyState('E') & 0x8000) u += 1.0f;
-		if (GetAsyncKeyState('Q') & 0x8000) u -= 1.0f;
 		float speed = demo_freecam_speed.GetFloat();
-		if (GetAsyncKeyState(VK_SHIFT) & 0x8000)
-			speed *= 3.0f;
+		if (DemoPlay_WindowFocused() && !g_bBlockInput)
+		{
+			if (GetAsyncKeyState('W') & 0x8000) f += 1.0f;
+			if (GetAsyncKeyState('S') & 0x8000) f -= 1.0f;
+			if (GetAsyncKeyState('D') & 0x8000) s += 1.0f;
+			if (GetAsyncKeyState('A') & 0x8000) s -= 1.0f;
+			if (GetAsyncKeyState('E') & 0x8000) u += 1.0f;
+			if (GetAsyncKeyState('Q') & 0x8000) u -= 1.0f;
+			if (GetAsyncKeyState(VK_SHIFT) & 0x8000)
+				speed *= 3.0f;
+			if (GetAsyncKeyState(VK_CONTROL) & 0x8000)
+				speed *= 0.3f;
+		}
 
+		// The camera eases toward the wished velocity instead of jumping to it.
+		float wish[3];
+		for (int i = 0; i < 3; ++i)
+			wish[i] = fwd[i] * f + right[i] * s + (i == 2 ? u : 0.0f);
+		const float flLen = sqrtf(wish[0] * wish[0] + wish[1] * wish[1] + wish[2] * wish[2]);
+		const float flScale = flLen > 1.0f ? speed / flLen : speed;
+		const float k = demo_freecam_accel.GetFloat();
+		const float a = k > 0.0f ? 1.0f - expf(-k * dt) : 1.0f;
 		for (int i = 0; i < 3; ++i)
 		{
-			float v = s_demo.camOrigin[i] + (fwd[i] * f + right[i] * s) * speed * dt;
-			if (i == 2)
-				v += u * speed * dt;
+			float& vel = s_demo.camVel[i];
+			vel += (wish[i] * flScale - vel) * a;
+			if (!std::isfinite(vel) || fabsf(vel) < 0.01f)
+				vel = 0.0f;
+			float v = s_demo.camOrigin[i] + vel * dt;
 			if (v > 65535.0f) v = 65535.0f;
 			if (v < -65535.0f) v = -65535.0f;
 			s_demo.camOrigin[i] = v;
 		}
+
+		// Look and movement change the framing. Keep that delta; never zero the offset.
+		if (bFollow)
+		{
+			const float d[3] = { s_demo.camOrigin[0] - plEye[0], s_demo.camOrigin[1] - plEye[1], s_demo.camOrigin[2] - plEye[2] };
+			if (demo_freecam_follow_turn.GetBool())
+			{
+				const float fy = sinf(-s_demo.flFollowYaw * flDeg2Rad), fc = cosf(-s_demo.flFollowYaw * flDeg2Rad);
+				s_demo.camFollowOff[0] = d[0] * fc - d[1] * fy;
+				s_demo.camFollowOff[1] = d[0] * fy + d[1] * fc;
+				s_demo.flFollowRelYaw = remainderf(s_demo.camAngles[1] - s_demo.flFollowYaw, 360.0f);
+			}
+			else
+			{
+				s_demo.camFollowOff[0] = d[0];
+				s_demo.camFollowOff[1] = d[1];
+			}
+			s_demo.camFollowOff[2] = d[2];
+		}
 	}
+	else
+		s_demo.camVel[0] = s_demo.camVel[1] = s_demo.camVel[2] = 0.0f;
 
 	pEyeOrigin[0] = s_demo.camOrigin[0];
 	pEyeOrigin[1] = s_demo.camOrigin[1];
 	pEyeOrigin[2] = s_demo.camOrigin[2];
-	pEyeAngles[0] = ang[0];
-	pEyeAngles[1] = ang[1];
-	pEyeAngles[2] = 0.0f;
+	pEyeAngles[0] = s_demo.camAngles[0];
+	pEyeAngles[1] = s_demo.camAngles[1];
+	pEyeAngles[2] = s_demo.camAngles[2];
+
+	const float flFov = bPath ? flPathFov : demo_freecam_fov.GetFloat();
+	if (pFov && flFov >= kCamMinFov)
+		*pFov = DemoCam_ClampFov(flFov);
 }
 
 // The stock view lets a scripted camera (traversal and portal animations) win
 // over the observer mode; the replay's roaming cameras must win instead.
 static void __fastcall Hook_Player_CalcView(uintptr_t pPlayer, float* pEyeOrigin, float* pEyeAngles, float* pFov)
 {
-	if (s_bDemoGate && s_demo.state == DemoPlayState_t::PLAYING && DemoPlay_UsesRoaming() && v_Player_RoamingView
-		&& pPlayer && pPlayer == DemoPlay_LocalPlayer())
+	// The path camera stays on screen while the world rewinds, even when
+	// ForceFullUpdate has dropped the local player and this would otherwise
+	// fall through to the recorded view.
+	const bool bPathCam = s_bDemoGate && s_demo.state == DemoPlayState_t::PLAYING
+		&& s_demo.bFreecam && s_demo.bPathPlaying && pEyeOrigin && pEyeAngles;
+	if (bPathCam || (s_bDemoGate && s_demo.state == DemoPlayState_t::PLAYING && DemoPlay_UsesRoaming()
+		&& v_Player_RoamingView && pPlayer && pPlayer == DemoPlay_LocalPlayer()))
 	{
 		Hook_Player_RoamingView(pPlayer, pEyeOrigin, pEyeAngles, pFov);
 		return;
 	}
 	v_Player_CalcView(pPlayer, pEyeOrigin, pEyeAngles, pFov);
+#if defined(SDK_WIP)
+	if (pPlayer && pPlayer == DemoPlay_LocalPlayer())
+		CubemapCapture_OverrideView(pEyeOrigin, pEyeAngles, pFov);
+#endif // SDK_WIP
+}
+
+// The rendered view. After the player view it copies a saved camera back over
+// the origin and angles, so path and follow poses written into the player view
+// never reach the screen. Own the last write when either is active.
+static constexpr ptrdiff_t kBuiltViewOrigin = 0xE0;
+static constexpr ptrdiff_t kBuiltViewAngles = 0xEC;
+
+static void __fastcall Hook_View_Build(void* pView)
+{
+	if (v_View_Build)
+		v_View_Build(pView);
+
+	if (!pView || !s_bDemoGate || s_demo.state != DemoPlayState_t::PLAYING)
+		return;
+
+	float pos[3], ang[3];
+	const bool bPath = s_demo.bPathPlaying;
+	if (bPath)
+	{
+		float flFov = 0.0f;
+		if (!DemoCam_EvalPath(DemoCam_PathSampleMs(), pos, ang, &flFov))
+			return;
+	}
+	else if (s_demo.bFreecam && s_demo.bCamFollow && s_demo.bCamInit)
+	{
+		// Last write: the free camera where it sits, not the player eyes.
+		for (int i = 0; i < 3; ++i)
+		{
+			pos[i] = s_demo.camOrigin[i];
+			ang[i] = s_demo.camAngles[i];
+		}
+	}
+	else
+		return;
+
+	__try
+	{
+		float* const pOrg = reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(pView) + kBuiltViewOrigin);
+		float* const pAng = reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(pView) + kBuiltViewAngles);
+		for (int i = 0; i < 3; ++i)
+		{
+			pOrg[i] = pos[i];
+			pAng[i] = ang[i];
+		}
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return;
+	}
+
+	if (g_pBuiltCamOrigin)
+	{
+		for (int i = 0; i < 3; ++i)
+		{
+			g_pBuiltCamOrigin[i] = pos[i];
+			g_pBuiltCamOrigin[3 + i] = pos[i];
+			g_pBuiltCamOrigin[6 + i] = ang[i];
+		}
+	}
+
+	if (bPath)
+	{
+		for (int i = 0; i < 3; ++i)
+		{
+			s_demo.camOrigin[i] = pos[i];
+			s_demo.camAngles[i] = ang[i];
+		}
+	}
+	DemoCam_WriteEngineAngles(ang);
+
+	static bool s_bPathLogged = false;
+	static bool s_bFollowLogged = false;
+	if (bPath)
+	{
+		if (!s_bPathLogged)
+		{
+			s_bPathLogged = true;
+			Msg(eDLL_T::ENGINE, "[DEMO] camera path owns the rendered view at %.2f s (%.0f %.0f %.0f)\n",
+				DemoPlay_GetTime(), pos[0], pos[1], pos[2]);
+		}
+	}
+	else if (!s_bFollowLogged)
+	{
+		s_bFollowLogged = true;
+		Msg(eDLL_T::ENGINE, "[DEMO] follow owns the rendered view at %.2f s (%.0f %.0f %.0f)\n",
+			DemoPlay_GetTime(), pos[0], pos[1], pos[2]);
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -2332,7 +3697,46 @@ static void DemoFreecam_f(const CCommand& args)
 	DemoPlay_SetFreecam(args.ArgC() >= 2 ? atoi(args.Arg(1)) != 0 : !DemoPlay_IsFreecam());
 }
 static ConCommand demo_freecam("demo_freecam", DemoFreecam_f,
-	"Toggle the free camera while a demo plays (WASD, E/Q up/down, Shift faster).", FCVAR_RELEASE);
+	"Toggle the free camera while a demo plays (WASD, E/Q up/down, Shift faster, wheel roll, Ctrl+wheel FOV).", FCVAR_RELEASE);
+
+static void DemoCamPath_f(const CCommand& args)
+{
+	const char* const pszVerb = args.ArgC() >= 2 ? args.Arg(1) : "list";
+	if (!V_stricmp(pszVerb, "add"))
+		DemoPlay_CamKeyAdd();
+	else if (!V_stricmp(pszVerb, "remove"))
+	{
+		const int nIndex = args.ArgC() >= 3 ? atoi(args.Arg(2)) - 1 : DemoCam_KeyAtNow();
+		if (!DemoPlay_CamKeyRemove(nIndex))
+			Warning(eDLL_T::ENGINE, "[DEMO] no camera keyframe there\n");
+	}
+	else if (!V_stricmp(pszVerb, "clear"))
+		DemoPlay_CamKeyClear();
+	else if (!V_stricmp(pszVerb, "goto") && args.ArgC() >= 3)
+		DemoPlay_CamKeyGoto(atoi(args.Arg(2)) - 1);
+	else if (!V_stricmp(pszVerb, "next"))
+		DemoPlay_CamKeyStep(1);
+	else if (!V_stricmp(pszVerb, "prev"))
+		DemoPlay_CamKeyStep(-1);
+	else if (!V_stricmp(pszVerb, "play"))
+		DemoPlay_SetCamPathPlaying(true);
+	else if (!V_stricmp(pszVerb, "stop"))
+		DemoPlay_SetCamPathPlaying(false);
+	else if (!V_stricmp(pszVerb, "list"))
+	{
+		for (size_t i = 0; i < s_demo.camKeys.size(); ++i)
+		{
+			const DemoCamKey_s& k = s_demo.camKeys[i];
+			Msg(eDLL_T::ENGINE, "  %2zu  %8.2f s  pos (%.0f %.0f %.0f)  ang (%.1f %.1f %.1f)  fov %.1f  dof %.0f\n", i + 1,
+				k.tMs / 1000.0, k.pos[0], k.pos[1], k.pos[2], k.ang[0], k.ang[1], k.ang[2], k.fov, k.dof);
+		}
+		Msg(eDLL_T::ENGINE, "%zu camera keyframe(s)%s\n", s_demo.camKeys.size(), s_demo.bPathPlaying ? ", path playing" : "");
+	}
+	else
+		Msg(eDLL_T::ENGINE, "Usage: demo_campath add | remove [n] | clear | goto <n> | next | prev | play | stop | list\n");
+}
+static ConCommand demo_campath("demo_campath", DemoCamPath_f,
+	"Free camera path keyframes: add | remove [n] | clear | goto <n> | next | prev | play | stop | list", FCVAR_RELEASE);
 
 static void DemoList_f(const CCommand& args)
 {
@@ -2368,6 +3772,7 @@ void VDemoPlayer::GetAdr(void) const
 {
 	LogFunAdr("Player_RoamingView", v_Player_RoamingView);
 	LogFunAdr("Player_CalcView", v_Player_CalcView);
+	LogFunAdr("View_Build", v_View_Build);
 	LogFunAdr("Engine_GetViewAngles", v_Engine_GetViewAngles);
 	LogVarAdr("EngineViewAngles", g_pEngineViewAngles);
 	LogFunAdr("CL_ForceFullUpdate", v_CL_ForceFullUpdate);
@@ -2390,6 +3795,24 @@ void VDemoPlayer::GetFun(void) const
 		.GetPtr(v_Player_CalcView);
 	if (!v_Player_CalcView)
 		Warning(eDLL_T::CLIENT, "[DEMO] player view pattern unresolved -- scripted cameras override the free camera\n");
+
+	// Rendered view. rcx is the view; +0xE0 origin and +0xEC angles are what the
+	// player view filled, and a flag then copies the saved camera back over them.
+	// The first saved-origin store is movss [rip+disp], xmm0 at +0x51C.
+	Module_FindPattern(g_GameDll,
+		"48 8B C4 53 56 57 48 81 EC 00 01 00 00 0F 29 70 A8 48 8D 3D ?? ?? ?? ??")
+		.GetPtr(v_View_Build);
+	if (v_View_Build)
+	{
+		const CMemory build(reinterpret_cast<uintptr_t>(v_View_Build));
+		const uint8_t* const pStore = build.Offset(0x51C).RCast<const uint8_t*>();
+		if (pStore && pStore[0] == 0xF3 && pStore[1] == 0x0F && pStore[2] == 0x11 && pStore[3] == 0x05)
+			g_pBuiltCamOrigin = build.Offset(0x51C).ResolveRelativeAddress(4, 8).RCast<float*>();
+		else
+			Warning(eDLL_T::CLIENT, "[DEMO] rendered-view origin store drifted -- path pose still written on the view\n");
+	}
+	else
+		Warning(eDLL_T::CLIENT, "[DEMO] rendered view pattern unresolved -- the saved camera paints over the path\n");
 
 	// Copies the active split-screen client state's view angles (stride 0x41358).
 	Module_FindPattern(g_GameDll,
@@ -2435,6 +3858,8 @@ void VDemoPlayer::Detour(const bool bAttach) const
 		DetourSetup(&v_Player_RoamingView, &Hook_Player_RoamingView, bAttach);
 	if (v_Player_CalcView)
 		DetourSetup(&v_Player_CalcView, &Hook_Player_CalcView, bAttach);
+	if (v_View_Build)
+		DetourSetup(&v_View_Build, &Hook_View_Build, bAttach);
 	if (v_Engine_GetViewAngles)
 		DetourSetup(&v_Engine_GetViewAngles, &Hook_Engine_GetViewAngles, bAttach);
 	if (v_Script_RunThreadsFrame)

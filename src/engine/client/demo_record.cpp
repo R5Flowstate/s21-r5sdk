@@ -88,6 +88,10 @@ static std::vector<uint8_t> s_blockScratch;
 static bool s_bBlockOpen = false;
 static ULONGLONG s_nLastKeyframeMs = 0;
 
+// The local player's commands, written in batches as USERCMD chunks.
+static constexpr size_t kUserCmdBatch = 64;
+static std::vector<R5DemUserCmd_s> s_userCmds;
+
 static void (*v_CL_ForceFullUpdate)(void) = nullptr;
 
 bool DemoRecord_IsRecording(void)
@@ -195,13 +199,48 @@ static void DemoRecord_WriteMeta(const bool bFinal)
 			json.data(), static_cast<uint32_t>(json.size()));
 }
 
+static void DemoRecord_FlushUserCmdsLocked(void)
+{
+	if (s_userCmds.empty() || !s_pWriter)
+	{
+		s_userCmds.clear();
+		return;
+	}
+	R5DemUserCmdPrefix_s pre = {};
+	pre.count = static_cast<uint16_t>(s_userCmds.size());
+	pre.angles[0] = s_userCmds.front().pitch;
+	pre.angles[1] = s_userCmds.front().yaw;
+	std::vector<uint8_t> payload(sizeof(pre) + s_userCmds.size() * sizeof(R5DemUserCmd_s));
+	memcpy(payload.data(), &pre, sizeof(pre));
+	memcpy(payload.data() + sizeof(pre), s_userCmds.data(), s_userCmds.size() * sizeof(R5DemUserCmd_s));
+	s_pWriter->Append(R5DemChunk_t::USERCMD, 0, DemoRecord_Signon(), 0, s_userCmds.front().tickCount,
+		payload.data(), static_cast<uint32_t>(payload.size()));
+	s_userCmds.clear();
+}
+
+void DemoRecord_OnUserCmd(const R5DemUserCmd_s& cmd)
+{
+	if (s_recState != DemoRecState_t::RECORDING)
+		return;
+	AcquireSRWLockExclusive(&s_recLock);
+	if (s_pWriter && s_recState == DemoRecState_t::RECORDING)
+	{
+		s_userCmds.push_back(cmd);
+		if (s_userCmds.size() >= kUserCmdBatch)
+			DemoRecord_FlushUserCmdsLocked();
+	}
+	ReleaseSRWLockExclusive(&s_recLock);
+}
+
 static void DemoRecord_StopLocked(const char* pszReason, const bool bKeep)
 {
 	if (!s_pWriter)
 	{
+		s_userCmds.clear();
 		s_recState = DemoRecState_t::OFF;
 		return;
 	}
+	DemoRecord_FlushUserCmdsLocked();
 
 	const uint32_t nMs = s_pWriter->GetWallMs();
 	const bool bHasData = s_nPackets > 0 &&
@@ -339,6 +378,7 @@ bool DemoRecord_Start(const char* pszName, const bool bFromConnect)
 	}
 
 	s_nPackets = 0;
+	s_userCmds.clear();
 	s_bModeMetaWritten = false;
 	s_nFirstFullTick = 0;
 	s_bFullRequested = false;

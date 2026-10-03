@@ -233,7 +233,7 @@ void HexDump(const char* const szHeader, const char* const szLogger, const void*
 char* StripTabsAndReturns(const char* const pInBuffer, char* const pOutBuffer, ssize_t nOutBufferSize)
 {
     char* out = pOutBuffer;
-    const char* i = pInBuffer;
+    const char* i = pInBuffer ? pInBuffer : "";
     char* o = out;
 
     out[0] = 0;
@@ -267,7 +267,7 @@ char* StripTabsAndReturns(const char* const pInBuffer, char* const pOutBuffer, s
 // For stripping quote characters from input buffer.
 char* StripQuotes(const char* const pInBuffer, char* const pOutBuffer, const ssize_t nOutBufferSize)
 {
-    const char* i = pInBuffer;
+    const char* i = pInBuffer ? pInBuffer : "";
     char* o = pOutBuffer;
 
     pOutBuffer[0] = 0;

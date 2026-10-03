@@ -183,14 +183,14 @@ void CAI_NetworkBuilder::SaveNetworkGraph(CAI_Network* pNetwork)
 				bCheckForProblems = true;
 			}
 			DevWarning(eDLL_T::SERVER, "   AI node %d is associated with Hammer node %d, but %d is already bound to node %d\n",
-				node, nIndex, nIndex, wcIDs[(unsigned short)nIndex]);
+				node, nIndex, nIndex, wcIDs[static_cast<unsigned short>(iPreviousNodeBinding)]);
 		}
 		else
 		{
 			wcIDs.Insert(nIndex, node);
 		}
 
-		DevMsg(eDLL_T::SERVER, " |-- Writing Hammer node (%d <--> %d) at 0x%zX\n", nIndex, wcIDs.Element((unsigned short)nIndex), buf.TellPut());
+		DevMsg(eDLL_T::SERVER, " |-- Writing Hammer node (%d <--> %d) at 0x%zX\n", nIndex, wcIDs[wcIDs.Find(nIndex)], buf.TellPut());
 		buf.PutInt(nIndex);
 	}
 

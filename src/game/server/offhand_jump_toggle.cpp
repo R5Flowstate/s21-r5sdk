@@ -3,9 +3,9 @@
 // Purpose: offhand_jump_toggle.h implementation.
 //
 // The S21 client selects an offhand whose weapon sets
-// 'offhand_deactivate_on_jump_toggle_or_release' while jump is held, and with
-// the toggle_on_jump_to_deactivate userinfo on, holsters it on the next jump
-// press. The S3 server halves predate the key; both branches run here after
+// 'offhand_deactivate_on_jump_toggle_or_release' while the movement ability
+// (IN_DODGE) is held, and with the toggle_on_jump_to_deactivate userinfo on,
+// holsters it on the next press. The S3 server halves predate the key; both branches run here after
 // the stock per-offhand frames, on the same command the client runs them.
 //
 //=============================================================================//
@@ -19,6 +19,7 @@
 #include "baseentity.h"
 #include "engine/server/vengineserver_impl.h"
 #include "game/shared/edict_dirty.h"
+#include "game/shared/titan_gate.h"
 #include "game/shared/sdk_entity_state.h"
 #include "game/shared/weapon_script_vars.h"
 #include "vscript/languages/squirrel_re/include/sqvm.h"
@@ -60,7 +61,7 @@ static constexpr ptrdiff_t OJ_WEAPON_OFF_GRAPPLE        = 0x2730;
 static constexpr ptrdiff_t OJ_WEAPON_OFF_FIREMODE       = 0x2750;
 static constexpr ptrdiff_t OJ_WEAPON_OFF_ACTIVESLOT     = 0x2754; // offhand_active_slot
 
-static constexpr int      OJ_IN_JUMP             = 0x00000002;
+static constexpr int      OJ_IN_MOVEMENT         = 0x10000000; // IN_DODGE; jump presses it unless +dodge is bound apart
 static constexpr int      OJ_IN_OFFHAND1         = 0x00200000; // tactical
 static constexpr int      OJ_FIREMODE_INSTANT    = 2;
 static constexpr int      OJ_ACTIVESTATE_ACTIVE  = 2;
@@ -146,13 +147,13 @@ static bool OJ_TriggerReleased(const void* pPlayer, const WeaponKVS21Ext_t& kv)
 	if (kv.bOffhandHoldsOnTactical && (nButtons & OJ_IN_OFFHAND1))
 		return false;
 	return OJ_ToggleOnJump(pPlayer)
-		? (OJ_Read<int>(pPlayer, OJ_PLAYER_OFF_PRESSED) & OJ_IN_JUMP) != 0
-		: (nButtons & OJ_IN_JUMP) == 0;
+		? (OJ_Read<int>(pPlayer, OJ_PLAYER_OFF_PRESSED) & OJ_IN_MOVEMENT) != 0
+		: (nButtons & OJ_IN_MOVEMENT) == 0;
 }
 
 bool OffhandJumpToggle_IsReleasing(const void* pPlayer)
 {
-	if (!pPlayer || !bridge_offhand_jump.GetBool())
+	if (!pPlayer || !bridge_offhand_jump.GetBool() || TitanGate_IsTitanPlayer(pPlayer))
 		return false;
 
 	const void* const pMain = OJ_ActiveWeapon(pPlayer, 0);
@@ -263,7 +264,7 @@ static bool OJ_CanSwitchToOffhand(void* pWeapon);
 
 static void OJ_TrySelect(void* pWeapon, void* pPlayer, const WeaponKVS21Ext_t& kv)
 {
-	if (!(OJ_Read<int>(pPlayer, OJ_PLAYER_OFF_BUTTONS) & OJ_IN_JUMP))
+	if (!(OJ_Read<int>(pPlayer, OJ_PLAYER_OFF_BUTTONS) & OJ_IN_MOVEMENT))
 		return;
 
 	if (OJ_ToggleOnJump(pPlayer)
@@ -302,7 +303,7 @@ static int64_t Hook_WeaponX_OffhandFrame(void* pWeapon, void* pPlayer, unsigned 
 		return result;
 
 	const WeaponKVS21Ext_t& kv = OJ_WeaponKV(pWeapon);
-	if (!kv.bOffhandJumpToggle || !OJ_FrameReachesJumpBranch(pWeapon, pPlayer))
+	if (!kv.bOffhandJumpToggle || TitanGate_IsTitanPlayer(pPlayer) || !OJ_FrameReachesJumpBranch(pWeapon, pPlayer))
 		return result;
 
 	OJ_TrySelect(pWeapon, pPlayer, kv);
@@ -322,7 +323,7 @@ static void OJ_DiagInput(const char* pszWhat, const void* pWeapon, const void* p
 	const int nPressed = OJ_Read<int>(pPlayer, OJ_PLAYER_OFF_PRESSED);
 	Msg(eDLL_T::SERVER, "[OFFHAND-JUMP] %s '%s' toggle=%d jump=%d jumpPress=%d tac=%d weapState=%d active=%d\n",
 		pszWhat, static_cast<const char*>(pWeapon) + OJ_WEAPON_OFF_CLASSNAME, OJ_ToggleOnJump(pPlayer) ? 1 : 0,
-		(nButtons & OJ_IN_JUMP) ? 1 : 0, (nPressed & OJ_IN_JUMP) ? 1 : 0, (nButtons & OJ_IN_OFFHAND1) ? 1 : 0,
+		(nButtons & OJ_IN_MOVEMENT) ? 1 : 0, (nPressed & OJ_IN_MOVEMENT) ? 1 : 0, (nButtons & OJ_IN_OFFHAND1) ? 1 : 0,
 		OJ_Read<int>(pWeapon, OJ_WEAPON_OFF_WEAPSTATE), OJ_Read<int>(pWeapon, OJ_WEAPON_OFF_ACTIVESTATE));
 }
 
@@ -338,7 +339,7 @@ static bool Hook_Player_IsOffhandButtonHeld(void* pPlayer, void* pWeapon)
 		return bHeld;
 
 	const WeaponKVS21Ext_t& kv = OJ_WeaponKV(pWeapon);
-	if (!kv.bOffhandJumpToggle && !kv.bOffhandHoldsOnTactical)
+	if ((!kv.bOffhandJumpToggle && !kv.bOffhandHoldsOnTactical) || TitanGate_IsTitanPlayer(pPlayer))
 		return bHeld;
 
 	const int nButtons = OJ_Read<int>(pPlayer, OJ_PLAYER_OFF_BUTTONS);
@@ -347,7 +348,7 @@ static bool Hook_Player_IsOffhandButtonHeld(void* pPlayer, void* pWeapon)
 		return !bActiveFrame && bTacticalHeld;
 
 	const bool bToggle = OJ_ToggleOnJump(pPlayer);
-	const bool bJumpHeld = (nButtons & OJ_IN_JUMP) != 0;
+	const bool bJumpHeld = (nButtons & OJ_IN_MOVEMENT) != 0;
 	if (!bActiveFrame)
 		return (bToggle && bJumpHeld) || bTacticalHeld;
 
@@ -468,7 +469,7 @@ static bool Hook_WeaponX_CanSwitchToOffhand(void* pWeapon)
 		return bCan;
 
 	void* const pPlayer = OJ_OwnerPlayer(pWeapon);
-	if (!pPlayer)
+	if (!pPlayer || TitanGate_IsTitanPlayer(pPlayer))
 		return bCan;
 
 	const void* const pMain = OJ_ActiveWeapon(pPlayer, 0);
@@ -596,7 +597,8 @@ static void OJ_MatchPlayerSkin(void* pPlayer, void* pOffhand)
 //-----------------------------------------------------------------------------
 void OffhandJumpToggle_PostSwitchToOffhand(void* pPlayer, void* pOffhand)
 {
-	if (!pPlayer || !pOffhand || !bridge_offhand_switch_rules.GetBool() || !ServerScript_EntityIsPlayer(pPlayer))
+	if (!pPlayer || !pOffhand || !bridge_offhand_switch_rules.GetBool() || !ServerScript_EntityIsPlayer(pPlayer)
+		|| TitanGate_IsTitanPlayer(pPlayer))
 		return;
 
 	if (WeaponKVS21Ext_GetBool(pOffhand, WeaponS21Bool_e::OFFHAND_MATCH_PLAYER_SKIN))
@@ -628,8 +630,8 @@ void OffhandJumpToggle_OnBusyFrame(void* pWeapon)
 	const uint32_t hOwner = OJ_Read<uint32_t>(pWeapon, OJ_WEAPON_OFF_OWNER);
 	void* const pPlayer = hOwner != OJ_INVALID_HANDLE
 		? SDKEntityState_Resolve(SDKEntityHandle(hOwner), ESide::Server) : nullptr;
-	if (!pPlayer || !ServerScript_EntityIsPlayer(pPlayer)
-		|| !(OJ_Read<int>(pPlayer, OJ_PLAYER_OFF_PRESSED) & OJ_IN_JUMP) || !OJ_ToggleOnJump(pPlayer))
+	if (!pPlayer || !ServerScript_EntityIsPlayer(pPlayer) || TitanGate_IsTitanPlayer(pPlayer)
+		|| !(OJ_Read<int>(pPlayer, OJ_PLAYER_OFF_PRESSED) & OJ_IN_MOVEMENT) || !OJ_ToggleOnJump(pPlayer))
 		return;
 
 	v_WeaponX_HolsterInternal(pWeapon, false);

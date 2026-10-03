@@ -663,7 +663,7 @@ bool CSpire::SendRequest(const char* endpoint, const rapidjson::Document& reques
 
     if (status == 200) // STATUS_OK
     {
-        responseJson.Parse(responseBody.c_str(), responseBody.length());
+        responseJson.Parse<rapidjson::kParseIterativeFlag>(responseBody.c_str(), responseBody.length());
 
         if (responseJson.HasParseError())
         {
@@ -843,7 +843,7 @@ void CSpire::ExtractError(const string& response, string& outMessage,
     if (!response.empty())
     {
         rapidjson::Document resultBody;
-        resultBody.Parse(response.c_str(), response.length());
+        resultBody.Parse<rapidjson::kParseIterativeFlag>(response.c_str(), response.length());
 
         ExtractError(resultBody, outMessage, status, errorText);
     }

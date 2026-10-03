@@ -20,8 +20,13 @@ size_t CURLWriteFileCallback(void* data, const size_t size, const size_t nmemb, 
 
 size_t CURLWriteStringCallback(char* data, const size_t size, const size_t nmemb, string* userp)
 {
-    userp->append(data, size * nmemb);
-    return size * nmemb;
+    // Remote-controlled body; returning short aborts the transfer.
+    constexpr size_t kMaxResponseBytes = 32 * 1024 * 1024;
+    const size_t nAdd = size * nmemb;
+    if (!userp || nAdd > kMaxResponseBytes || userp->size() > kMaxResponseBytes - nAdd)
+        return 0;
+    userp->append(data, nAdd);
+    return nAdd;
 }
 
 void CURLInitCommonOptions(CURL* curl, const char* remote,

@@ -29,6 +29,7 @@
 #include "wallclimb.h"
 #include "wall_launch.h"
 #include "armored_leap.h"
+#include "slide_gate_launch.h"
 #include <cstring>
 #include <unordered_map>
 #include <unordered_set>
@@ -1005,6 +1006,7 @@ static __int64 __fastcall Hook_CGameMovement_FullWalkMove_JetDrive(void* ctx)
 	PlayerLaunch_BeginFullWalkMove(ctx);
 	WallClimb_BeforeFullWalkMove(ctx);
 	ArmoredLeap_BeginFullWalkMove(ctx);
+	SlideGateLaunch_BeginFullWalkMove(ctx);
 	s_pJetDriveSlotCtx = nullptr;
 	const __int64 ret = v_CGameMovement__FullWalkMove
 		? v_CGameMovement__FullWalkMove(ctx)

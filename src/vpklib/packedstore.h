@@ -210,7 +210,7 @@ public:
 	void InitLzEncoder(const lzham_int32 maxHelperThreads = -1, const char* compressionLevel = "default");
 	void InitLzDecoder(void);
 
-	bool Deduplicate(const uint8_t* pEntryBuffer, VPKChunkDescriptor_t& descriptor, const size_t chunkIndex);
+	bool Deduplicate(const uint8_t* pEntryBuffer, VPKChunkDescriptor_t& descriptor, const size_t chunkIndex, string& outHash);
 
 	void PackStore(const VPKPair_t& vpkPair, const char* workspaceName, const char* buildPath);
 	void UnpackStore(const VPKDir_t& vpkDir, const char* workspaceName = "");
@@ -218,7 +218,7 @@ public:
 private:
 	lzham_compress_params   m_Encoder; // LZham compression parameters.
 	lzham_decompress_params m_Decoder; // LZham decompression parameters.
-	std::unordered_map<string, const VPKChunkDescriptor_t&> m_ChunkHashMap;
+	std::unordered_map<string, VPKChunkDescriptor_t> m_ChunkHashMap;
 };
 
 bool PackedStore_GetDirBaseName(const CUtlString& dirFileName, CUtlString& dirBaseName);

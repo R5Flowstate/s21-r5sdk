@@ -270,8 +270,15 @@ ConCommandBase* ConCommandBase::Create(const char* pName, const char* pHelpStrin
 
 	m_pszHelpString = pHelpString ? pHelpString : "";
 
-	// S21 dropped m_pszStaticUsageString; bake ctor usage into m_pszCustomUsageString.
-	m_pszCustomUsageString = pszUsageString ? pszUsageString : nullptr;
+	// S21 dropped m_pszStaticUsageString and the dtor delete[]s the custom slot, so it holds a copy.
+	m_pszCustomUsageString = nullptr;
+	if (pszUsageString && *pszUsageString)
+	{
+		const size_t nUsageLen = strlen(pszUsageString) + 1;
+		char* const pszOwned = new char[nUsageLen];
+		memcpy(pszOwned, pszUsageString, nUsageLen);
+		m_pszCustomUsageString = pszOwned;
+	}
 
 	m_nFlags = flags;
 

@@ -17,6 +17,7 @@
 #include "player.h"
 #include "game/shared/in_buttons.h"
 #include "game/shared/sdk_entity_state.h"
+#include "game/shared/titan_gate.h"
 
 // CGameMovement ctx / CMoveData (same layout mantle_boost.cpp established).
 static constexpr ptrdiff_t SSJ_CTX_OFF_PLAYER         = 8;
@@ -61,7 +62,7 @@ static char __fastcall Hook_CGameMovement_Jump(void* ctx)
 {
 	CPlayer* const player = *reinterpret_cast<CPlayer**>(reinterpret_cast<uintptr_t>(ctx) + SSJ_CTX_OFF_PLAYER);
 	const uintptr_t mv = *reinterpret_cast<uintptr_t*>(reinterpret_cast<uintptr_t>(ctx) + SSJ_CTX_OFF_MOVEDATA);
-	if (!player || !mv)
+	if (!player || !mv || TitanGate_IsTitanPlayer(player))
 		return v_CGameMovement__Jump(ctx);
 
 	const bool bOnGround = *reinterpret_cast<const int*>(reinterpret_cast<uintptr_t>(player) + SSJ_PLAYER_OFF_GROUNDENT) != -1;

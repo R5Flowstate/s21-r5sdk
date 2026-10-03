@@ -10,6 +10,9 @@
 #include "engine/cmodel_bsp.h"
 #include "engine/modelloader.h"
 #include "engine/vis_debug.h"
+#if defined(SDK_WIP)
+#include "game/client/cubemap_capture.h"
+#endif // SDK_WIP
 #include "datacache/mdlcache.h"
 #include <vgui/vgui_baseui_interface.h>
 #include <filesystem/filesystem.h>
@@ -409,6 +412,9 @@ static __int64 __fastcall Hook_Mod_LoadCubemapArray(void* pMap, const char* pszL
 {
 	const __int64 nResult = Mod_LoadCubemapArray(pMap, pszLoadName, pSamples, pAmbientRcp, nSampleCount);
 	Cubemap_DumpBound(pszLoadName, nSampleCount);
+#if defined(SDK_WIP)
+	CubemapCapture_SetSamples(pszLoadName, pSamples, nSampleCount);
+#endif // SDK_WIP
 	return nResult;
 }
 

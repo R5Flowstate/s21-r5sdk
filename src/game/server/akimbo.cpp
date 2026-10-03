@@ -113,6 +113,10 @@ typedef void* (__fastcall* WeaponHandViewModel_t)(void* pWeapon);
 static WeaponHandViewModel_t v_WeaponHandViewModel = nullptr;
 typedef void (__fastcall* WeaponApplyModBodygroups_t)(void* pViewModel, void* pWeapon, void* pWeaponInfo, void* pModValues);
 static WeaponApplyModBodygroups_t v_WeaponApplyModBodygroups = nullptr;
+typedef __int64 (__fastcall* WeaponAddMod_t)(void* pWeapon, const char* pszModName);
+static WeaponAddMod_t v_WeaponAddMod = nullptr;
+typedef void (__fastcall* WeaponRemoveMod_t)(void* pWeapon, const char* pszModName);
+static WeaponRemoveMod_t v_WeaponRemoveMod = nullptr;
 
 static SDKEntityMap<AkimboWeaponState> s_akimboWeaponServer(ESide::Server, "akimbo.wpn");
 
@@ -678,6 +682,47 @@ static void SetOpticModDisabled(void* pMain, bool disabled)
 {
 	SetOpticModDisabledOne(pMain, disabled);
 	SetOpticModDisabledOne(AkimboBridge_GetOtherWeapon(pMain), disabled);
+}
+
+// A mod change on the main akimbo weapon repeats on its partner, as on the
+// client: akimbo_active (is_semi_auto 0) must reach both hands or the
+// semi-auto partner stalls the alternation while fire is held.
+static void* MirrorModPartner(void* pWeapon, const char* pszModName)
+{
+	if (!bridge_akimbo.GetBool() || !pWeapon || !pszModName || !*pszModName)
+		return nullptr;
+
+	bool discarded = false;
+	if (Akimbo_GetWeaponBool(pWeapon, "m_discarded", &discarded) && discarded)
+		return nullptr;
+	if (AkimboBridge_IsAlthand(pWeapon))
+		return nullptr;
+
+	void* const other = AkimboBridge_GetOtherWeapon(pWeapon);
+	return other != pWeapon ? other : nullptr;
+}
+
+static __int64 __fastcall Hook_WeaponAddMod(void* pWeapon, const char* pszModName)
+{
+	const __int64 result = v_WeaponAddMod(pWeapon, pszModName);
+	if (void* const other = MirrorModPartner(pWeapon, pszModName))
+	{
+		v_WeaponAddMod(other, pszModName);
+		if (bridge_akimbo_diag.GetBool())
+			Msg(eDLL_T::SERVER, "[Akimbo] mod +%s weapon=%p -> partner=%p\n", pszModName, pWeapon, other);
+	}
+	return result;
+}
+
+static void __fastcall Hook_WeaponRemoveMod(void* pWeapon, const char* pszModName)
+{
+	v_WeaponRemoveMod(pWeapon, pszModName);
+	if (void* const other = MirrorModPartner(pWeapon, pszModName))
+	{
+		v_WeaponRemoveMod(other, pszModName);
+		if (bridge_akimbo_diag.GetBool())
+			Msg(eDLL_T::SERVER, "[Akimbo] mod -%s weapon=%p -> partner=%p\n", pszModName, pWeapon, other);
+	}
 }
 
 static void SetState(void* pPlayer, int newState)
@@ -1642,6 +1687,8 @@ void VAkimboBridge::GetAdr(void) const
 	LogFunAdr("WeaponInfo_FindMod", v_WeaponInfoFindMod);
 	LogFunAdr("CWeaponX::GetHandViewModel", v_WeaponHandViewModel);
 	LogFunAdr("Weapon_ApplyModBodygroups", v_WeaponApplyModBodygroups);
+	LogFunAdr("CWeaponX::AddMod", v_WeaponAddMod);
+	LogFunAdr("CWeaponX::RemoveMod", v_WeaponRemoveMod);
 }
 
 void VAkimboBridge::GetFun(void) const
@@ -1759,6 +1806,21 @@ void VAkimboBridge::GetFun(void) const
 	if (!v_WeaponHandViewModel || !v_WeaponApplyModBodygroups)
 		Warning(eDLL_T::SERVER,
 			"[Akimbo] mod bodygroup apply pattern unresolved -- optic bodygroups refresh on the next mod change\n");
+
+	// Server twins (WeaponInfo at +0x15A8); add ORs the mod bit, remove clears it.
+	Module_FindPattern(g_GameDll,
+		"40 53 48 83 EC 20 48 8B C2 48 8B D9 48 85 D2 0F 84 ?? ?? ?? ?? 80 3A 00 0F 84 ?? ?? ?? ?? 48 89 74 24 ?? 4C 8D 44 24 ?? "
+		"48 8B B1 A8 15 00 00 48 8B C8 48 8B D6 E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 8B 83 7C 15 00 00 8B 4C 24 ?? "
+		"44 8B 83 74 15 00 00 48 89 6C 24 ?? BD 00 02 00 00 48 89 7C 24 ?? BF 01 00 00 00 D3 E7 0B F8")
+		.GetPtr(v_WeaponAddMod);
+	Module_FindPattern(g_GameDll,
+		"40 53 48 83 EC 20 48 8B C2 48 8B D9 48 85 D2 0F 84 ?? ?? ?? ?? 80 3A 00 0F 84 ?? ?? ?? ?? 48 89 74 24 ?? 4C 8D 44 24 ?? "
+		"48 8B B1 A8 15 00 00 48 8B C8 48 8B D6 E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 8B 83 7C 15 00 00 8B 4C 24 ?? "
+		"44 8B 83 74 15 00 00 48 89 6C 24 ?? BD 00 02 00 00 48 89 7C 24 ?? BF 01 00 00 00 D3 E7 F7 D7 23 F8")
+		.GetPtr(v_WeaponRemoveMod);
+	if (!v_WeaponAddMod || !v_WeaponRemoveMod)
+		Warning(eDLL_T::SERVER,
+			"[Akimbo] CWeaponX AddMod/RemoveMod pattern unresolved -- the partner keeps its own mods and held fire stalls\n");
 }
 
 void VAkimboBridge::GetVar(void) const { }
@@ -1800,4 +1862,8 @@ void VAkimboBridge::Detour(const bool bAttach) const
 		DetourSetup(&v_FillClipAmmoFromStock, &Hook_FillClipAmmoFromStock, bAttach);
 	if (v_WeaponTranslateActivity)
 		DetourSetup(&v_WeaponTranslateActivity, &Hook_WeaponTranslateActivity, bAttach);
+	if (v_WeaponAddMod)
+		DetourSetup(&v_WeaponAddMod, &Hook_WeaponAddMod, bAttach);
+	if (v_WeaponRemoveMod)
+		DetourSetup(&v_WeaponRemoveMod, &Hook_WeaponRemoveMod, bAttach);
 }

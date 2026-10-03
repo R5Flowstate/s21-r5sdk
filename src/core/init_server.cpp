@@ -149,7 +149,11 @@
 #include "game/server/weapon_ammo_pool_mod.h"
 #include "game/server/consumable_inv.h"
 #include "game/server/slide_super_jump.h"
+#include "game/server/slide_gate_launch.h"
+#include "game/server/grenade_spawn_origin.h"
 #include "game/server/dodge_rules.h"
+#include "game/server/movement_ability_input.h"
+#include "game/server/titan_gate.h"
 #include "game/server/mantle_boost.h"
 #include "game/server/mantle_boost_vm_probe.h"
 #include "game/server/mantle_boost_anim.h"
@@ -159,6 +163,7 @@
 #include "game/server/repel_realm_gate.h"
 #include "game/server/realm_adopt.h"
 #include "game/server/weapon_realm_follow.h"
+#include "game/server/projectile_trail_te.h"
 #include "game/server/weapon_holster_reselect.h"
 #include "game/server/zipline_cooldown.h"
 #include "game/server/zipline_exit_parity.h"
@@ -636,7 +641,8 @@ REGISTER(VConnectPasswordGate);   // REGISTER SERVER ONLY! challenge-bind the co
 	REGISTER(VMoveSimTrace);            // REGISTER SERVER ONLY! [MOVE-TRACE] per-command FullWalkMove state dump; twin: VMoveSimTraceClient (attaches nothing; sampled from VJetDrive's hook)
 	REGISTER(VSurfPropIdUnclamp);       // REGISTER SERVER ONLY! [SURFPROP-ID] S3 remaps surface id >127 to default; S21 does not. Digital_Water is 133.
 	REGISTER(VRepelRealmGate);          // REGISTER SERVER ONLY! [REPEL-REALM] player-vs-player repel pass gated on shared m_realmsBitMask; disjoint-realm players no longer push each other
-	REGISTER(VWeaponRealmFollow);       // REGISTER SERVER ONLY! [REALM-FOLLOW] carried weapons adopt owner realms at activation + on every SetRealmsBitMask (opponent tracers)
+	REGISTER(VWeaponRealmFollow);       // REGISTER SERVER ONLY! [REALM-FOLLOW] carried weapons adopt owner realms at activation + on every SetRealmsBitMask (bolts inherit the weapon mask)
+	REGISTER(VProjectileTrailTE);       // REGISTER SERVER ONLY! [TRAIL-TE] trail temp entity sent when the S21 _3p trail key is set (close-range enemy tracers)
 	REGISTER(VRealmAdopt);              // REGISTER SERVER ONLY! [REALM-ADOPT] all-realms script entities adopt owner/parent realms; realm-filtered world FX
 	REGISTER(VHolsterReselect);         // REGISTER SERVER ONLY! [HOLSTER-RESEL] holstered 0xFD + leftover activeWeapons must still write m_selectedWeapons
 	REGISTER(VZiplineExitParity);       // REGISTER SERVER ONLY! [ZIP-EXIT] auto-detach exit-velocity rewrite (client rope clamp + vertical magnitude) so both engines leave the rope with the same velocity
@@ -645,7 +651,11 @@ REGISTER(VConnectPasswordGate);   // REGISTER SERVER ONLY! challenge-bind the co
 	REGISTER(VAllianceCompat);          // REGISTER SERVER! FreeDM/Control alliance matrix + IsEnemyTeam detour (SetTeamIsInAlliance native)
 	REGISTER(VDeathFieldSystem);        // REGISTER SERVER! SetDeathFieldParams hook + g_pWorldEntity resolve for realm rings
 	REGISTER(VSlideSuperJumpBridge);    // REGISTER SERVER ONLY! [SSJ] slide super-jump twin (boosted_slide_jump mod): airborne second press within 0.3s of a slide-jump gets sqrt(2gh) on the S3 Jump detour
+	REGISTER(VGrenadeSpawnOrigin);      // REGISTER SERVER ONLY! [GRENADE-SPAWN] FireWeaponGrenade creates the projectile at the requested position instead of sweeping it from the owner eye
+	REGISTER(VSlideGateLaunch);         // REGISTER SERVER ONLY! [SLIDEGATE] Nitro Gate launch: velocity along travel + native TryBeginSlide on the next FullWalkMove (Player.ApplySlideGateLaunch)
 	REGISTER(VDodgeRules);              // REGISTER SERVER ONLY! [DODGE] airborne dodge rules + ducked dodge on the S3 Jump detour (client twin in game/client/dodge_rules.cpp)
+	REGISTER(VMovementAbilityInput);    // REGISTER SERVER ONLY! [MOVE-ABILITY] airborne Jump actions answer IN_DODGE, ground jump IN_JUMP (client twin in game/client/movement_ability_input.cpp)
+	REGISTER(VTitanGate);               // REGISTER SERVER ONLY! [TITAN] general-class field behind the titan early-out of the pilot movement overrides (client twin in game/client/titan_gate.cpp)
 	REGISTER(VTapStrafeBridge);         // REGISTER SERVER ONLY! [TAPSTRAFE] Gap B: from-scratch port of 's "jump grace"/tap-strafe (lurch) assist -- S3 has zero trace of the mechanic (confirmed via convar-string sweep, only 2 leftover ConVar-registration stubs survive). ONE detour on CGameMovement::FullWalkMove, airborne-gated, mantle_boost_disables_tap_strafes-gated via MantleBoost_ShouldSuppressTapStrafe. See tapstrafe.h.
 	REGISTER(VWallClimb);               // REGISTER SERVER ONLY! [WALLCLIMB] remap S21-layout wallrun/climb finders + bind disable_wall_run. Tap sampled from VJetDrive FullWalkMove.
 	REGISTER(VWallLaunch);              // REGISTER SERVER ONLY! [WALL-LAUNCH] Sparrow climb high jump + edge air; twin: VWallLaunchClient.

@@ -1929,9 +1929,9 @@ static char __fastcall Hook_CPlayer_Zipline_CheckAutoDetach(void* player, float*
 	if (!v_CZipline__GetPoints || !g_pZiplineSpeedFieldOffset)
 		return nResult;
 
-	// Bound GetPoints from m_numZiplinePoints first; *ioCount is not a capacity.
+	// GetPoints copies m_numNodes points; *ioCount is not a capacity.
 	const int nZipPoints =
-		*(const int*)(reinterpret_cast<const uintptr_t>(zip) + ZE_ZIP_OFF_NUM_ZIP_POINTS);
+		*(const int*)(reinterpret_cast<const uintptr_t>(zip) + ZE_ZIP_OFF_NUM_NODES);
 	if (nZipPoints > ZE_MAX_POINTS)
 	{
 		if (ZiplineExit_ShouldWarnSample(s_nBadCountWarns))
@@ -2457,7 +2457,7 @@ static bool ZiplineExit_RideAlphaAtPosition(void* zip, const float pos[3], float
 		return false;
 
 	const int nZipPoints =
-		*(const int*)(reinterpret_cast<const uintptr_t>(zip) + ZE_ZIP_OFF_NUM_ZIP_POINTS);
+		*(const int*)(reinterpret_cast<const uintptr_t>(zip) + ZE_ZIP_OFF_NUM_NODES);
 	if (nZipPoints > ZE_MAX_POINTS)
 		return false;
 

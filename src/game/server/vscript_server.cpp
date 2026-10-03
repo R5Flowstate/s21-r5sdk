@@ -28,6 +28,9 @@
 #include "game/shared/vscript_gamedll_defs.h"
 #include "game/shared/globalnonrewind_vars.h"
 #include "game/shared/weapon_heat.h"
+#if defined(SDK_WIP)
+#include "game/server/portal/weapon_portalgun.h"
+#endif // SDK_WIP
 #include "game/server/energize.h"
 #include "game/server/akimbo.h"
 #include "game/shared/deathfield_system.h"
@@ -60,6 +63,7 @@
 #include "game/server/weapon_stockpile_bonus.h"
 #include "game/server/mantle_boost.h"
 #include "game/server/armored_leap.h"
+#include "game/server/slide_gate_launch.h"
 #include "game/server/drag_revive.h"
 #include "game/server/entity_script_ext.h"
 #include "game/server/skyward.h"
@@ -2159,6 +2163,7 @@ static void Script_RegisterServerPlayerClassFuncs()
     DoubleJumpPower_RegisterScriptFunctions(g_serverScriptPlayerStruct);
     MantleBoost_RegisterScriptFunctions(g_serverScriptPlayerStruct);
     ArmoredLeap_RegisterScriptFunctions(g_serverScriptPlayerStruct);
+    SlideGateLaunch_RegisterScriptFunctions(g_serverScriptPlayerStruct);
     DragRevive_RegisterScriptFunctions(g_serverScriptPlayerStruct);
     EntityScriptExt_RegisterPlayerFunctions(g_serverScriptPlayerStruct);
     SkywardBridge_RegisterScriptFunctions(g_serverScriptPlayerStruct);
@@ -2218,6 +2223,9 @@ static void Script_RegisterServerWeaponClassFuncs()
     WeaponScriptVars_RegisterInfiniteAmmoFuncs(g_serverScriptWeaponStruct);
     WeaponScriptVars_RegisterInfiniteAmmoSetter(g_serverScriptWeaponStruct);
     WeaponHeat_RegisterWeaponFuncs(g_serverScriptWeaponStruct);
+#if defined(SDK_WIP)
+    PortalGun_RegisterWeaponFuncs(g_serverScriptWeaponStruct);
+#endif // SDK_WIP
     EnergizeBridge_RegisterWeaponFuncs(g_serverScriptWeaponStruct);
     AkimboBridge_RegisterWeaponFuncs(g_serverScriptWeaponStruct);
     PlayerOverheat_RegisterWeaponFuncs(g_serverScriptWeaponStruct);

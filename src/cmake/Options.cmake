@@ -72,6 +72,21 @@ macro( apply_project_settings )
     )
     endif()
 
+    # Unfinished features (portal gun, scene views, cubemap capture). A certain
+    # build leaves them out unless OPTION_WIP is set explicitly.
+    if( ${OPTION_CERTAIN} )
+        set( WIP_DEFAULT OFF )
+    else()
+        set( WIP_DEFAULT ON )
+    endif()
+    option( OPTION_WIP "Build unfinished features (portal gun, scene views, cubemap capture)" ${WIP_DEFAULT} )
+
+    if( ${OPTION_WIP} )
+    add_compile_definitions(
+        "SDK_WIP"
+    )
+    endif()
+
     # Set settings for Debug configuration
     add_compile_options(
         $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/MTd>

@@ -190,21 +190,9 @@ static void __fastcall Hook_EffectPublish(unsigned __int64 live, unsigned __int6
 			&& ReadQword(incoming + EFFECT_CHILD_COUNT, count))
 		{
 			count = static_cast<unsigned int>(count);
+			// The engine walks the stored count, so a list too long to validate is dropped whole.
 			static constexpr unsigned kEfctChildWalkCap = 4096;
-			if (count > kEfctChildWalkCap)
-			{
-				if (s_logBudget > 0)
-				{
-					--s_logBudget;
-					const char* const name = ParentName(incoming);
-					Warning(eDLL_T::CLIENT,
-						"[EFCT-LINK] '%s' child count %u walk-capped to %u\n",
-						name ? name : "?", count, kEfctChildWalkCap);
-				}
-				count = kEfctChildWalkCap;
-			}
-
-			bool drop = !IsPlausiblePointer(refs) && count != 0;
+			bool drop = count > kEfctChildWalkCap || (!IsPlausiblePointer(refs) && count != 0);
 			unsigned __int64 bad = 0;
 			unsigned int badIndex = 0;
 

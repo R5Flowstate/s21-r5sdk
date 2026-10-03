@@ -2,6 +2,10 @@
 #define RTECH_PAKALLOC_H
 #include "rtech/ipakfile.h"
 
+// Largest page/slab alignment a pak may request.
+constexpr uint32_t PAK_MAX_ALIGNMENT = 1u << 16;
+
+extern bool Pak_ValidateAlignments(const PakFile_s* const pak);
 extern void Pak_AlignSlabHeaders(PakFile_s* const pak, PakSlabDescriptor_s* const desc);
 extern void Pak_AlignSlabData(PakFile_s* const pak, PakSlabDescriptor_s* const desc);
 extern void Pak_CopyPagesToSlabs(PakFile_s* const pak, PakLoadedInfo_s* const loadedInfo, PakSlabDescriptor_s* const desc);

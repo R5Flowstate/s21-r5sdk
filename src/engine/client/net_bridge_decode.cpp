@@ -6,6 +6,9 @@
 #include "core/stdafx.h"
 #include "engine/client/net_observer.h"
 #include "engine/client/net_bridge_internal.h"
+#if defined(SDK_WIP)
+#include "game/client/portal/c_prop_portal.h"
+#endif // SDK_WIP
 #include "engine/client/demo_bridge.h"
 
 #include "engine/cmd.h"
@@ -322,6 +325,9 @@ static void Bridge_LinkNonRewindClientClass()
 static char __fastcall Hook_DataTable_SetupRecv(__int64 a1, __int64 a2, __int64 a3, __int64 a4)
 {
 	Bridge_LinkNonRewindClientClass();
+#if defined(SDK_WIP)
+	Portal_LinkClientClass();
+#endif // SDK_WIP
 
 	// a1 = SendTable*. S21 name is at *(char**)(a1 + 0x4B8); 1208 is a rare alt layout.
 	const char* name = nullptr;

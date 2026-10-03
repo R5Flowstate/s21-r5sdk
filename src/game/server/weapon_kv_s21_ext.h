@@ -32,6 +32,16 @@ struct WeaponKVS21ModBool_t
 	mutable int     nBit = -2; // -2 unresolved, -1 not a mod of this weapon
 };
 
+static constexpr int WEAPON_S21_TRAIL_COUNT = 5; // projectile_trail_effect_0..4
+
+struct WeaponKVS21ModTrail_t
+{
+	std::string modName;
+	int         nIndex;
+	bool        bHasTrail;
+	mutable int nBit = -2;
+};
+
 struct WeaponKVS21Ext_t
 {
 	float flInheritBaseVelocityScale = 1.0f;  // projectile_inherit_base_velocity_scale
@@ -58,11 +68,17 @@ struct WeaponKVS21Ext_t
 	// Client parse-table defaults, in WeaponS21Bool_e order.
 	bool  abBool[static_cast<size_t>(WeaponS21Bool_e::COUNT)] = { false, true, false, false, false, false, true };
 	std::vector<WeaponKVS21ModBool_t> modBools;
+
+	// projectile_trail_effect_<n>_3p is set and non-empty.
+	bool  abTrail3p[WEAPON_S21_TRAIL_COUNT] = {};
+	std::vector<WeaponKVS21ModTrail_t> modTrails;
 };
 
 const WeaponKVS21Ext_t& WeaponKVS21Ext_Get(const char* pszWeaponName);
 // Base value, then every active mod that sets the key, in Mods order.
 bool WeaponKVS21Ext_GetBool(const void* pWeapon, WeaponS21Bool_e key);
+// Whether the weapon's third-person trail <nIndex> is set under modBits.
+bool WeaponKVS21Ext_HasTrail3p(const void* pWeapon, uint32_t nModBits, int nIndex);
 void WeaponKVS21Ext_LevelShutdown(void);
 
 #endif // WEAPON_KV_S21_EXT_H

@@ -13,6 +13,7 @@
 #include "game/shared/sdk_entity_state.h"
 #include "game/shared/vscript_gamedll_defs.h"
 #include "game/shared/double_jump_power.h"
+#include "game/shared/titan_gate.h"
 #include "vscript/languages/squirrel_re/include/sqvm.h"
 #include "vscript/languages/squirrel_re/vsquirrel.h"
 #include "vscript/languages/squirrel_re/include/squirrel.h"
@@ -55,7 +56,7 @@ static uint8_t* DoubleJumpPower_CvarParent(ConVar*& pVar, const char* const pszN
 
 static bool DoubleJumpPower_IsEnabled(void* const player)
 {
-	if (!player || !bridge_double_jump_power.GetBool())
+	if (!player || !bridge_double_jump_power.GetBool() || TitanGate_IsTitanPlayer(player))
 		return false;
 	const bool* const pEnabled = s_enabledMap.Find(player);
 	return pEnabled && *pEnabled;

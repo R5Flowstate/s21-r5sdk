@@ -29,32 +29,109 @@ static bool Script_WhenWordEq(const char* const start, const int n, const char* 
 	return n == w && !_strnicmp(start, want, n);
 }
 
+// Upper bound of the native When evaluator: only the VM context names are known
+// here; every other name (DEV, MP, SP, ...) depends on runtime state, so it is
+// MAYBE. A list is counted unless its When is definitely false -- counting less
+// than the native loads would let it overrun the fixed script array.
+enum class WhenTri_t { NO, YES, MAYBE };
+
+static bool Script_WhenIsNameChar(const char c)
+{
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+}
+
+static void Script_WhenSkipSpace(const char*& p)
+{
+	while (*p == ' ' || *p == '\t')
+		++p;
+}
+
+static WhenTri_t Script_WhenEvalExpr(const char*& p, const char* const want, const int depth, bool& bOk);
+
+static WhenTri_t Script_WhenEvalUnary(const char*& p, const char* const want, const int depth, bool& bOk)
+{
+	Script_WhenSkipSpace(p);
+	if (*p == '!')
+	{
+		++p;
+		const WhenTri_t v = Script_WhenEvalUnary(p, want, depth + 1, bOk);
+		return v == WhenTri_t::MAYBE ? v : (v == WhenTri_t::YES ? WhenTri_t::NO : WhenTri_t::YES);
+	}
+	if (*p == '(')
+	{
+		++p;
+		const WhenTri_t v = Script_WhenEvalExpr(p, want, depth + 1, bOk);
+		Script_WhenSkipSpace(p);
+		if (*p != ')')
+			bOk = false;
+		else
+			++p;
+		return v;
+	}
+
+	const char* const start = p;
+	while (Script_WhenIsNameChar(*p))
+		++p;
+	const int n = static_cast<int>(p - start);
+	if (n == 0)
+	{
+		bOk = false;
+		return WhenTri_t::MAYBE;
+	}
+	for (const char* const name : s_scriptContextNames)
+	{
+		if (Script_WhenWordEq(start, n, name))
+			return (want && Script_WhenWordEq(start, n, want)) ? WhenTri_t::YES : WhenTri_t::NO;
+	}
+	return WhenTri_t::MAYBE;
+}
+
+static WhenTri_t Script_WhenEvalExpr(const char*& p, const char* const want, const int depth, bool& bOk)
+{
+	if (depth > 32)
+	{
+		bOk = false;
+		return WhenTri_t::MAYBE;
+	}
+
+	WhenTri_t acc = Script_WhenEvalUnary(p, want, depth, bOk);
+	char op = 0;
+	while (bOk)
+	{
+		Script_WhenSkipSpace(p);
+		const bool bAnd = p[0] == '&' && p[1] == '&';
+		const bool bOr = p[0] == '|' && p[1] == '|';
+		if (!bAnd && !bOr)
+			break;
+		// Mixed && / || without parentheses: precedence is the native's call.
+		if (op && op != p[0])
+			bOk = false;
+		op = p[0];
+		p += 2;
+		const WhenTri_t rhs = Script_WhenEvalUnary(p, want, depth, bOk);
+		if (bAnd)
+			acc = (acc == WhenTri_t::NO || rhs == WhenTri_t::NO) ? WhenTri_t::NO
+				: (acc == WhenTri_t::YES && rhs == WhenTri_t::YES) ? WhenTri_t::YES : WhenTri_t::MAYBE;
+		else
+			acc = (acc == WhenTri_t::YES || rhs == WhenTri_t::YES) ? WhenTri_t::YES
+				: (acc == WhenTri_t::NO && rhs == WhenTri_t::NO) ? WhenTri_t::NO : WhenTri_t::MAYBE;
+	}
+	return acc;
+}
+
 static bool Script_WhenExprMatches(const char* const expr, const SQCONTEXT context)
 {
 	if (!expr || !expr[0])
-		return false;
+		return true;
 	const int idx = static_cast<int>(context);
 	const char* const want = (idx >= 0 && idx < 3) ? s_scriptContextNames[idx] : nullptr;
 	const char* p = expr;
-	int safety = 0;
-	while (*p && ++safety < 256)
-	{
-		while (*p && !((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z')
-			|| (*p >= '0' && *p <= '9') || *p == '_'))
-			++p;
-		if (!*p)
-			break;
-		const char* const start = p;
-		while (*p && ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z')
-			|| (*p >= '0' && *p <= '9') || *p == '_'))
-			++p;
-		const int n = static_cast<int>(p - start);
-		if (Script_WhenWordEq(start, n, "DEV") || Script_WhenWordEq(start, n, "DEVELOPER"))
-			return true;
-		if (want && Script_WhenWordEq(start, n, want))
-			return true;
-	}
-	return false;
+	bool bOk = true;
+	const WhenTri_t v = Script_WhenEvalExpr(p, want, 0, bOk);
+	Script_WhenSkipSpace(p);
+	if (!bOk || *p)
+		return true;
+	return v != WhenTri_t::NO;
 }
 
 static bool Script_AddListedCount(int* const total, const int add)

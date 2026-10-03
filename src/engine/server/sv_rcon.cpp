@@ -887,6 +887,9 @@ void CRConServer::Disconnect(const int nIndex, const char* szReason) // NETMGR
 
 		if (!NET_IsAddressLoopback(netAdr))
 			Msg(eDLL_T::SERVER, "Connection to '%s' lost (%s)\n", netAdr.ToString(), szReason);
+		// A deferred close keeps the slot until the walk ends; clear it so a repeat call cannot count it twice.
+		data.authorized = false;
+
 		if (--m_nAuthConnections < sv_rcon_maxconnections.GetInt())
 		{
 			if (!m_Socket.IsListening())
@@ -1071,12 +1074,12 @@ static void RCON_ConnectionCountChanged_f(IConVar* pConVar, const char* pOldStri
 		}
 		else
 		{
-			int currCount = count;
-
-			while (currCount > maxCount)
+			// The auth count is not a socket index; walk the sockets and drop authorized ones from the top.
+			for (int i = pCreator->GetAcceptedSocketCount() - 1;
+				i >= 0 && RCONServer()->GetAuthenticatedCount() > maxCount; --i)
 			{
-				RCONServer()->Disconnect(currCount - 1, "too many authenticated sockets");
-				currCount = RCONServer()->GetAuthenticatedCount();
+				if (pCreator->GetAcceptedSocketData(i).authorized)
+					RCONServer()->Disconnect(i, "too many authenticated sockets");
 			}
 
 			pCreator->CloseListenSocket();

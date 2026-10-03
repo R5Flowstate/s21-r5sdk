@@ -22,10 +22,11 @@
 #include "engine/server/vengineserver_impl.h"
 #include "game/shared/dt_extend.h"
 #include "game/shared/player_extend_sidecar.h"
+#include "game/shared/titan_gate.h"
 #include "game/shared/sdk_entity_state.h"
 #include "game/server/zipline_disconnect.h"
 #include "game/shared/edict_dirty.h"
-#include "game/shared/mantle_boost_curves.h"
+#include "game/server/entitylist.h"
 #include "game/shared/scriptremotefunctions_shared.h"
 #include "common/netmessages.h"
 #include "engine/server/server.h"
@@ -86,13 +87,10 @@ static ConVar mantle_boost_input_setting("mantle_boost_input_setting", "1", FCVA
 	"[MANTLE-BOOST] Activation input FALLBACK default (per-client value comes from the client's "
 	"FCVAR_USERINFO copy): 0=Off, 1=Jump (S21 default), 2=Crouch, 3=Movement Ability/custom "
 	"(bridge_mantle_boost_button_mask). Must match the client-side default for lockstep prediction.");
-static ConVar bridge_mantle_boost_sweet_spot_auto("bridge_mantle_boost_sweet_spot_auto", "1", FCVAR_RELEASE,
-	"[MANTLE-BOOST] derive the sweet-spot threshold per traversal state from the baked curve so "
-	"the window is the last min_valid_traversal_frac of the climb, as S21's is. 0 uses the "
-	"authored bridge_mantle_boost_sweet_spot_angle. Must match the client-side default.");
-static ConVar bridge_mantle_boost_sweet_spot_angle("bridge_mantle_boost_sweet_spot_angle", "2", FCVAR_RELEASE,
+static ConVar bridge_mantle_boost_sweet_spot_angle("bridge_mantle_boost_sweet_spot_angle", "5.25", FCVAR_RELEASE,
 	"[MANTLE-BOOST] trigger: max |animViewPitch - eyePitch| (degrees) that still counts as the sweet spot. "
-	"Must match the client-side default.");
+	"Live S30 grants the boost anywhere past min_valid_traversal_frac while the camera settles; its mantle "
+	"clips peak at 5.2 deg, so the gate clears them. Must match the client-side default.");
 static ConVar mantle_boost_require_increasing_view_angle("mantle_boost_require_increasing_view_angle", "0", FCVAR_RELEASE,
 	"[MANTLE-BOOST] tweak (default 0): require |delta| still opening (moving away from zero). Must match client.");
 static ConVar mantle_boost_require_decreasing_view_angle("mantle_boost_require_decreasing_view_angle", "1", FCVAR_RELEASE,
@@ -101,11 +99,10 @@ static ConVar mantle_boost_min_valid_traversal_frac("mantle_boost_min_valid_trav
 	"[MANTLE-BOOST] tweak (default 0.5): the traversal must have progressed past this fraction at the"
 	"press for the superglide to be valid -- final decision-cascade step (at/below -> FAILED (3), above -> BOOST (4)). "
 	"Must match the client-side default.");
-static ConVar bridge_mantle_boost_exit_speed("bridge_mantle_boost_exit_speed", "200", FCVAR_RELEASE,
+static ConVar bridge_mantle_boost_exit_speed("bridge_mantle_boost_exit_speed", "260", FCVAR_RELEASE,
 	"[MANTLE-BOOST] Base horizontal exit speed (u/s). State 4 multiplies by sprint_mult.");
-static ConVar bridge_mantle_boost_sprint_mult("bridge_mantle_boost_sprint_mult", "1.5", FCVAR_RELEASE,
-	"[MANTLE-BOOST] Exit-speed multiplier on full boost (state 4). S21 "
-	"player_mantleBoostSprintSpeedMultiplier = 1.5 (29/30 legends; Sparrow is 1.0).");
+static ConVar bridge_mantle_boost_sprint_mult("bridge_mantle_boost_sprint_mult", "1.3", FCVAR_RELEASE,
+	"[MANTLE-BOOST] Exit-speed multiplier on full boost (state 4). Must match the client-side default.");
 static ConVar bridge_mantle_boost_jump_height("bridge_mantle_boost_jump_height", "90", FCVAR_RELEASE,
 	"[MANTLE-BOOST] Jump height (u) for state-4 forced Jump (sqrt(2*gravity*height)). "
 	"State 3 keeps player_jumpHeight (56).");
@@ -308,72 +305,130 @@ static void MantleBoost_FireCallback(CPlayer* const player)
 }
 
 //-----------------------------------------------------------------------------
-// Anim-camera pitch delta from the baked curve vs eye angles. False if degenerate or unbaked.
+// CPredictedFirstPersonProxy. TraversalMove resets its sequence to the traversal
+// activity on every state change and feeds it the anim progress as its cycle.
 //-----------------------------------------------------------------------------
-static bool MantleBoost_ComputeAnimCameraDelta(CPlayer* const player, const QAngle& eyeAngles,
-	float* const pflDelta)
+static constexpr ptrdiff_t MB_PLAYER_OFF_PROXY_HANDLE  = 25404;  // EHANDLE of the player's first-person proxy
+static constexpr ptrdiff_t MB_PLAYER_OFF_ANIM_PROGRESS = 27412;  // the value TraversalMove hands the proxy as its cycle
+static constexpr ptrdiff_t MB_PROXY_OFF_ATTACH_REF     = 4608;   // attachment ids cached by the proxy's OnModelChanged
+static constexpr ptrdiff_t MB_PROXY_OFF_ATTACH_CAMERA  = 4612;
+static constexpr ptrdiff_t MB_PROXY_OFF_ATTACH_CAMBASE = 4616;
+static constexpr ptrdiff_t MB_ANIM_OFF_STUDIOHDR       = 4056;   // CStudioHdr*; +8 is the studiohdr_t
+static constexpr ptrdiff_t MB_ANIM_OFF_CYCLE           = 4068;   // m_flCycle
+static constexpr ptrdiff_t MB_ENT_OFF_EFLAGS           = 560;
+static constexpr ptrdiff_t MB_ENT_OFF_ABS_ANGLES       = 1116;   // the frame GetAttachment builds bones in
+static constexpr ptrdiff_t MB_VTBL_OFF_GETATTACHMENT   = 2336;   // bool GetAttachment(int id, matrix3x4_t* out), world space
+static constexpr uint32_t  MB_EFL_BONECACHE_DIRTY      = 0x10000000;  // bone cache is reused within a tick unless set
+
+typedef bool (*MantleBoost_GetAttachmentFn_t)(void* pEntity, int nIndex, matrix3x4_t* pOut);
+
+static CBaseEntity* MantleBoost_ResolveProxy(CPlayer* const player)
+{
+	const uint32_t rawHandle = *reinterpret_cast<const uint32_t*>(
+		reinterpret_cast<uintptr_t>(player) + MB_PLAYER_OFF_PROXY_HANDLE);
+	if (rawHandle == INVALID_EHANDLE_INDEX || !g_serverEntityList)
+		return nullptr;
+	return reinterpret_cast<CBaseEntity*>(g_serverEntityList->LookupEntity(
+		CBaseHandle::UnsafeFromIndex(static_cast<int>(rawHandle))));
+}
+
+// Attachment rotation with the model scale taken out of its axes.
+static void MantleBoost_AttachmentRotation(const matrix3x4_t& in, matrix3x4_t& out)
+{
+	for (int c = 0; c < 3; ++c)
+	{
+		const float flLen = sqrtf(in[0][c] * in[0][c] + in[1][c] * in[1][c] + in[2][c] * in[2][c]);
+		const float flInv = flLen > 1e-6f ? 1.0f / flLen : 0.0f;
+		for (int r = 0; r < 3; ++r)
+			out[r][c] = in[r][c] * flInv;
+	}
+	for (int r = 0; r < 3; ++r)
+		out[r][3] = 0.0f;
+}
+
+//-----------------------------------------------------------------------------
+// Traversal camera pitch minus eye pitch, sampled off the proxy's own REF /
+// CAMERA / CAMERA_BASE attachments with the proxy held at flCycle. This is
+// GetTraversalViewPosition's angle path with the proxy pinned to the ledge
+// basis: SA * inv(ref) * cam * inv(base) * SA^T * eye, all model-space.
+//-----------------------------------------------------------------------------
+static bool MantleBoost_SampleCameraDelta(CPlayer* const player, float flCycle,
+	const QAngle& eyeAngles, float* const pflDelta)
 {
 	const Vector3D& vecFwd = player->Diag_TraversalForwardDir();
-	if (vecFwd.LengthSqr() < 1e-6f)
+	if (vecFwd.LengthSqr() < 1e-6f || !isfinite(flCycle))
 		return false;
 
-	const int nTravState = *reinterpret_cast<const int*>(
-		reinterpret_cast<uintptr_t>(player) + MB_PLAYER_OFF_TRAVERSAL_STATE);
-	const float flCycle = player->Diag_TraversalProgress();
-
-	if (!MBCurves_Has(nTravState))
-	{
-		static uint16_t s_nWarnedStates = 0;
-		if (nTravState >= 0 && nTravState < MB_CURVE_TRAVERSAL_COUNT
-			&& !(s_nWarnedStates & (1u << nTravState)))
-		{
-			s_nWarnedStates |= uint16_t(1u << nTravState);
-			Warning(eDLL_T::SERVER, "[MANTLE-BOOST] no baked curve for travState=%d -- "
-				"presses latch the weak tier until %s carries it\n",
-				nTravState, MBCurves_FilePath());
-		}
+	CBaseEntity* const pProxy = MantleBoost_ResolveProxy(player);
+	if (!pProxy)
 		return false;
-	}
+	uint8_t* const pProxyBytes = reinterpret_cast<uint8_t*>(pProxy);
 
-	return MBCurves_Eval(nTravState, flCycle, vecFwd, eyeAngles, pflDelta);
+	const uintptr_t pStudioHdr = *reinterpret_cast<const uintptr_t*>(pProxyBytes + MB_ANIM_OFF_STUDIOHDR);
+	if (!pStudioHdr || !*reinterpret_cast<const uintptr_t*>(pStudioHdr + 8))
+		return false;
+
+	const int nRefId  = *reinterpret_cast<const int*>(pProxyBytes + MB_PROXY_OFF_ATTACH_REF);
+	const int nCamId  = *reinterpret_cast<const int*>(pProxyBytes + MB_PROXY_OFF_ATTACH_CAMERA);
+	const int nBaseId = *reinterpret_cast<const int*>(pProxyBytes + MB_PROXY_OFF_ATTACH_CAMBASE);
+	if (nRefId <= 0 || nCamId <= 0 || nBaseId <= 0)
+		return false;
+
+	const MantleBoost_GetAttachmentFn_t fnGetAttachment = reinterpret_cast<MantleBoost_GetAttachmentFn_t>(
+		(*reinterpret_cast<void***>(pProxy))[MB_VTBL_OFF_GETATTACHMENT / 8]);
+
+	flCycle = fminf(fmaxf(flCycle, 0.0f), 1.0f);
+	float* const pCycle = reinterpret_cast<float*>(pProxyBytes + MB_ANIM_OFF_CYCLE);
+	uint32_t* const pEFlags = reinterpret_cast<uint32_t*>(pProxyBytes + MB_ENT_OFF_EFLAGS);
+	const float flSavedCycle = *pCycle;
+
+	*pCycle = flCycle;
+	*pEFlags |= MB_EFL_BONECACHE_DIRTY;
+
+	matrix3x4_t refW, camW, baseW;
+	const bool bOk = fnGetAttachment(pProxy, nRefId, &refW)
+		&& fnGetAttachment(pProxy, nCamId, &camW)
+		&& fnGetAttachment(pProxy, nBaseId, &baseW);
+	const float* const pAbsAngles = reinterpret_cast<const float*>(pProxyBytes + MB_ENT_OFF_ABS_ANGLES);
+	const QAngle absAngles(pAbsAngles[0], pAbsAngles[1], pAbsAngles[2]);
+
+	*pCycle = flSavedCycle;
+	*pEFlags |= MB_EFL_BONECACHE_DIRTY;
+
+	if (!bOk)
+		return false;
+
+	// World = E * model; undo the proxy's own frame so only the pose remains.
+	matrix3x4_t refR, camR, baseR, E, refInv, baseInv, t0, t1, P;
+	MantleBoost_AttachmentRotation(refW, refR);
+	MantleBoost_AttachmentRotation(camW, camR);
+	MantleBoost_AttachmentRotation(baseW, baseR);
+	AngleMatrix(absAngles, E);
+	MatrixSetColumn(Vector3D(0.0f, 0.0f, 0.0f), 3, E);
+	MatrixInvert(refR, refInv);
+	MatrixInvert(baseR, baseInv);
+	ConcatTransforms(refInv, camR, t0);
+	ConcatTransforms(t0, baseInv, t1);
+	ConcatTransforms(t1, E, P);
+
+	matrix3x4_t sa, saT, eyeM, a, b, c;
+	VectorMatrix(vecFwd, sa);
+	MatrixSetColumn(Vector3D(0.0f, 0.0f, 0.0f), 3, sa);
+	MatrixInvert(sa, saT);
+	AngleMatrix(eyeAngles, eyeM);
+	ConcatTransforms(saT, eyeM, a);
+	ConcatTransforms(P, a, b);
+	ConcatTransforms(sa, b, c);
+
+	QAngle outAngles;
+	MatrixAngles(c, outAngles);
+	const float flDelta = outAngles.x - eyeAngles.x;
+	if (!isfinite(flDelta))
+		return false;
+
+	*pflDelta = flDelta;
+	return true;
 }
-
-static float MantleBoost_SweetSpotThreshold(CPlayer* const player, const QAngle& eyeAngles)
-{
-	float flThreshold = bridge_mantle_boost_sweet_spot_angle.GetFloat();
-	if (!bridge_mantle_boost_sweet_spot_auto.GetBool())
-		return flThreshold;
-
-	const int nTravState = *reinterpret_cast<const int*>(
-		reinterpret_cast<uintptr_t>(player) + MB_PLAYER_OFF_TRAVERSAL_STATE);
-
-	float flDerived = 0.0f;
-	if (MBCurves_AutoThreshold(nTravState, mantle_boost_min_valid_traversal_frac.GetFloat(),
-			player->Diag_TraversalForwardDir(), eyeAngles, &flDerived)
-		&& flDerived > flThreshold)
-	{
-		flThreshold = flDerived;
-	}
-	return flThreshold;
-}
-
-//-----------------------------------------------------------------------------
-// Dev iteration on a fresh bake without a dedi restart.
-//-----------------------------------------------------------------------------
-static void CC_MantleBoostCurvesReload(const CCommand& args)
-{
-	MBCurves_Reload();
-	int nBaked = 0;
-	for (int t = 0; t < MB_CURVE_TRAVERSAL_COUNT; ++t)
-	{
-		if (MBCurves_Has(t))
-			++nBaked;
-	}
-	Msg(eDLL_T::SERVER, "[MANTLE-BOOST] curves reloaded: %d traversal states baked\n", nBaked);
-}
-static ConCommand mantle_boost_curves_reload("mantle_boost_curves_reload",
-	CC_MantleBoostCurvesReload, "Reload platform/cfg/mantle_boost_curves.txt.",
-	FCVAR_DEVELOPMENTONLY);
 
 //-----------------------------------------------------------------------------
 // Latch 3 or 4 on the first activation press while dangle gates are clear.
@@ -399,11 +454,23 @@ static void MantleBoost_EvaluateTrigger(CPlayer* const player, const uint8_t* co
 		(*reinterpret_cast<const uint8_t*>(reinterpret_cast<uintptr_t>(player) + MB_PLAYER_OFF_DANGLE_FORCEFALL) == 0) &&
 		(*reinterpret_cast<const float*>(reinterpret_cast<uintptr_t>(player) + MB_PLAYER_OFF_DANGLE_DISMOUNT) == 0.0f);
 
-	// Unbaked/degenerate delta still latches the weak tier -- never left pending.
-	float flLiveDelta = 0.0f;
-	const bool bHaveDelta = MantleBoost_ComputeAnimCameraDelta(player, eyeAngles, &flLiveDelta);
-
+	// No camera sample still latches the weak tier -- never left pending.
 	const float flAnim = player->Diag_TraversalAnimProgress();
+	const float flProxyCycle = *reinterpret_cast<const float*>(
+		reinterpret_cast<uintptr_t>(player) + MB_PLAYER_OFF_ANIM_PROGRESS);
+	if (flProxyCycle != flAnim)
+	{
+		static bool s_bWarnedAnimField = false;
+		if (!s_bWarnedAnimField)
+		{
+			s_bWarnedAnimField = true;
+			Warning(eDLL_T::SERVER, "[MANTLE-BOOST] anim progress field mismatch (member %.3f, proxy cycle %.3f)\n",
+				flAnim, flProxyCycle);
+		}
+	}
+
+	float flLiveDelta = 0.0f;
+	const bool bHaveDelta = MantleBoost_SampleCameraDelta(player, flProxyCycle, eyeAngles, &flLiveDelta);
 	if (bButtonPressed && bMantleType && bDangleClear)
 	{
 		// Decreasing = negative lobe rising toward zero; increasing = positive falling. No epsilon.
@@ -414,7 +481,7 @@ static void MantleBoost_EvaluateTrigger(CPlayer* const player, const uint8_t* co
 		if (!bHaveDelta)
 		{
 			s.m_nState = 3;
-			pszGate = "nocurve";
+			pszGate = "nocam";
 		}
 		else if (!bDecreasingOk && mantle_boost_require_increasing_view_angle.GetBool())
 		{
@@ -426,7 +493,7 @@ static void MantleBoost_EvaluateTrigger(CPlayer* const player, const uint8_t* co
 			s.m_nState = 3;
 			pszGate = "dec";
 		}
-		else if (fabsf(flLiveDelta) >= MantleBoost_SweetSpotThreshold(player, eyeAngles))
+		else if (fabsf(flLiveDelta) >= bridge_mantle_boost_sweet_spot_angle.GetFloat())
 		{
 			s.m_nState = 3;
 			pszGate = "angle";
@@ -450,7 +517,7 @@ static void MantleBoost_EvaluateTrigger(CPlayer* const player, const uint8_t* co
 				reinterpret_cast<uintptr_t>(player) + MB_PLAYER_OFF_TRAVERSAL_STATE);
 			Msg(eDLL_T::SERVER, "[MB-TRIG] t=%.3f travState=%d raw=%.3f anim=%.3f delta=%.2f prev=%.2f thr=%.2f gate=%s -> %d slot=%d\n",
 				gpGlobals ? gpGlobals->curTime : 0.0f, nTravState, flRaw, flAnim,
-				flLiveDelta, s.m_flPrevDelta, MantleBoost_SweetSpotThreshold(player, eyeAngles),
+				flLiveDelta, s.m_flPrevDelta, bridge_mantle_boost_sweet_spot_angle.GetFloat(),
 				pszGate, s.m_nState, slot);
 		}
 	}
@@ -624,7 +691,7 @@ static void MantleBoost_ApplyBoost(void* const ctx, CPlayer* const player,
 
 	if (bridge_mantle_boost_trig_log.GetBool())
 		Msg(eDLL_T::SERVER, "[MB-CLIMB] side=ds climb=%d pred=%d auth=%d apply=%d "
-			"gate=%s delta=%.2f src=recon anim=%.3f speed=%.1f jump=%d t=%.3f slot=%d\n",
+			"gate=%s delta=%.2f src=proxy anim=%.3f speed=%.1f jump=%d t=%.3f slot=%d\n",
 			s.m_nTraversalSeq, s.m_nState, s.m_nState, s.m_nState,
 			s.m_pszDecisionGate ? s.m_pszDecisionGate : "none",
 			s.m_flDecisionDelta, s.m_flDecisionAnim, flSpeed, bJumped ? 1 : 0,
@@ -670,7 +737,7 @@ static char Hook_CGameMovement_TraversalMove(void* ctx, char justStarted)
 	if (!mantle_boost_enabled.GetBool() || !ctx)
 		return v_CGameMovement__TraversalMove(ctx, justStarted);
 
-	if (!player)
+	if (!player || TitanGate_IsTitanPlayer(player))
 		return v_CGameMovement__TraversalMove(ctx, justStarted);
 
 	const int slot = static_cast<int>(player->GetEdict()) - 1;
@@ -695,6 +762,11 @@ static char Hook_CGameMovement_TraversalMove(void* ctx, char justStarted)
 	const float flProgressBefore = player->Diag_TraversalProgress();
 	const float flJumpOffBefore = *reinterpret_cast<const float*>(
 		reinterpret_cast<uintptr_t>(player) + MB_PLAYER_OFF_DANGLE_DISMOUNT);   // m_wallDangleJumpOffTime analog, pre-orig
+
+	// A climb that settles into the idle hang can no longer boost (MANTLE_BOOST_STATE_INVALID).
+	if (!justStarted && s.m_nState == 0 && *reinterpret_cast<const int*>(
+			reinterpret_cast<uintptr_t>(player) + MB_PLAYER_OFF_TRAVERSAL_STATE) == 11)
+		s.m_nState = 1;
 
 	uint8_t* const mvTrig = *reinterpret_cast<uint8_t**>(reinterpret_cast<uintptr_t>(ctx) + MB_CTX_OFF_MOVEDATA);
 	if (!justStarted && mvTrig && s.m_nState == 0)

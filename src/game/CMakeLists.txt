@@ -19,6 +19,8 @@ add_sources( SOURCE_GROUP "Entity"
     "shared/ehandle.h"
     "shared/dodge_rules.h"
     "shared/double_jump_power.h"
+    "shared/jump_input_gate.h"
+    "shared/titan_gate.h"
 )
 
 add_sources( SOURCE_GROUP "Simulation"
@@ -110,6 +112,13 @@ add_sources( SOURCE_GROUP "Weapon"
     "shared/scriptnetdata_ext.h"
     "shared/scriptnetdata_limits.h"
 )
+
+if( ${OPTION_WIP} )
+add_sources( SOURCE_GROUP "Portal"
+    "shared/portal/portal_shared.cpp"
+    "shared/portal/portal_shared.h"
+)
+endif()
 
 if( ${PROJECT_NAME} STREQUAL "game_shared_static" )
 add_sources( SOURCE_GROUP "Server Only"
@@ -331,6 +340,10 @@ add_sources( SOURCE_GROUP "Player"
     "server/zipline_exit_parity.h"
     "server/poseparam_ext.cpp"
     "server/poseparam_ext.h"
+    "server/grenade_spawn_origin.cpp"
+    "server/grenade_spawn_origin.h"
+    "server/slide_gate_launch.cpp"
+    "server/slide_gate_launch.h"
     "server/slide_super_jump.cpp"
     "server/slide_super_jump.h"
     "server/tapstrafe.cpp"
@@ -396,6 +409,8 @@ add_sources( SOURCE_GROUP "Weapon"
     "server/weapon_holster_reselect.h"
     "server/weapon_realm_follow.cpp"
     "server/weapon_realm_follow.h"
+    "server/projectile_trail_te.cpp"
+    "server/projectile_trail_te.h"
     "server/energize.cpp"
     "server/energize.h"
     "server/akimbo.cpp"
@@ -404,6 +419,12 @@ add_sources( SOURCE_GROUP "Weapon"
     "server/weapon_activity_modifiers.h"
     "server/dodge_rules.cpp"
     "server/dodge_rules.h"
+    "server/movement_ability_input.cpp"
+    "server/movement_ability_input.h"
+    "server/titan_gate.cpp"
+    "server/titan_gate.h"
+    "server/titan_diag.cpp"
+    "server/titan_diag.h"
     "server/sndc_alloc.cpp"
     "server/sndc_alloc.h"
 )
@@ -449,6 +470,29 @@ add_sources( SOURCE_GROUP "Physics"
     "server/physics_main.h"
 )
 
+if( ${OPTION_WIP} )
+add_sources( SOURCE_GROUP "Portal"
+    "server/portal/prop_portal.cpp"
+    "server/portal/prop_portal.h"
+    "server/portal/portal_placement.cpp"
+    "server/portal/portal_placement.h"
+    "server/portal/weapon_portalgun.cpp"
+    "server/portal/weapon_portalgun.h"
+    "shared/portal/portal_placement_shared.h"
+    "server/portal/portal_teleport.cpp"
+    "server/portal/portal_teleport.h"
+)
+
+add_sources( SOURCE_GROUP "Halo Vehicle"
+    "server/halo_vehicle/halo_vehicle.cpp"
+    "server/halo_vehicle/halo_vehicle.h"
+    "server/halo_vehicle/halo_vehicle_defs.cpp"
+    "server/halo_vehicle/halo_vehicle_defs.h"
+    "server/halo_vehicle/halo_vehicle_sim.cpp"
+    "server/halo_vehicle/halo_vehicle_sim.h"
+)
+endif()
+
 add_sources( SOURCE_GROUP "Utility"
     "server/cbase.cpp"
     "server/cbase.h"
@@ -488,7 +532,24 @@ add_sources( SOURCE_GROUP "Entity"
     "client/icliententityinternal.h"
     "client/body_skin.cpp"
     "client/body_skin.h"
+    "client/coll_prop_job.cpp"
+    "client/coll_prop_job.h"
+    "client/titan_use_self.cpp"
+    "client/titan_use_self.h"
+    "client/weapon_world_proxy.cpp"
+    "client/weapon_world_proxy.h"
 )
+
+if( ${OPTION_WIP} )
+add_sources( SOURCE_GROUP "Portal"
+    "client/portal/c_prop_portal.cpp"
+    "client/portal/c_prop_portal.h"
+    "client/portal/portal_render.cpp"
+    "client/portal/portal_render.h"
+    "client/portal/portal_teleport.cpp"
+    "client/portal/portal_teleport.h"
+)
+endif()
 
 add_sources( SOURCE_GROUP "Weapon"
     "client/r1/c_weapon_x.cpp"
@@ -524,6 +585,15 @@ add_sources( SOURCE_GROUP "Rendering"
     "client/visual_clutter.cpp"
     "client/visual_clutter.h"
 )
+
+if( ${OPTION_WIP} )
+add_sources( SOURCE_GROUP "Rendering"
+    "client/sceneview.cpp"
+    "client/sceneview.h"
+    "client/cubemap_capture.cpp"
+    "client/cubemap_capture.h"
+)
+endif()
 
 add_sources( SOURCE_GROUP "Animation"
 )
@@ -585,6 +655,12 @@ add_sources( SOURCE_GROUP "Prediction"
     "client/dodge_bind.h"
     "client/dodge_rules.cpp"
     "client/dodge_rules.h"
+    "client/movement_ability_input.cpp"
+    "client/movement_ability_input.h"
+    "client/titan_gate.cpp"
+    "client/titan_gate.h"
+    "client/titan_diag.cpp"
+    "client/titan_diag.h"
     "client/aimassist.cpp"
     "client/aimassist.h"
     "client/mantle_boost_rui.cpp"

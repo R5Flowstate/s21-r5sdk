@@ -22,4 +22,10 @@ unsigned DlssSr_DisplayHeight(void);
 unsigned DlssSr_ContextFlags(void);
 void DlssSr_DumpStatus(void);
 
+// Engine texture (ITexture*) -> its D3D12 resource, AddRef'd; and the
+// state the RHI keeps that resource in between batches.
+struct ID3D12Resource;
+ID3D12Resource* DlssSr_ResourceFromTexture(void* pTexture);
+unsigned DlssSr_ResourceRestingState(ID3D12Resource* pResource, unsigned fallback);
+
 #endif // !DEDICATED

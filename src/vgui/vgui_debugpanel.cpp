@@ -122,6 +122,9 @@ void CTextOverlay::AddLog(const eDLL_T context, const char* pszText, const ssize
 //-----------------------------------------------------------------------------
 void CTextOverlay::DrawNotify(void)
 {
+	if (!g_pViewRender)
+		return;
+
 	Vector2D screenPos;
 	ScreenPosition(*g_pViewRender->GetMainView(), con_notify_pos_x.GetFloat(), con_notify_pos_y.GetFloat(), &screenPos);
 
@@ -256,6 +259,9 @@ void CTextOverlay::Con_NPrintf(void)
 //-----------------------------------------------------------------------------
 void CTextOverlay::DrawFrameMetrics(void)
 {
+	if (!g_pViewRender)
+		return;
+
 	Vector2D screenPos;
 	ScreenPosition(*g_pViewRender->GetMainView(), cl_frameMetrics_pos_x.GetFloat(), cl_frameMetrics_pos_y.GetFloat(), &screenPos);
 
@@ -278,7 +284,7 @@ void CTextOverlay::DrawCrosshairMaterial(void)
 {
 	const CMaterialGlue* const materialGlue = v_GetMaterialAtCrossHair();
 
-	if (!materialGlue)
+	if (!materialGlue || !g_pViewRender)
 		return;
 
 	const MaterialGlue_s* const material = materialGlue->Get();
@@ -293,7 +299,7 @@ void CTextOverlay::DrawCrosshairMaterial(void)
 		material->width, material->height,
 		material->surfaceProp, material->surfaceProp2,
 		material->streamingTextureHandleCount,
-		material->shaderset->m_nTextureInputCount);
+		material->shaderset ? material->shaderset->m_nTextureInputCount : 0);
 }
 
 //-----------------------------------------------------------------------------

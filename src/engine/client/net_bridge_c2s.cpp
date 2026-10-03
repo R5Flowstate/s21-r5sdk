@@ -9,6 +9,7 @@
 #include "core/bridge_stats.h"
 #include "engine/client/bridge_join_auth.h"
 #include "engine/client/demo_bridge.h"
+#include "public/demo/r5dem.h"
 #include "engine/client/bridge_connect_password.h"
 #include "engine/sys_integrity.h"
 #include "engine/mdl_precache_client_grow.h"
@@ -1233,6 +1234,23 @@ static bool S21Bridge_TransformOneUsercmd(bf_read& r, bf_write& w)
 			return false;
 	}
 	s_bridgeC2sPrevCmd = cur;
+
+	if (DemoRecord_IsRecording())
+	{
+		R5DemUserCmd_s rec = {};
+		rec.commandNumber = cur.commandNumber;
+		rec.tickCount = cur.baseSnapshotTickCount;
+		rec.frameTime = cur.frametime;
+		rec.pitch = cur.commandViewAngles[0];
+		rec.yaw = cur.commandViewAngles[1];
+		rec.forwardmove = cur.forwardmove;
+		rec.sidemove = cur.sidemove;
+		rec.upmove = cur.upmove;
+		rec.buttons = cur.buttons;
+		rec.weaponSelectSlot = static_cast<uint8_t>(cur.weaponSelect);
+		rec.impulse = cur.impulse;
+		DemoRecord_OnUserCmd(rec);
+	}
 
 	static long long s_xformLog = 0;
 	++s_xformLog;

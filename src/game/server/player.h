@@ -1693,6 +1693,8 @@ inline Vector3D*(*CPlayer__EyePosition)(CPlayer* pPlayer, Vector3D* pPosition);
 inline void(*CPlayer__PlayerRunCommand)(CPlayer* pPlayer, CUserCmd* pUserCmd, IMoveHelper* pMover);
 inline bool(*CPlayer__PhysicsSimulate)(CPlayer* pPlayer, int numPerIteration, bool adjustTimeBase);
 inline void(*CPlayer__ApplyViewPunch)(CPlayer* pPlayer, const CTakeDamageInfo* inputInfo);
+// Sets fixangle; the engine sends svc_FixAngle so the owning client snaps its view.
+inline void(*CPlayer__SnapEyeAngles)(CPlayer* pPlayer, const QAngle* pAngles);
 
 ///////////////////////////////////////////////////////////////////////////////
 class VPlayer : public IDetour
@@ -1704,6 +1706,7 @@ class VPlayer : public IDetour
 		LogFunAdr("CPlayer::PlayerRunCommand", CPlayer__PlayerRunCommand);
 		LogFunAdr("CPlayer::PhysicsSimulate", CPlayer__PhysicsSimulate);
 		LogFunAdr("CPlayer::ApplyViewPunch", CPlayer__ApplyViewPunch);
+		LogFunAdr("CPlayer::SnapEyeAngles", CPlayer__SnapEyeAngles);
 	}
 	virtual void GetFun(void) const
 	{
@@ -1712,6 +1715,10 @@ class VPlayer : public IDetour
 		Module_FindPattern(g_GameDll, "E8 ?? ?? ?? ?? 8B 03 49 81 C6 ?? ?? ?? ??").FollowNearCallSelf().GetPtr(CPlayer__PlayerRunCommand);
 		Module_FindPattern(g_GameDll, "E8 ?? ?? ?? ?? 48 8B 15 ?? ?? ?? ?? 84 C0 74 06").FollowNearCallSelf().GetPtr(CPlayer__PhysicsSimulate);
 		Module_FindPattern(g_GameDll, "4C 8B DC 49 89 5B ?? 49 89 6B ?? 49 89 7B ?? 41 54 41 56 41 57 48 81 EC").GetPtr(CPlayer__ApplyViewPunch);
+		// fixangle = 1 at +0x5E18, then the snap angles.
+		Module_FindPattern(g_GameDll, "40 53 48 83 EC 30 C7 81 18 5E 00 00 01 00 00 00 48 8B D9 8B 02 4C 8B C2").GetPtr(CPlayer__SnapEyeAngles);
+		if (!CPlayer__SnapEyeAngles)
+			Warning(eDLL_T::SERVER, "[PLAYER] CPlayer::SnapEyeAngles pattern unresolved -- portal exits keep the entry view\n");
 	}
 	virtual void GetVar(void) const { }
 	virtual void GetCon(void) const { }

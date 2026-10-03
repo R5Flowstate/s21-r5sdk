@@ -12,6 +12,13 @@ inline __int64(__fastcall* v_MilesShared_LoadBanksListFromFile)(char*, __int64, 
 inline char(__fastcall* v_ClientSoundMiles_Initialize)(void) = nullptr;
 inline const char** s_ppszMilesLanguageLatch = nullptr;
 
+// One mod bank per boot (BankIndex 2, served after custom). Resolved once,
+// shared by the bank-list append and the project sidecar serve.
+bool MilesBankDisk_ResolveModBank(void);
+const char* MilesBankDisk_ModBankName(void);
+const char* MilesBankDisk_ModProjectPath(void);
+bool MilesBankDisk_ShouldServeProject(const char* const pszPath);
+
 ///////////////////////////////////////////////////////////////////////////////
 class VMilesBankListS21 : public IDetour
 {

@@ -41,6 +41,13 @@
 
 #include "game/client/c_baseentity.h"
 #include "game/client/mantle_boost.h"
+#if defined(SDK_WIP)
+#include "game/client/portal/portal_teleport.h"
+#include "game/shared/portal/portal_shared.h"
+#else
+// Matches portal_shared.h; the frame is still recognized and dropped.
+static constexpr uint32_t BRIDGE_S2C_PORTALLED_MAGIC = 0x504F5254u;
+#endif // SDK_WIP
 #include "game/client/pred_authority.h"
 #include "game/client/hud_basechat.h"
 #include "game/shared/heap_canary.h"
@@ -3064,6 +3071,22 @@ static void S21Bridge_HandleS2CScriptRemote(uint8_t* s21buf)
 		}
 		if (MantleBoostClient_AuthoritativeEnabled())
 			MantleBoostClient_OnAuthoritativeState((nValue >> 7) & 0x7F, nValue);
+		return;
+	}
+
+	if (ok && magic == BRIDGE_S2C_PORTALLED_MAGIC)
+	{
+		int32_t nEntWire = 0, nPortalWire = 0, nTick = 0;
+		float flOrg[3] = {}, flAng[3] = {};
+		if (byteLen != 40 || !takeBytes(&nEntWire, 4) || !takeBytes(&nPortalWire, 4) ||
+			!takeBytes(flOrg, 12) || !takeBytes(flAng, 12) || !takeBytes(&nTick, 4))
+		{
+			Warning(eDLL_T::ENGINE, "[BRIDGE-S2C-PORTAL] portalled frame byteLen %u invalid -- dropping frame\n", byteLen);
+			return;
+		}
+#if defined(SDK_WIP)
+		PortalClient_OnPortalled(nEntWire, nPortalWire, flOrg, flAng, nTick);
+#endif // SDK_WIP
 		return;
 	}
 

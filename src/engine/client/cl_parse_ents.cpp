@@ -71,19 +71,34 @@ void VCLParsePacketEntitiesBound::Detour(const bool bAttach) const
 		return;
 
 	uint8_t* const fn = static_cast<uint8_t*>(v_CL_ParsePacketEntities);
-	const uint8_t kWrite[] = { 0x45, 0x89, 0xA4, 0x82, 0xD0, 0x79, 0xC5, 0x02 };
+	// mov [r10+rax*4+disp32], r12d; disp32 is the table RVA and differs between the dx11 and dx12 exes.
+	const uint8_t kWriteOp[] = { 0x45, 0x89, 0xA4, 0x82 };
+	uint8_t kWrite[8] = {};
 	uint8_t* writes[4] = {};
 	for (int i = 0; i < 4; ++i)
 	{
-		writes[i] = FindSeq(fn, kParseScan, kWrite, sizeof(kWrite), i);
+		writes[i] = FindSeq(fn, kParseScan, kWriteOp, sizeof(kWriteOp), i);
 		if (!writes[i])
 		{
 			Warning(eDLL_T::CLIENT, "[PARSE-ENTS] table write %d missing -- not patched\n", i);
 			return;
 		}
+		if (i == 0)
+			memcpy(kWrite, writes[0], sizeof(kWrite));
+		else if (memcmp(writes[i], kWrite, sizeof(kWrite)) != 0)
+		{
+			Warning(eDLL_T::CLIENT, "[PARSE-ENTS] table write %d targets another table -- not patched\n", i);
+			return;
+		}
+	}
+	if (FindSeq(fn, kParseScan, kWriteOp, sizeof(kWriteOp), 4))
+	{
+		Warning(eDLL_T::CLIENT, "[PARSE-ENTS] more than 4 table writes -- not patched\n");
+		return;
 	}
 
-	const uint8_t kPreserve[] = { 0x48, 0x8B, 0x03, 0x48, 0x85, 0xC0 };
+	// The preserve-entity branch head is the only one of six `mov rax,[rbx]; test rax,rax` with a near jz.
+	const uint8_t kPreserve[] = { 0x48, 0x8B, 0x03, 0x48, 0x85, 0xC0, 0x0F, 0x84 };
 	uint8_t* const preserve = FindSeq(fn, kParseScan, kPreserve, sizeof(kPreserve), 0);
 	const uint8_t kLeaveStore[] = { 0x48, 0x8B, 0x43, 0x08, 0x89, 0x78, 0x04 };
 	uint8_t* const leaveStore = FindSeq(fn, kParseScan, kLeaveStore, sizeof(kLeaveStore), 0);
@@ -92,12 +107,6 @@ void VCLParsePacketEntitiesBound::Detour(const bool bAttach) const
 		Warning(eDLL_T::CLIENT, "[PARSE-ENTS] preserve/leave site missing -- not patched\n");
 		return;
 	}
-	if (preserve[6] != 0x0F || preserve[7] != 0x84)
-	{
-		Warning(eDLL_T::CLIENT, "[PARSE-ENTS] preserve jz missing -- not patched\n");
-		return;
-	}
-
 	int32_t jzRel = 0;
 	memcpy(&jzRel, preserve + 8, 4);
 	uint8_t* const exitSite = preserve + 12 + jzRel;
@@ -145,8 +154,8 @@ void VCLParsePacketEntitiesBound::Detour(const bool bAttach) const
 	*p++ = 0x00;
 	*p++ = 0x73;
 	uint8_t* const jaeSlot = p++;
-	memcpy(p, kPreserve, sizeof(kPreserve));
-	p += sizeof(kPreserve);
+	memcpy(p, kPreserve, 6);
+	p += 6;
 	if (!Rel32Fits(p, preserve + 6))
 	{
 		Warning(eDLL_T::CLIENT, "[PARSE-ENTS] preserve stub out of range -- not patched\n");

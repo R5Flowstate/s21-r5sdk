@@ -11,6 +11,9 @@
 #include "game/client/move_sim_trace.h"
 #include "game/client/wallclimb.h"
 #include "game/client/wall_launch.h"
+#if defined(SDK_WIP)
+#include "game/client/portal/portal_teleport.h"
+#endif // SDK_WIP
 
 //-----------------------------------------------------------------------------
 // Raw layout constants -- r5apex client.
@@ -85,6 +88,10 @@ static __int64 __fastcall Hook_CGameMovement_FullWalkMove(void* ctx)
 		return 0;
 
 	WallLaunchClient_BeforeFullWalkMove(ctx);
+#if defined(SDK_WIP)
+	if (uint8_t* const pPortalMv = *reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(ctx) + MT_CTX_OFF_MV))
+		PortalPredict_BeforeFullWalkMove(pPortalMv);
+#endif // SDK_WIP
 
 	const int nMode = bridge_move_trace.GetInt();
 	if (nMode <= 0)
@@ -92,6 +99,14 @@ static __int64 __fastcall Hook_CGameMovement_FullWalkMove(void* ctx)
 		const __int64 nTapOnly = v_CGameMovement__FullWalkMove(ctx);
 		WallClimbTap_AfterFullWalkMove(ctx);
 		WallLaunchClient_AfterFullWalkMove(ctx);
+#if defined(SDK_WIP)
+		uint8_t* const pTapPlayer = *reinterpret_cast<uint8_t**>(
+			reinterpret_cast<uint8_t*>(ctx) + MT_CTX_OFF_PLAYER);
+		uint8_t* const pTapMv = *reinterpret_cast<uint8_t**>(
+			reinterpret_cast<uint8_t*>(ctx) + MT_CTX_OFF_MV);
+		if (pTapPlayer && pTapMv)
+			PortalPredict_AfterFullWalkMove(pTapPlayer, pTapMv, MoveTrace_ReadCmdNumber(pTapPlayer));
+#endif // SDK_WIP
 		return nTapOnly;
 	}
 
@@ -127,6 +142,9 @@ static __int64 __fastcall Hook_CGameMovement_FullWalkMove(void* ctx)
 	const __int64 nResult = v_CGameMovement__FullWalkMove(ctx);
 	WallClimbTap_AfterFullWalkMove(ctx);
 	WallLaunchClient_AfterFullWalkMove(ctx);
+#if defined(SDK_WIP)
+	PortalPredict_AfterFullWalkMove(player, mv, nCmd);
+#endif // SDK_WIP
 
 	const float* const pPostOrigin = reinterpret_cast<const float*>(mv + MT_MV_OFF_ORIGIN);
 	const float* const pPostVel = reinterpret_cast<const float*>(mv + MT_MV_OFF_VELOCITY);

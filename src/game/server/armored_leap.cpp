@@ -24,6 +24,7 @@
 #include "game/shared/edict_dirty.h"
 #include "game/shared/sdk_entity_state.h"
 #include "game/shared/player_extend_sidecar.h"
+#include "game/shared/titan_gate.h"
 #include "game/shared/collisionproperty.h"
 #include "game/shared/util_shared.h"
 #include "game/shared/vscript_gamedll_defs.h"
@@ -935,7 +936,7 @@ int ArmoredLeap_AnimActivity(const void* pPlayer)
 
 bool ArmoredLeap_IsActive(const void* pPlayer)
 {
-	if (!pPlayer || !s_leapActive.Size())
+	if (!pPlayer || !s_leapActive.Size() || TitanGate_IsTitanPlayer(pPlayer))
 		return false;
 	const ArmoredLeapState* const s = s_leapMap.Find(pPlayer);
 	return s && s->m_nPhase != AL_PHASE_NONE;

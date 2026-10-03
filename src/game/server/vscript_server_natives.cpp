@@ -32,6 +32,11 @@
 
 #include "vscript_server.h"
 #include "vscript_server_natives.h"
+#if defined(SDK_WIP)
+#include "game/server/portal/prop_portal.h"
+#include "game/server/halo_vehicle/halo_vehicle.h"
+#include "game/server/portal/weapon_portalgun.h"
+#endif // SDK_WIP
 #include "classvar_natives.h"
 #include "vscript_server_placement.h"
 #include "player.h"
@@ -2622,6 +2627,10 @@ void Script_RegisterDedicatedS21ServerNatives(CSquirrelVM* s)
         return;
 
 	Script_RegisterClassVarNatives(s);
+#if defined(SDK_WIP)
+	Portal_RegisterServerNatives(s);
+	HaloVehicle_RegisterServerNatives(s);
+#endif // SDK_WIP
 
 	// S3 parity with S21 native TraceHullHighDetail (ray.m_detailLevel = HIGH).
 	// Signature matches engine TraceHull (array ignore + optional upDir/tracingEntity).

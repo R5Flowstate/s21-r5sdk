@@ -75,8 +75,6 @@ add_sources( SOURCE_GROUP "Network"
     "stringtable_diag.h"
     "skinnames_stub.cpp"
     "skinnames_stub.h"
-    "weapon_precache_redirect.cpp"
-    "weapon_precache_redirect.h"
 )
 endif()
 
@@ -323,6 +321,8 @@ add_sources( SOURCE_GROUP "Windows"
     "${ENGINE_SOURCE_DIR}/windows/dlss_sr.h"
     "${ENGINE_SOURCE_DIR}/windows/pso_cache.cpp"
     "${ENGINE_SOURCE_DIR}/windows/pso_cache.h"
+    "${ENGINE_SOURCE_DIR}/windows/texture_readback.cpp"
+    "${ENGINE_SOURCE_DIR}/windows/texture_readback.h"
 )
 endif()
 

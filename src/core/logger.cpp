@@ -16,6 +16,40 @@ static const boost::regex s_AnsiRowRegex(R"(\x1b\[[\d;]+m)");
 static std::mutex s_LogMutex;
 PFN_LogTap g_LogTap = nullptr;
 
+// The console runs with VT processing on, so any escape in logged text is executed. Script and
+// wire text may carry them: keep only SGR color codes, and none at all from script contexts.
+static void Logger_ScrubTerminalControls(std::string& text, const eDLL_T context)
+{
+	const bool bKeepSgr = static_cast<int>(context) >= 0;
+	size_t out = 0;
+	for (size_t i = 0; i < text.size(); ++i)
+	{
+		const unsigned char c = static_cast<unsigned char>(text[i]);
+		if (c == 0x1B && bKeepSgr && i + 1 < text.size() && text[i + 1] == '[')
+		{
+			size_t j = i + 2;
+			while (j < text.size() && ((text[j] >= '0' && text[j] <= '9') || text[j] == ';'))
+				++j;
+			if (j < text.size() && text[j] == 'm')
+			{
+				while (i <= j)
+					text[out++] = text[i++];
+				--i;
+				continue;
+			}
+		}
+		if (c == '\r' && i + 1 < text.size() && text[i + 1] == '\n')
+		{
+			text[out++] = text[i];
+			continue;
+		}
+		if ((c < 0x20 && c != '\t' && c != '\n') || c == 0x7F)
+			continue;
+		text[out++] = text[i];
+	}
+	text.resize(out);
+}
+
 static bool Logger_IsConsoleNoise(eDLL_T context, const std::string& formatted)
 {
 	if (context == eDLL_T::SCRIPT_UI || context == eDLL_T::SCRIPT_CLIENT ||
@@ -274,8 +308,9 @@ void EngineLoggerSink(LogType_t logType, LogLevel_t logLevel, eDLL_T context,
 	//-------------------------------------------------------------------------
 	va_list argsCopy;
 	va_copy(argsCopy, args);
-	const string formatted = FormatV(pszFormat, argsCopy);
+	string formatted = FormatV(pszFormat, argsCopy);
 	va_end(argsCopy);
+	Logger_ScrubTerminalControls(formatted, context);
 
 #ifndef _TOOLS
 	if (g_LogTap && g_LogTap(context, logType, formatted.c_str(), formatted.length()))
@@ -448,6 +483,40 @@ void EngineLoggerSink(LogType_t logType, LogLevel_t logLevel, eDLL_T context,
 static const boost::regex s_AnsiRowRegex(R"(\x1b\[[\d;]+m)");
 static std::mutex s_LogMutex;
 PFN_LogTap g_LogTap = nullptr;
+
+// The console runs with VT processing on, so any escape in logged text is executed. Script and
+// wire text may carry them: keep only SGR color codes, and none at all from script contexts.
+static void Logger_ScrubTerminalControls(std::string& text, const eDLL_T context)
+{
+	const bool bKeepSgr = static_cast<int>(context) >= 0;
+	size_t out = 0;
+	for (size_t i = 0; i < text.size(); ++i)
+	{
+		const unsigned char c = static_cast<unsigned char>(text[i]);
+		if (c == 0x1B && bKeepSgr && i + 1 < text.size() && text[i + 1] == '[')
+		{
+			size_t j = i + 2;
+			while (j < text.size() && ((text[j] >= '0' && text[j] <= '9') || text[j] == ';'))
+				++j;
+			if (j < text.size() && text[j] == 'm')
+			{
+				while (i <= j)
+					text[out++] = text[i++];
+				--i;
+				continue;
+			}
+		}
+		if (c == '\r' && i + 1 < text.size() && text[i + 1] == '\n')
+		{
+			text[out++] = text[i];
+			continue;
+		}
+		if ((c < 0x20 && c != '\t' && c != '\n') || c == 0x7F)
+			continue;
+		text[out++] = text[i];
+	}
+	text.resize(out);
+}
 
 static bool Logger_IsConsoleNoise(eDLL_T context, const std::string& formatted)
 {
@@ -714,8 +783,9 @@ void EngineLoggerSink(LogType_t logType, LogLevel_t logLevel, eDLL_T context,
 	//-------------------------------------------------------------------------
 	va_list argsCopy;
 	va_copy(argsCopy, args);
-	const string formatted = FormatV(pszFormat, argsCopy);
+	string formatted = FormatV(pszFormat, argsCopy);
 	va_end(argsCopy);
+	Logger_ScrubTerminalControls(formatted, context);
 
 #ifndef _TOOLS
 	if (g_LogTap && g_LogTap(context, logType, formatted.c_str(), formatted.length()))

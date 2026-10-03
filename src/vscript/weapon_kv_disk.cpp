@@ -7,7 +7,9 @@
 #include "common/global.h"
 #include "tier0/dbg.h"
 #include "tier1/cvar.h"
+#include "tier1/strtools.h"
 #include "filesystem/filesystem.h"
+#include "pluginsystem/modsystem.h"
 
 #include <cstdio>
 #include <cstring>
@@ -267,6 +269,138 @@ static void KV_BuildGroup(void* kvNode, void* outGroup, void* gh,
 //-----------------------------------------------------------------------------
 // Parse platform/scripts/weapons/<name>.txt; NULL falls back to packed.
 //-----------------------------------------------------------------------------
+// A weapon name is path-shaped, so gate it before it reaches a file open.
+static bool WeaponKV_NameIsSafe(const char* weaponName)
+{
+	if (!weaponName || !weaponName[0])
+		return false;
+
+	if (V_strlen(weaponName) > 64)
+		return false;
+
+	if (V_strstr(weaponName, "..")
+		|| strchr(weaponName, '/')
+		|| strchr(weaponName, '\\'))
+	{
+		return false;
+	}
+
+	return true;
+}
+
+// True when the weapon file name carries the mod's namespace ("<ns>__...").
+static bool WeaponKV_OwnedByMod(const char* weaponName, const CModSystem::ModInstance_t* const mod)
+{
+	if (!weaponName || !mod)
+		return false;
+
+	const char* const pszNs = mod->nameSpace.String();
+	const size_t nNs = static_cast<size_t>(mod->nameSpace.Length());
+	if (!nNs)
+		return false;
+
+	return V_strlen(weaponName) > nNs + 2
+		&& _strnicmp(weaponName, pszNs, nNs) == 0
+		&& weaponName[nNs] == '_' && weaponName[nNs + 1] == '_';
+}
+
+// True when the mod declares the weapon in its mod.vdf "Weapons" block.
+static bool WeaponKV_DeclaredByMod(const char* weaponName, const CModSystem::ModInstance_t* const mod)
+{
+	if (!weaponName || !mod)
+		return false;
+
+	FOR_EACH_VEC(mod->weapons, i)
+	{
+		if (!V_stricmp(mod->weapons[i].String(), weaponName))
+			return true;
+	}
+	return false;
+}
+
+// Enabled mods serve only files they own; the base GAME load above always wins.
+// A declared (non-namespaced) name must also be absent from the packed data and
+// claimed by exactly one enabled mod, so a mod can never replace a stock weapon.
+static bool LoadModWeaponGroup(void* rootKV, void* ifs, const char* weaponName)
+{
+	if (!WeaponKV_NameIsSafe(weaponName) || !ModSystem()->IsEnabled())
+		return false;
+
+	char rel[MAX_PATH];
+	V_snprintf(rel, sizeof(rel), "scripts/weapons/%s.txt", weaponName);
+
+	bool bLoaded = false;
+	ModSystem()->LockModList();
+
+	int nDeclaring = 0;
+	FOR_EACH_VEC(ModSystem()->GetResolvedModList(), i)
+	{
+		const CModSystem::ModInstance_t* const mod = ModSystem()->GetResolvedModList()[i];
+		if (mod && mod->IsEnabled() && WeaponKV_DeclaredByMod(weaponName, mod))
+			++nDeclaring;
+	}
+
+	bool bDeclaredUsable = nDeclaring == 1;
+	if (nDeclaring > 1)
+	{
+		Warning(eDLL_T::FS, "[WEAP-DISK] weapon '%s' is declared by %d enabled mods -- none of them serve it\n",
+			weaponName, nDeclaring);
+	}
+	else if (nDeclaring == 1 && v_ReadKVWeaponFile_S21 && v_ReadKVWeaponFile_S21(weaponName))
+	{
+		Warning(eDLL_T::FS, "[WEAP-DISK] weapon '%s' exists in the packed data -- a mod may not replace it\n",
+			weaponName);
+		bDeclaredUsable = false;
+	}
+
+	FOR_EACH_VEC(ModSystem()->GetResolvedModList(), i)
+	{
+		const CModSystem::ModInstance_t* const mod = ModSystem()->GetResolvedModList()[i];
+		if (!mod || !mod->IsEnabled())
+			continue;
+		if (!WeaponKV_OwnedByMod(weaponName, mod)
+			&& !(bDeclaredUsable && WeaponKV_DeclaredByMod(weaponName, mod)))
+			continue;
+
+		CUtlString modRel = mod->GetBasePath() + rel;
+		if (v_KV_LoadFromFile_S21(rootKV, ifs, modRel.String(), 0, 0, "GAME", nullptr))
+		{
+			Msg(eDLL_T::FS, "[WEAP-DISK] loaded '%s' from mod '%s' (GAME '%s')\n",
+				weaponName, mod->id.String(), modRel.String());
+			bLoaded = true;
+			break;
+		}
+
+		char exeDir[MAX_PATH] = {};
+		if (GetModuleFileNameA(NULL, exeDir, sizeof(exeDir)))
+		{
+			char* pSlash = strrchr(exeDir, '\\');
+			if (!pSlash)
+				pSlash = strrchr(exeDir, '/');
+			if (pSlash)
+				*pSlash = '\0';
+
+			char abs[MAX_PATH * 2] = {};
+			_snprintf_s(abs, sizeof(abs), _TRUNCATE, "%s\\%s", exeDir, modRel.String());
+			for (char* q = abs; *q; ++q)
+			{
+				if (*q == '/')
+					*q = '\\';
+			}
+
+			if (v_KV_LoadFromFile_S21(rootKV, ifs, abs, 0, 0, NULL, nullptr))
+			{
+				Msg(eDLL_T::FS, "[WEAP-DISK] loaded '%s' from mod '%s' (abs '%s')\n",
+					weaponName, mod->id.String(), abs);
+				bLoaded = true;
+				break;
+			}
+		}
+	}
+	ModSystem()->UnlockModList();
+	return bLoaded;
+}
+
 static void* BuildDiskWeaponGroup(const char* weaponName)
 {
 	void* const globalHeap = g_ppRTechGlobalHeap_S21 ? *g_ppRTechGlobalHeap_S21 : nullptr;
@@ -287,7 +421,10 @@ static void* BuildDiskWeaponGroup(const char* weaponName)
 	std::memset(rootKV, 0, sizeof(rootKV));
 
 	if (!v_KV_LoadFromFile_S21(rootKV, ifs, rel, 0, 0, "GAME", nullptr))
-		return nullptr;
+	{
+		if (!LoadModWeaponGroup(rootKV, ifs, weaponName))
+			return nullptr;
+	}
 
 	RTechAlloc_fn alloc = *reinterpret_cast<RTechAlloc_fn*>(globalHeap);
 	void* group = alloc(globalHeap, 48, 8, 0);

@@ -35,6 +35,7 @@ inline char (__fastcall *v_Pak_InitAsyncLoad_S21)(__int64 pakHnd) = nullptr;
 
 // Engine fatal logger: severity==5 is dumpless TerminateProcess. Pak-load fatals are neutered.
 inline void (__fastcall *v_FatalErrorLogger_S21)(char severity, const char* fmt, __int64 vargs) = nullptr;
+inline int (__fastcall *v_SysError_S21)(const char* fmt, va_list args) = nullptr;
 
 // Consistency check: a2+0 guid, +56 start, +64 count. a1+22672 guidDesc array, a1+22584 page ptrs.
 inline __int64 (__fastcall *v_PakConsistencyCheck_S21)(__int64 a1, __int64 a2) = nullptr;
@@ -106,6 +107,7 @@ class VRPakObserveS21 : public IDetour
 		LogFunAdr("Pak_UnloadAsyncByHandle_S21", v_Pak_UnloadAsyncByHandle_S21);
 		LogFunAdr("Pak_PreCache_UnloadAll_S21",  v_Pak_PreCache_UnloadAll_S21);
 		LogFunAdr("FatalErrorLogger_S21",        v_FatalErrorLogger_S21);
+		LogFunAdr("SysError_S21",                v_SysError_S21);
 		LogFunAdr("PakConsistencyCheck_S21",     v_PakConsistencyCheck_S21);
 	}
 	virtual void GetFun(void) const
@@ -135,6 +137,11 @@ class VRPakObserveS21 : public IDetour
 			"48 89 5C 24 10 48 89 6C 24 18 56 B8 40 27 00 00 E8 ?? ?? ?? ?? "
 			"48 2B E0 0F B6 D9 49 8B F0 48 8B EA 80 FB 08")
 			.GetPtr(v_FatalErrorLogger_S21);
+
+		// Sys_Error: 0x830 frame for its 2048-byte message buffer.
+		Module_FindPattern(g_GameDll,
+			"48 89 5C 24 10 48 89 6C 24 18 57 48 81 EC 30 08 00 00 48 8B DA 48 8B F9 E8 ?? ?? ?? ?? 33 ED 48 89 5C 24 28 4C 8B CF")
+			.GetPtr(v_SysError_S21);
 
 		// Pak guidDesc consistency check.
 

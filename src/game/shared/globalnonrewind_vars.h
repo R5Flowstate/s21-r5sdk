@@ -32,6 +32,9 @@ void GlobalNonRewind_LevelShutdown();
 // Slot-indexed NonRewind misc data for the DT_GlobalNonRewinding.m_playerMiscData
 // wire array. Returns false for an out-of-range slot.
 bool GlobalNonRewind_GetSlotMisc(int slot, float* outRespawnTime, int* outMusicPack);
+
+// Replays values scripts set before the non-rewind entity existed. Call after its default init.
+void GlobalNonRewind_ApplyPendingToEntity();
 #endif // !CLIENT_DLL
 
 #endif // GLOBALNONREWIND_VARS_H

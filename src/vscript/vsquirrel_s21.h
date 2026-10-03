@@ -105,6 +105,8 @@ typedef int ScriptDataType_t;
 // recycled across a level change, so pointer identity cannot prove a cached
 // script handle still names a closure this VM owns -- compare generations.
 inline unsigned int g_nS21ScriptVMGeneration = 0;
+// Bumped on client VM (re)init only; one per level.
+inline unsigned int g_nS21ClientVMGeneration = 0;
 
 // S21 m_hVM is at +0x30 (not the S3 GetVM/+0x08 layout).
 HSQUIRRELVM CSquirrelVM_GetHVM_S21(CSquirrelVM* const s);

@@ -497,8 +497,17 @@ int V_UTF8ToUnicode(const char* pUTF8, wchar_t* pwchDest, int cubDestSizeInBytes
 //-----------------------------------------------------------------------------
 int V_UnicodeToUTF8(const wchar_t* pUnicode, char* pUTF8, int cubDestSizeInBytes)
 {
-	if (cubDestSizeInBytes > 0)
-		pUTF8[0] = 0;
+	// Sizing call: the result counts the terminator; the error path below writes through pUTF8.
+	if (!pUTF8 || cubDestSizeInBytes <= 0)
+	{
+#ifdef _WIN32
+		return pUnicode ? WideCharToMultiByte(CP_UTF8, 0, pUnicode, -1, NULL, 0, NULL, NULL) : 0;
+#else
+		return 0;
+#endif
+	}
+
+	pUTF8[0] = 0;
 
 #ifdef _WIN32
 	int cchResult = WideCharToMultiByte(CP_UTF8, 0, pUnicode, -1, pUTF8, cubDestSizeInBytes, NULL, NULL);
@@ -515,7 +524,7 @@ int V_UnicodeToUTF8(const wchar_t* pUnicode, char* pUTF8, int cubDestSizeInBytes
 			*pUTF8 = '\0';
 		}
 	}
-	else
+	else if (cchResult < cubDestSizeInBytes)
 		pUTF8[cchResult] = '\0';
 
 	return cchResult;

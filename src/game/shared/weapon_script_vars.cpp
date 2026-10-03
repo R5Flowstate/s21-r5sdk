@@ -852,13 +852,30 @@ static SQRESULT Script_SetCylinderRadius(HSQUIRRELVM v)
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
+// The heavy-trigger fields sit past the stock allocation of every other class;
+// script may pass any entity, so a non-heavy one is dropped instead of written.
+static bool Script_GetHeavyTrigger(HSQUIRRELVM v, void** ppEntity)
+{
+	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(ppEntity)))
+		return false;
+
+	if (*ppEntity && !DTExtend_EntityHasSendTable(*ppEntity, "DT_TriggerCylinderHeavy"))
+	{
+		static int s_nWarns = 0;
+		if (s_nWarns++ < 8)
+			Warning(eDLL_T::SERVER, "[TRIG-HEAVY] trigger setter called on a non-heavy entity %p -- ignored\n", *ppEntity);
+		*ppEntity = nullptr;
+	}
+	return true;
+}
+
 //-----------------------------------------------------------------------------
 // SetLaunchDelay - gravity-cannon charge window, in seconds
 //-----------------------------------------------------------------------------
 static SQRESULT Script_SetLaunchDelay(HSQUIRRELVM v)
 {
 	void* pEntity = nullptr;
-	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pEntity)))
+	if (!Script_GetHeavyTrigger(v, &pEntity))
 		return SQ_ERROR;
 
 	SQFloat delay = 0.0f;
@@ -880,7 +897,7 @@ static SQRESULT Script_SetLaunchDelay(HSQUIRRELVM v)
 static SQRESULT Script_GravityCannonIsPreparingLaunch(HSQUIRRELVM v)
 {
 	void* pEntity = nullptr;
-	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pEntity)))
+	if (!Script_GetHeavyTrigger(v, &pEntity))
 		return SQ_ERROR;
 
 	sq_pushbool(v, TriggerCannon_IsPreparingLaunch(pEntity) ? SQTrue : SQFalse);
@@ -893,7 +910,7 @@ static SQRESULT Script_GravityCannonIsPreparingLaunch(HSQUIRRELVM v)
 static SQRESULT Script_SetLaunchTargetLocation(HSQUIRRELVM v)
 {
 	void* pEntity = nullptr;
-	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pEntity)))
+	if (!Script_GetHeavyTrigger(v, &pEntity))
 		return SQ_ERROR;
 
 	const SQVector3D* pTarget = nullptr;
@@ -915,7 +932,7 @@ static SQRESULT Script_SetLaunchTargetLocation(HSQUIRRELVM v)
 static SQRESULT Script_GetLaunchDir(HSQUIRRELVM v)
 {
 	void* pEntity = nullptr;
-	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pEntity)))
+	if (!Script_GetHeavyTrigger(v, &pEntity))
 		return SQ_ERROR;
 
 	float dir[3] = { 0.0f, 0.0f, 0.0f };
@@ -954,7 +971,7 @@ static bool Script_GetBoolOrInt(HSQUIRRELVM v, int nIdx, bool* pOut)
 static SQRESULT Script_SetEnableDoubleJump(HSQUIRRELVM v)
 {
 	void* pEntity = nullptr;
-	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pEntity)))
+	if (!Script_GetHeavyTrigger(v, &pEntity))
 		return SQ_ERROR;
 
 	bool bEnable = false;
@@ -968,7 +985,7 @@ static SQRESULT Script_SetEnableDoubleJump(HSQUIRRELVM v)
 static SQRESULT Script_SetLimitedAirControl(HSQUIRRELVM v)
 {
 	void* pEntity = nullptr;
-	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pEntity)))
+	if (!Script_GetHeavyTrigger(v, &pEntity))
 		return SQ_ERROR;
 
 	bool bLimited = false;
@@ -982,7 +999,7 @@ static SQRESULT Script_SetLimitedAirControl(HSQUIRRELVM v)
 static SQRESULT Script_SetLaunchAirControlParams(HSQUIRRELVM v)
 {
 	void* pEntity = nullptr;
-	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pEntity)))
+	if (!Script_GetHeavyTrigger(v, &pEntity))
 		return SQ_ERROR;
 
 	float flSpeed = 0.0f;
@@ -1019,7 +1036,7 @@ static bool Script_GetFloatOrInt(HSQUIRRELVM v, int nIdx, float* pOut)
 static SQRESULT Script_SetGravityLiftParams(HSQUIRRELVM v)
 {
 	void* pEntity = nullptr;
-	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pEntity)))
+	if (!Script_GetHeavyTrigger(v, &pEntity))
 		return SQ_ERROR;
 
 	float params[10] = {};
@@ -1039,7 +1056,7 @@ static SQRESULT Script_SetGravityLiftParams(HSQUIRRELVM v)
 static SQRESULT Script_SetBlackholeParams(HSQUIRRELVM v)
 {
 	void* pEntity = nullptr;
-	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pEntity)))
+	if (!Script_GetHeavyTrigger(v, &pEntity))
 		return SQ_ERROR;
 
 	float params[6] = {};
@@ -1059,7 +1076,7 @@ static SQRESULT Script_SetBlackholeParams(HSQUIRRELVM v)
 static SQRESULT Script_SetBlackholeIsStrongPulling(HSQUIRRELVM v)
 {
 	void* pEntity = nullptr;
-	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pEntity)))
+	if (!Script_GetHeavyTrigger(v, &pEntity))
 		return SQ_ERROR;
 
 	SQBool bStrong = SQFalse;

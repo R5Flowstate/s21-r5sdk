@@ -449,17 +449,17 @@ bool CExpressionEvaluator::Evaluate( bool &bResult, const char *pInfixExpression
 	// for caller simplicity, we strip of any enclosing braces
 	// strip the bracketing if present
 	char szCleanToken[512];
+
+	// SECURITY: Bail on input buffers that are too large, they're used for RCEs and we don't
+	// need to support them. Applies unbracketed too: parse and simplify recurse per '(' and operator.
+	size_t len = V_strlen( pInfixExpression );
+	if ( len + 1 > ARRAYSIZE( szCleanToken ) )
+	{
+		return false;
+	}
+
 	if ( pInfixExpression[0] == '[' )
 	{
-		size_t len = V_strlen( pInfixExpression );
-
-		// SECURITY: Bail on input buffers that are too large, they're used for RCEs and we don't 
-		// need to support them.
-		if ( len + 1 > ARRAYSIZE( szCleanToken ) )
-		{
-			return false;
-		}
-
 		V_strncpy( szCleanToken, pInfixExpression + 1, len );
 		len--;
 		if ( szCleanToken[len-1] == ']' )

@@ -14,11 +14,6 @@ class CSquirrelVM;
 
 void MantleBoostRui_RegisterClientFunctions(CSquirrelVM* s);
 
-// Bakes the S21 traversal camera curve for the current traversal state into
-// platform/cfg/mantle_boost_curves.txt (see game/shared/mantle_boost_curves.h).
-// Called per TraversalMove tick on the local player; no-op once baked.
-void MantleBoostCurveDump_Think(uintptr_t pPlayer);
-
 // C_Player::GetViewVector -- AngleVectors(GetAimAngles()), i.e. the aim
 // direction including punch and view drift.
 inline void* (*v_C_Player_GetViewVector)(void* pPlayer, void* pOutVec) = nullptr;

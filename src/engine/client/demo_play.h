@@ -53,6 +53,38 @@ enum DemoCamMode_t
 bool  DemoPlay_SetCamera(const int nMode);
 int   DemoPlay_GetCamera(void);
 
+// Free camera roll and field of view in degrees; a field of view under 10 is the game's.
+void  DemoPlay_SetCamRoll(const float flDegrees);
+float DemoPlay_GetCamRoll(void);
+void  DemoPlay_SetCamFov(const float flDegrees);
+float DemoPlay_GetCamFov(void);
+// Free camera depth of field: focus distance (0 = off) and the sharp depth around it.
+void  DemoPlay_SetCamDof(const float flFocus, const float flRange);
+float DemoPlay_GetCamDof(void);
+float DemoPlay_GetCamDofRange(void);
+// WM_MOUSEWHEEL delta: roll, or field of view with Ctrl, while the free camera is on.
+void  DemoPlay_OnMouseWheel(const int nDelta);
+// Raw relative mouse motion in counts; the free camera looks with it, playing or paused.
+void  DemoPlay_OnRawMouse(const int nDx, const int nDy);
+// Free camera follow: keeps its offset from the watched player and turns with them.
+void  DemoPlay_SetCamFollow(const bool bOn);
+bool  DemoPlay_IsCamFollow(void);
+
+// Camera path: free camera keyframes on the replay timeline, kept in
+// <file>.campath beside the replay. Indices are 0-based and by time.
+bool  DemoPlay_CamKeyAdd(void);
+bool  DemoPlay_CamKeyRemove(const int nIndex);
+void  DemoPlay_CamKeyClear(void);
+bool  DemoPlay_CamKeyGoto(const int nIndex);
+bool  DemoPlay_CamKeyStep(const int nDir);
+void  DemoPlay_GetCamKeyTimes(std::vector<float>& out);
+// Four floats per keyframe: seconds, roll, field of view, focus distance (0 = off).
+void  DemoPlay_GetCamKeyData(std::vector<float>& out);
+// The keyframe at the playhead, give or take a quarter second; -1 if none.
+int   DemoPlay_CamKeyAtNow(void);
+bool  DemoPlay_SetCamPathPlaying(const bool bOn);
+bool  DemoPlay_IsCamPathPlaying(void);
+
 // Bookmarks live in <file>.marks beside the replay; clips are new files named
 // "<replay>_c<mmss>", cut at the end time, that open at their start time.
 bool  DemoPlay_AddBookmark(void);

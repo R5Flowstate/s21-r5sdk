@@ -35,6 +35,7 @@ static void PlayerExtend_ApplyIdleSentinels(PlayerExtendBundle* pBundle)
 	pBundle->player.m_skywardObstacleAvoidanceEndPos[1] = FLT_MAX;
 	pBundle->player.m_skywardObstacleAvoidanceEndPos[2] = FLT_MAX;
 	pBundle->player.m_glideUpwardsBoostEndTime = -1.0f;
+	pBundle->player.m_hPortalEnvironment = -1;
 }
 
 static PlayerExtendSlot* FindSlot(uint64_t key)
@@ -81,6 +82,26 @@ static PlayerExtendSlot* EnsureSlot(uint64_t key)
 	slot->handleKey = key;
 	return slot;
 }
+
+// A slot is keyed on the full ehandle, so every player entity instance takes a fresh one;
+// free it when the entity dies or 128 connects in one level evict live players.
+static void PlayerExtend_OnEntityDestroy(SDKEntityHandle h, void* /*pEnt*/, ESide /*side*/, void* /*userData*/)
+{
+	if (!h.IsValid())
+		return;
+
+	PlayerExtendSlot* const slot = FindSlot(PackHandle(h));
+	if (!slot)
+		return;
+
+	InterlockedIncrement(&slot->seq);
+	slot->handleKey = 0;
+	InterlockedIncrement(&slot->seq);
+	InterlockedDecrement(&s_used);
+}
+
+static EntityDestroySubscription* const s_destroySub =
+	SDKEntityState_SubscribeDestroy(&PlayerExtend_OnEntityDestroy, nullptr, ESide::Server);
 
 static volatile LONG s_nPackReads   = 0;
 static volatile LONG s_nPackNoSlot  = 0;

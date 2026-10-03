@@ -459,17 +459,17 @@ static void ValidateCRC32PostDecomp(const CUtlString& assetPath, const uint32_t 
 // chunkIndex - 
 // Output: true if the chunk was deduplicated, false otherwise
 //-----------------------------------------------------------------------------
-bool CPackedStoreBuilder::Deduplicate(const uint8_t* pEntryBuffer, VPKChunkDescriptor_t& descriptor, const size_t chunkIndex)
+bool CPackedStoreBuilder::Deduplicate(const uint8_t* pEntryBuffer, VPKChunkDescriptor_t& descriptor, const size_t chunkIndex, string& outHash)
 {
-	string entryHash(reinterpret_cast<const char*>(pEntryBuffer), descriptor.m_nUncompressedSize);
-	entryHash = sha1(entryHash);
+	const string entryData(reinterpret_cast<const char*>(pEntryBuffer), descriptor.m_nUncompressedSize);
+	outHash = sha1(entryData);
 
-	auto p = m_ChunkHashMap.insert({ entryHash.c_str(), descriptor });
-	if (!p.second) // Map to existing chunk to avoid having copies of the same data.
+	const auto it = m_ChunkHashMap.find(outHash);
+	if (it != m_ChunkHashMap.end()) // Map to existing chunk to avoid having copies of the same data.
 	{
 		Msg(eDLL_T::FS, "Mapping chunk #%zu ('%s') to existing chunk at 0x%llx\n",
-			chunkIndex, entryHash.c_str(), p.first->second.m_nPackFileOffset);
-		descriptor = p.first->second;
+			chunkIndex, outHash.c_str(), it->second.m_nPackFileOffset);
+		descriptor = it->second;
 
 		return true;
 	}
@@ -571,7 +571,8 @@ void CPackedStoreBuilder::PackStore(const VPKPair_t& vpkPair, const char* worksp
 			FileSystem()->Read(pEntryBuffer.get(), descriptor.m_nCompressedSize, hAsset);
 			descriptor.m_nPackFileOffset = FileSystem()->Tell(hPackFile);
 
-			if (entryValue.m_bDeduplicate && Deduplicate(pEntryBuffer.get(), descriptor, j))
+			string chunkHash;
+			if (entryValue.m_bDeduplicate && Deduplicate(pEntryBuffer.get(), descriptor, j, chunkHash))
 			{
 				nSharedTotal += descriptor.m_nCompressedSize;
 				nSharedCount++;
@@ -599,6 +600,10 @@ void CPackedStoreBuilder::PackStore(const VPKPair_t& vpkPair, const char* worksp
 			}
 
 			FileSystem()->Write(pEntryBuffer.get(), descriptor.m_nCompressedSize, hPackFile);
+
+			// By value, once final: entryBlocks relocates as it grows.
+			if (entryValue.m_bDeduplicate)
+				m_ChunkHashMap.emplace(chunkHash, descriptor);
 		}
 
 		FileSystem()->Close(hAsset);

@@ -49,7 +49,9 @@
 #include "game/client/c_baseentity.h"
 #include "game/client/mantle_boost.h"
 #include "game/client/pred_authority.h"
+#include "game/client/cliententitylist.h"
 #include "game/client/melee_activity_trace.h"
+#include "game/client/titan_diag.h"
 #include "game/shared/heap_canary.h"
 #include "vscript/languages/squirrel_re/vsquirrel.h"
 #include "vscript/vsquirrel_s21.h"
@@ -78,6 +80,9 @@ extern CGlobalVarsBase* gpGlobals;
 // Silence C4505/C4189/C4456/C4459; leave C4244 enabled.
 #pragma warning(disable: 4456 4459)
 #include "engine/client/net_bridge_split.h"
+#if defined(SDK_WIP)
+#include "game/client/portal/c_prop_portal.h"
+#endif // SDK_WIP
 
 
 // SDK_Log + the file-only bridge_trace redirect macro + BridgeTrace_Log are now
@@ -620,6 +625,12 @@ std::unordered_set<std::string> s_s21RecvTableNames;
 void S21Bridge_ExtractRecvTableNames()
 {
 	if (!s_s21RecvTableNames.empty()) return; // already populated
+
+#if defined(SDK_WIP)
+	// Synthesized tables must be in the engine list before the snapshot, or the
+	// SendTable scan stubs them and the stub takes their decoder.
+	Portal_LinkClientClass();
+#endif // SDK_WIP
 
 	uintptr_t base = NetObs_GetExeModuleBase();
 	if (!base) return;
@@ -4560,6 +4571,7 @@ static double __fastcall Hook_HostFrame(double a1, float a2)
 	DemoPlay_LockView();
 	ClockDrift_FlushPending();
 	MeleeActivityTrace_OnFrame();
+	TitanDiag_OnFrame();
 	return r;
 }
 
@@ -4848,6 +4860,37 @@ static void S21Bridge_ClockHealthSample(__int64 a1)
 	s_clkHealthDedupWin0 = dedupNow;
 }
 
+// Each drift sample is wall time over server time, times host_timescale. Replay
+// speed is applied through the game timescale instead, so at 0.25x the samples
+// read 4, the average clamps to 0.25 and the client clock runs at a sixteenth;
+// it then falls 0.2 s behind and snaps forward. Scale the new sample by the
+// replay speed, as host_timescale would have, and redo the trimmed mean.
+static void ClockDrift_ApplyDemoScale(const __int64 a1)
+{
+	float flScale = 1.0f;
+	if (!a1 || !DemoPlay_TimescaleOverride(&flScale) || flScale == 1.0f || flScale < 0.01f)
+		return;
+
+	ClockDriftView_t* const pDrift = reinterpret_cast<ClockDriftView_t*>(a1);
+	const int nIdx = pDrift->m_serverFrameTimeScaleIndex;
+	if (nIdx < 0 || nIdx >= 24)
+		return;
+	float& flSample = pDrift->m_serverFrameTimeScales[(nIdx + 23) % 24];
+	if (!std::isfinite(flSample))
+		return;
+	flSample *= flScale;
+
+	float sorted[24];
+	memcpy(sorted, pDrift->m_serverFrameTimeScales, sizeof(sorted));
+	std::sort(sorted, sorted + 24);
+	float flSum = 0.0f;
+	for (int i = 2; i < 20; ++i)
+		flSum += sorted[i];
+	const float flAvg = 18.0f / flSum;
+	if (std::isfinite(flAvg))
+		pDrift->m_serverFrameTimeScaleAverage = fminf(fmaxf(0.1f, flAvg), 1.0f);
+}
+
 static void ClockDrift_FlushPending(void)
 {
 	const LONG tick = InterlockedExchange(&s_clockDriftPendingTick, kClockDriftTickNone);
@@ -4863,6 +4906,7 @@ static void ClockDrift_FlushPending(void)
 
 	s_origClockDrift(mgrBits, static_cast<__int64>(static_cast<unsigned int>(tick)),
 		s_clockDriftPendingA3, s_clockDriftPendingA4);
+	ClockDrift_ApplyDemoScale(mgrBits);
 	if (bridge_clk_health.GetBool())
 		S21Bridge_ClockHealthSample(mgrBits);
 }
@@ -4893,6 +4937,7 @@ static __int64 __fastcall Hook_ClockDrift(__int64 a1, __int64 a2, __int64 a3, __
 			QueryPerformanceCounter(&s_clkHealthLastAcceptedQpc);
 
 		const __int64 r = s_origClockDrift ? s_origClockDrift(a1, a2, a3, a4) : 0;
+		ClockDrift_ApplyDemoScale(a1);
 		if (bridge_clk_health.GetBool())
 			S21Bridge_ClockHealthSample(a1);
 		return r;
@@ -4924,9 +4969,49 @@ static __int64 __fastcall Hook_ClockDrift(__int64 a1, __int64 a2, __int64 a3, __
 //=============================================================================
 // CViewRender::SetupSky. m_has3DSky at +0x11A375. Observability only.
 //=============================================================================
+static ConVar bridge_sky_probe("bridge_sky_probe", "0", FCVAR_DEVELOPMENTONLY,
+	"[SKY-PROBE] Once a second, log the 3D sky gate: the local player's sky camera "
+	"handle, the client entity it resolves to, the sky scale, and m_has3DSky.");
+
 static __int64 __fastcall Hook_SetupSky(uintptr_t viewRender, uintptr_t viewBundle)
 {
 	const __int64 result = s_origSetupSky ? s_origSetupSky(viewRender, viewBundle) : 0;
+
+	static const auto s_getLocal = reinterpret_cast<uintptr_t(__fastcall*)(int)>(
+		NetObs_Sym(NetObsSym_t::GetLocalPlayer));
+	const uintptr_t player = s_getLocal ? s_getLocal(0) : 0;
+	// C_Player m_Local: m_hSkyCamera at +0x1E20, m_skybox3d.scale/area follow it.
+	const uint32_t hCam = player ? *reinterpret_cast<const uint32_t*>(player + 0x1E20) : 0xFFFFFFFFu;
+	const int32_t* const sky = player ? reinterpret_cast<const int32_t*>(player + 0x1E24) : nullptr;
+	const int32_t scale = sky ? sky[0] : -1;
+	const int32_t area = sky ? sky[1] : -1;
+	const int has3D = static_cast<int>(*reinterpret_cast<const uint8_t*>(viewRender + 0x11A375));
+	// The sky setup SetupSky fills at +0x11A380: the sky camera origin at +96
+	// and the 1/scale the view's offset is multiplied by at +108.
+	const float* const setup = reinterpret_cast<const float*>(viewRender + 0x11A380);
+	const float camX = setup[24], camY = setup[25], camZ = setup[26], invScale = setup[27];
+
+	// Logged once per change, so a map's sky state is in every run's log.
+	static uint32_t s_hCam = 0;
+	static int32_t s_scale = INT32_MIN, s_area = INT32_MIN;
+	static int s_has3D = -1;
+	static float s_camX = 0.f, s_invScale = 0.f;
+	const bool changed = hCam != s_hCam || scale != s_scale || area != s_area || has3D != s_has3D
+		|| camX != s_camX || invScale != s_invScale;
+
+	static DWORD s_last = 0;
+	const DWORD now = GetTickCount();
+	const bool periodic = bridge_sky_probe.GetBool() && now - s_last >= 1000;
+	if (changed || periodic)
+	{
+		s_last = now;
+		s_hCam = hCam; s_scale = scale; s_area = area; s_has3D = has3D; s_camX = camX; s_invScale = invScale;
+		const void* const cam = (hCam != 0xFFFFFFFFu && g_pClientEntityList)
+			? g_pClientEntityList->GetClientEntity(static_cast<int>(hCam & 0xFFFF)) : nullptr;
+		Warning(eDLL_T::CLIENT,
+			"[SKY-PROBE] player=%p hSkyCamera=0x%08X camEnt=%p scale=%d area=%d has3DSky=%d skyCam=(%.1f %.1f %.1f) invScale=%g\n",
+			reinterpret_cast<void*>(player), hCam, cam, scale, area, has3D, camX, camY, camZ, invScale);
+	}
 	return result;
 }
 
@@ -6059,6 +6144,52 @@ static __int64 __fastcall Hook_PropApplyLoop(
 	}
 
 	// [PP-IDLE]/[PIPELINE] probe removed.
+
+#if defined(SDK_WIP)
+	// [PORTAL-APPLY] changed-prop list the client applies to DT_Prop_Portal.
+	static volatile LONG s_nPortalApplyLogs = 0;
+	if (a3 && a2 && reinterpret_cast<const void*>(a3) == Portal_ClientRecvTable()
+		&& s_nPortalApplyLogs < 12)
+	{
+		InterlockedIncrement(&s_nPortalApplyLogs);
+		const uintptr_t decoder = *reinterpret_cast<const uintptr_t*>(reinterpret_cast<uintptr_t>(a3) + 0x4C0);
+		const uint8_t* const buf = *reinterpret_cast<const uint8_t* const*>(a2);
+		const uint32_t pos = *reinterpret_cast<const uint32_t*>(a2 + 12);
+		const int nRecv = decoder ? *reinterpret_cast<const int*>(decoder + 0x4098) : 0;
+		int nIdx = 0, nTail = 0, lastIdx = -1;
+		char tailList[64] = {};
+		if (buf && nRecv > 0 && nRecv < 8192)
+		{
+			for (int i = 0; i < 512; ++i)
+			{
+				const uint16_t idx = *reinterpret_cast<const uint16_t*>(buf + pos + 2 * i);
+				if (idx >= nRecv)
+					break;
+				++nIdx;
+				lastIdx = idx;
+				if (idx >= nRecv - 5 && nTail < 5)
+				{
+					const size_t len = strlen(tailList);
+					snprintf(tailList + len, sizeof(tailList) - len, "%u ", idx);
+					++nTail;
+				}
+			}
+		}
+		unsigned int tailFlags[5] = {};
+		if (decoder && nRecv >= 5)
+		{
+			const uintptr_t recvArr = *reinterpret_cast<const uintptr_t*>(decoder + 0x4080);
+			for (int k = 0; k < 5 && recvArr; ++k)
+			{
+				const uintptr_t rp = *reinterpret_cast<const uintptr_t*>(recvArr + 8ull * (nRecv - 5 + k));
+				tailFlags[k] = rp ? *reinterpret_cast<const uint32_t*>(rp + 0x14) : 0xFFFFFFFFu;
+			}
+		}
+		Warning(eDLL_T::CLIENT, "[PORTAL-APPLY] ent=%p nRecv=%d changed=%d last=%d tail=[%s] a8=%d a9=0x%X a12=%d flags=%X %X %X %X %X\n",
+			(void*)(a5 ? (uintptr_t)a5 - PROPAPPLY_ENTITY_ADJ : 0), nRecv, nIdx, lastIdx, tailList, a8, a9, (int)a12,
+			tailFlags[0], tailFlags[1], tailFlags[2], tailFlags[3], tailFlags[4]);
+	}
+#endif // SDK_WIP
 
 	// [PROPAPPLY-BASE-ADJ] true entity pointer = a5 - 0x18 (see the PROPAPPLY_ENTITY_ADJ banner).
 	const uintptr_t weapEntBase = a5 ? ((uintptr_t)a5 - PROPAPPLY_ENTITY_ADJ) : 0;

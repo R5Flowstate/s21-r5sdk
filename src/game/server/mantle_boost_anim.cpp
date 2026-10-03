@@ -116,7 +116,16 @@ void VMantleBoostAnimServer::GetFun(void) const
 	const CMemory early = Module_FindPattern(g_GameDll,
 		"48 8B CF 4C 89 74 24 38 4C 89 7C 24 30 E8 ?? ?? ?? ?? 48 8B 8F C0 01 00 00 33 DB 44 0F B6 F8 84 C0 75 07");
 	if (early)
-		s_pEarlySite = early.Offset(0x3).RCast<uint8_t*>();
+	{
+		// The epilogue reloads rsi from a slot spilled 0x37 past the site; the trampoline
+		// head re-issues that store, so require it to be the expected instruction.
+		static const uint8_t kRsiSpill[] = { 0x48, 0x89, 0x74, 0x24, 0x48 };   // mov [rsp+48h], rsi
+		uint8_t* const pSite = early.Offset(0x3).RCast<uint8_t*>();
+		if (memcmp(pSite + 0x37, kRsiSpill, sizeof(kRsiSpill)) == 0)
+			s_pEarlySite = pSite;
+		else
+			Warning(eDLL_T::SERVER, "[MB-ANIM] early site rsi spill moved -- falling back to the late order\n");
+	}
 	else
 		Warning(eDLL_T::SERVER, "[MB-ANIM] early site pattern unresolved -- falling back to the late order\n");
 }
@@ -129,9 +138,16 @@ void VMantleBoostAnimServer::Detour(const bool bAttach) const
 	if (bAttach)
 	{
 		static const uint8_t kRestoreRcx[] = { 0x48, 0x8B, 0xCF };   // mov rcx, rdi
+		// The epilogue reloads r14, r15 and rsi; at the early site none of them is spilled yet.
+		static const uint8_t kSpills[] = {
+			0x4C, 0x89, 0x74, 0x24, 0x38,   // mov [rsp+38h], r14
+			0x4C, 0x89, 0x7C, 0x24, 0x30,   // mov [rsp+30h], r15
+			0x48, 0x89, 0x74, 0x24, 0x48,   // mov [rsp+48h], rsi
+		};
 		const bool bEarly = bridge_mantle_boost_air_anim_early.GetBool() && s_pEarlySite;
 		const bool ok = bEarly
-			? s_patch.InstallReplay(s_pEarlySite, 5, kRestoreRcx, sizeof(kRestoreRcx), s_pEpilogue, &MantleBoostAnim_Select)
+			? s_patch.InstallReplay(s_pEarlySite, 5, kRestoreRcx, sizeof(kRestoreRcx), s_pEpilogue, &MantleBoostAnim_Select,
+				kSpills, sizeof(kSpills))
 			: s_patch.Install(s_pSelectSite, s_pEpilogue, &MantleBoostAnim_Select);
 		if (!ok)
 			Warning(eDLL_T::SERVER, "[MB-ANIM] CalcMainActivity site patch failed at %p\n", bEarly ? s_pEarlySite : s_pSelectSite);

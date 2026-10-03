@@ -228,6 +228,7 @@ static const char* const s_sdkPaksToLoadAfterCommonMp[] =
 {
 	"common_flowstate.rpak",
 	"sdk_s30.rpak",
+	"sdk_titans.rpak",
 };
 static const size_t s_sdkPaksToLoadAfterCommonMpCount =
 	V_ARRAYSIZE(s_sdkPaksToLoadAfterCommonMp);
@@ -393,9 +394,12 @@ static void Pak_EnqueueNamedList_S21(const char* const* names, size_t count, con
  const DWORD attrs = GetFileAttributesA(diskPath);
  if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY))
  {
- Warning(eDLL_T::RTECH,
- "[%s] '%s' not on disk (%s) -- skipping\n", tag, name, diskPath);
- continue;
+	 // sdk_titans.rpak only exists in installs that carry the titan content.
+	 if (name && !_stricmp(name, "sdk_titans.rpak"))
+		 DevMsg(eDLL_T::RTECH, "[%s] '%s' not on disk (%s) -- skipping\n", tag, name, diskPath);
+	 else
+		 Warning(eDLL_T::RTECH, "[%s] '%s' not on disk (%s) -- skipping\n", tag, name, diskPath);
+	 continue;
  }
 
  if (bAllowSiblingModule)
@@ -1153,6 +1157,31 @@ static void FatalObs_Render(char* out, size_t n, const char* fmt, __int64 vargs)
 	}
 }
 
+// Sys_Error shows a modal box and terminates without writing its text to any log.
+static int __fastcall Hook_SysError_S21(const char* fmt, va_list args)
+{
+	char msg[2048];
+	FatalObs_Render(msg, sizeof(msg), fmt, reinterpret_cast<__int64>(args));
+
+	const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+	void* stackFrames[24] = {};
+	const USHORT frameCount = RtlCaptureStackBackTrace(0, 24, stackFrames, nullptr);
+	char stackBuf[24 * 20 + 1] = {};
+	size_t stackBufLen = 0;
+	for (USHORT i = 0; i < frameCount && stackBufLen + 20 < sizeof(stackBuf); ++i)
+	{
+		const uintptr_t frameAddr = reinterpret_cast<uintptr_t>(stackFrames[i]);
+		stackBufLen += static_cast<size_t>(snprintf(stackBuf + stackBufLen,
+			sizeof(stackBuf) - stackBufLen, "0x%llX ",
+			base ? (0x140000000ULL + (frameAddr - base)) : 0ULL));
+	}
+
+	Warning(eDLL_T::ENGINE, "[SYS-ERROR] stack=[ %s] msg=\"%s\"\n", stackBuf, msg);
+	BridgeTrace_Log("[SYS-ERROR] stack=[ %s] msg=\"%s\"\n", stackBuf, msg);
+	BridgeTrace_Flush();
+	return v_SysError_S21(fmt, args);
+}
+
 static void __fastcall Hook_FatalErrorLogger_S21(char severity, const char* fmt, __int64 vargs)
 {
 	// Log every engine fatal before the pak-only neuter.
@@ -1458,6 +1487,8 @@ void VRPakObserveS21::Detour(const bool bAttach) const
 				&Hook_Pak_RequestLoadByName_S21, bAttach);
 	DetourSetup(&v_FatalErrorLogger_S21,
 				&Hook_FatalErrorLogger_S21, bAttach);
+	if (v_SysError_S21)
+		DetourSetup(&v_SysError_S21, &Hook_SysError_S21, bAttach);
 	DetourSetup(&v_PakConsistencyCheck_S21,
 				&Hook_PakConsistencyCheck_S21, bAttach);
 	if (v_Pak_UnloadAsyncByHandle_S21)

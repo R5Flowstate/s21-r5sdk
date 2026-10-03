@@ -17,6 +17,7 @@
 #include "vscript/languages/squirrel_re/vsquirrel.h"
 #include "game/shared/vscript_gamedll_defs.h"
 #include "game/shared/double_jump_power.h"
+#include "game/shared/titan_gate.h"
 #include "game/client/pred_authority.h"
 #include "game/client/classvar_natives.h"
 #include "double_jump_power.h"
@@ -58,7 +59,8 @@ static uint8_t* DoubleJumpPower_CvarParent(ConVar*& pVar, const char* const pszN
 
 static bool DoubleJumpPower_IsEnabled(const void* const player)
 {
-	return player && s_bEnabled && bridge_double_jump_power.GetBool() && player == ClassVar_LocalPlayer();
+	return player && s_bEnabled && bridge_double_jump_power.GetBool() && player == ClassVar_LocalPlayer()
+		&& !TitanGate_IsTitanPlayer(player);
 }
 
 static char __fastcall Hook_GameMovement_Jump(void* ctx)

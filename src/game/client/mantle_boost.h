@@ -44,12 +44,14 @@ void MantleBoostClient_SetProfile(float flHeightScale, float flSprintScale);
 // traversal of a session.
 uintptr_t MantleBoostClient_GetPredictedPlayer(void);
 
-// The sweet-spot angle gate in degrees. The traversal-aware form is the one the
-// gate itself calls; the argument-free form returns whatever it last derived,
-// for callers that hold no traversal inputs.
-float MantleBoostClient_GetSweetSpotAngle(int nTravState, const Vector3D& vecFwd,
-	const QAngle& eyeAngles);
+// The sweet-spot angle gate in degrees.
 float MantleBoostClient_GetSweetSpotAngle(void);
+
+// Traversal camera pitch minus eye pitch with the first-person proxy held at
+// flCycle (native GetTraversalViewPosition). False when the proxy is not on a
+// traversal activity or its camera attachments are not cached yet.
+bool MantleBoostClient_SampleCameraDelta(uintptr_t pPlayer, float flCycle, const QAngle& eyeAngles,
+	float* pflDelta);
 
 // The traversal ledge forward dir (m_traversalForwardDir). False when the
 // engine has not initialized the traversal fields yet.

@@ -15,11 +15,9 @@
 // installed (all realms) down to DEFAULT alone, so a weapon is born in
 // realm 0 whatever realm its future owner sits in.
 //
-// The S21 client gates remote-bullet FX on realms twice: the whole
-// OnRemoteBulletFired block needs DoesShareRealms(owner, view player), and
-// the tracer particle itself is created with the WEAPON's mask. A
-// disjoint weapon mask discards the opponent's tracers while models, sounds
-// and impacts (owner-gated only) keep working -- the 1v1 symptom.
+// A bolt takes the firing weapon's mask at creation, and both its transmit
+// and its trail temp entity go only to players sharing that mask, so a
+// stale weapon mask hides the opponent's projectiles from a fight realm.
 //
 // The dedi pushes the owner's whole inventory both on every realm
 // change (weapons held across a realm move) and on every activation

@@ -704,7 +704,8 @@ void CConsole::DrawAutoCompletePanel(void)
             string newInputText;
 
             DetermineInputTextFromSelectedSuggestion(suggest, newInputText);
-            memmove(m_inputTextBuf, newInputText.data(), newInputText.size() + 1);
+            // Suggestion names include mod-registered ConVars of any length.
+            V_strncpy(m_inputTextBuf, newInputText.c_str(), sizeof(m_inputTextBuf));
 
             m_canAutoComplete = true;
             m_reclaimFocus = true;

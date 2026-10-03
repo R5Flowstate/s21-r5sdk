@@ -19,7 +19,6 @@
 #include "game/client/viewrender.h"
 #include "game/client/mantle_boost.h"
 #include "game/client/mantle_boost_rui.h"
-#include "game/shared/mantle_boost_curves.h"
 #include "mathlib/mathlib.h"
 #include <cmath>
 
@@ -36,15 +35,6 @@ static ConVar bridge_mantle_boost_rui_log("bridge_mantle_boost_rui_log", "0",
 static constexpr ptrdiff_t CPLAYER_OFF_TRAVERSAL_ANIM_FRAC = 0x2234; // m_traversalAnimProgress
 static constexpr ptrdiff_t CPLAYER_OFF_TRAVERSAL_PROGRESS  = 0x2B7C; // m_traversalProgress
 static constexpr ptrdiff_t CPLAYER_OFF_TRAVERSAL_STATE     = 0x2B34; // m_traversalState
-static constexpr ptrdiff_t CPLAYER_OFF_PROXY_HANDLE        = 0x3704;
-
-// C_PredictedFirstPersonProxy. The view-correction block is always written by
-// GetTraversalViewPosition, so every sampler snapshots and restores it.
-static constexpr ptrdiff_t PROXY_OFF_ATTACH_REF   = 5536;
-static constexpr ptrdiff_t PROXY_OFF_ATTACH_CAM   = 5537;
-static constexpr ptrdiff_t PROXY_OFF_ATTACH_BASE  = 5538;
-static constexpr ptrdiff_t PROXY_OFF_VIEWCORR     = 5568;
-static constexpr ptrdiff_t PROXY_OFF_PLAYBACKRATE = 0xE34;  // Anim_SetPlaybackRate is inline
 
 static constexpr int TRAVERSAL_COUNT = 13;
 
@@ -92,36 +82,6 @@ static uintptr_t MantleBoostRui_LocalPlayer(void)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: the player's first-person proxy, with its cached attachment ids
-// already populated. Zero ids mean the engine has not cached them yet.
-//-----------------------------------------------------------------------------
-static uintptr_t MantleBoostRui_Proxy(uintptr_t pPlayer)
-{
-	if (!pPlayer)
-		return 0;
-
-	const uint32_t hProxy = *reinterpret_cast<const uint32_t*>(pPlayer + CPLAYER_OFF_PROXY_HANDLE);
-	if (hProxy == 0xFFFFFFFFu)
-		return 0;
-
-	const uintptr_t pList = NetObs_EntityHandleTableAddr();
-	if (!pList)
-		return 0;
-
-	const uintptr_t pEntry = pList + 32ull * static_cast<uint16_t>(hProxy);
-	const uintptr_t pProxy = *reinterpret_cast<const uintptr_t*>(pEntry);
-	if (!pProxy || *reinterpret_cast<const uint32_t*>(pEntry + 8) != (hProxy >> 16))
-		return 0;
-
-	if (*reinterpret_cast<const uint8_t*>(pProxy + PROXY_OFF_ATTACH_REF) <= 0
-		|| *reinterpret_cast<const uint8_t*>(pProxy + PROXY_OFF_ATTACH_CAM) <= 0
-		|| *reinterpret_cast<const uint8_t*>(pProxy + PROXY_OFF_ATTACH_BASE) <= 0)
-		return 0;
-
-	return pProxy;
-}
-
-//-----------------------------------------------------------------------------
 // Purpose: tanHalfFovX * aspectRatioYOverX, inverted.
 //
 // Not read off CViewSetup: the SDK's declaration of that struct does not match
@@ -157,14 +117,16 @@ static bool MantleBoostRui_InvProjectionScale(float* pflInvScale)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: where the boost window OPENS, as a traversal-progress (cycle)
-// fraction -- the moment the ring should meet the brackets.
+// Purpose: where the boost window OPENS, as a fraction of the proxy's traversal
+// cycle -- the moment the ring should meet the brackets.
 //
-// Evaluated off the baked curve: scan the cycle upward from 0.5 and cache
-// the first sample whose |delta| drops below the angle threshold.
+// Scrubs the first-person proxy's own traversal camera upward from 0.5 and
+// caches the first cycle whose |delta| drops below the angle threshold.
 //-----------------------------------------------------------------------------
 static float s_flTraversalSweetSpotFrac[TRAVERSAL_COUNT] = { 0.0f };
 static float s_flSweetSpotRetryAt[TRAVERSAL_COUNT] = { 0.0f };
+
+static constexpr int SWEET_SPOT_SCAN_STEPS = 50;   // cycle 0.5..1.0 in 0.01 steps
 
 static float MantleBoostRui_SweetSpotFrac(uintptr_t pPlayer)
 {
@@ -182,25 +144,19 @@ static float MantleBoostRui_SweetSpotFrac(uintptr_t pPlayer)
 		return 0.0f;
 	s_flSweetSpotRetryAt[nTraversalState] = flNow + 1.0f;
 
-	float vecFwd[3];
-	if (!MBCurves_Has(nTraversalState)
-		|| !MantleBoostClient_GetTraversalFwd(pPlayer, vecFwd))
-		return 0.0f;
-
 	float flEye[3] = { 0.0f, 0.0f, 0.0f };
 	if (v_C_Player_EyeAngles)
 		v_C_Player_EyeAngles(reinterpret_cast<void*>(pPlayer), flEye);
 
-	const Vector3D fwd(vecFwd[0], vecFwd[1], vecFwd[2]);
 	const QAngle eye(flEye[0], flEye[1], flEye[2]);
-	const float flThreshold = MantleBoostClient_GetSweetSpotAngle(nTraversalState, fwd, eye);
+	const float flThreshold = MantleBoostClient_GetSweetSpotAngle();
 
 	float flFound = 0.0f;
-	for (int i = MB_CURVE_SAMPLES / 2; i < MB_CURVE_SAMPLES; ++i)
+	for (int i = 0; i <= SWEET_SPOT_SCAN_STEPS; ++i)
 	{
-		const float flCycle = float(i) / float(MB_CURVE_SAMPLES - 1);
+		const float flCycle = 0.5f + 0.5f * float(i) / float(SWEET_SPOT_SCAN_STEPS);
 		float flDelta = 0.0f;
-		if (!MBCurves_Eval(nTraversalState, flCycle, fwd, eye, &flDelta))
+		if (!MantleBoostClient_SampleCameraDelta(pPlayer, flCycle, eye, &flDelta))
 			break;
 		if (fabsf(flDelta) < flThreshold)
 		{
@@ -231,197 +187,6 @@ static float MantleBoostRui_SweetSpotFrac(uintptr_t pPlayer)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: clear baked curve state so the next climb re-bakes it. Also resets
-// the memoized ring windows, which derive from the same table.
-//-----------------------------------------------------------------------------
-static void CC_MantleBoostCurveRebake(const CCommand& args)
-{
-	MBCurveSet_t& set = MBCurves();
-	MBCurves_Load();
-	int nCleared = 0;
-	for (int t = 0; t < MB_CURVE_TRAVERSAL_COUNT; ++t)
-	{
-		if (args.ArgC() > 1 && atoi(args.Arg(1)) != t)
-			continue;
-		if (set.m_bLoaded[t])
-			++nCleared;
-		set.m_bLoaded[t] = false;
-		s_flTraversalSweetSpotFrac[t] = 0.0f;
-		s_flSweetSpotRetryAt[t] = 0.0f;
-	}
-	Msg(eDLL_T::CLIENT, "[MB-CURVE] cleared %d baked traversal states -- "
-		"climb each type again to re-bake\n", nCleared);
-}
-static ConCommand mantle_boost_curve_rebake("mantle_boost_curve_rebake",
-	CC_MantleBoostCurveRebake,
-	"Clear baked mantle-boost curves (optional travState arg) so the next climb re-bakes.",
-	FCVAR_DEVELOPMENTONLY);
-
-//-----------------------------------------------------------------------------
-// Curve bake (game/shared/mantle_boost_curves.h). GetTraversalViewPosition is
-// linear in the eye matrix and factors as SA * P(cycle) * inv(SA) * eyeM, so
-// sampling the NATIVE function with a zero eye across the cycle range recovers
-// P exactly -- the dedi then evaluates the identical delta from its own ledge
-// basis with no proxy animation or attachments involved. Each bake validates
-// itself against the native function at probe eyes before it is kept.
-//-----------------------------------------------------------------------------
-static ConVar mantle_boost_curve_autodump("mantle_boost_curve_autodump", "0", FCVAR_DEVELOPMENTONLY,
-	"Bake the S21 traversal camera curve for each mantle type on first climb "
-	"(writes platform/cfg/mantle_boost_curves.txt -- the dedi's sweet-spot input).");
-
-static constexpr ptrdiff_t CPLAYER_OFF_TRAVERSAL_START = 0x2B80; // m_traversalStartTime
-
-static float MantleBoostCurve_WrapDeg(float a)
-{
-	return fmodf(a + 540.0f, 360.0f) - 180.0f;
-}
-
-// delta composed from a P sample: MatrixAngles(SA * P * SA^T * eyeM).x - eye.x.
-// Mirrors MBCurves_Eval on an exact sample row (no lerp), for validation.
-static float MantleBoostCurve_ComposePitch(const matrix3x4_t& sa, const matrix3x4_t& saT,
-	const float* pRow, const QAngle& eye)
-{
-	matrix3x4_t P;
-	for (int r = 0; r < 3; ++r)
-	{
-		for (int c = 0; c < 3; ++c)
-			P[r][c] = pRow[r * 3 + c];
-		P[r][3] = 0.0f;
-	}
-	matrix3x4_t eyeM, a, b, m;
-	AngleMatrix(eye, eyeM);
-	ConcatTransforms(saT, eyeM, a);
-	ConcatTransforms(P, a, b);
-	ConcatTransforms(sa, b, m);
-	QAngle out;
-	MatrixAngles(m, out);
-	return out.x;
-}
-
-void MantleBoostCurveDump_Think(uintptr_t pPlayer)
-{
-	if (!mantle_boost_curve_autodump.GetBool() || !pPlayer
-		|| !v_C_BaseAnimating_SetCycle || !C_PredictedFirstPersonProxy__GetTraversalViewPosition)
-		return;
-
-	const int nTravState = *reinterpret_cast<const int*>(pPlayer + CPLAYER_OFF_TRAVERSAL_STATE);
-	if (nTravState < 0 || nTravState >= MB_CURVE_TRAVERSAL_COUNT)
-		return;
-	if (MBCurves_Has(nTravState))
-		return;
-
-	// One attempt per traversal: a failed bake (proxy not ready, native bail,
-	// validation miss) retries on the NEXT climb of this type, not per tick.
-	static float s_flLastTryStart[MB_CURVE_TRAVERSAL_COUNT] = {};
-	const float flStartTime = *reinterpret_cast<const float*>(pPlayer + CPLAYER_OFF_TRAVERSAL_START);
-	if (s_flLastTryStart[nTravState] == flStartTime)
-		return;
-
-	const uintptr_t pProxy = MantleBoostRui_Proxy(pPlayer);
-	if (!pProxy)
-		return;   // attachments not cached yet -- retry this same traversal
-	s_flLastTryStart[nTravState] = flStartTime;
-
-	float vecFwd[3];
-	if (!MantleBoostClient_GetTraversalFwd(pPlayer, vecFwd))
-		return;
-
-	matrix3x4_t sa, saT;
-	VectorMatrix(Vector3D(vecFwd[0], vecFwd[1], vecFwd[2]), sa);
-	MatrixSetColumn(Vector3D(0.0f, 0.0f, 0.0f), 3, sa);
-	MatrixInvert(sa, saT);
-
-	float* const pViewCorr = reinterpret_cast<float*>(pProxy + PROXY_OFF_VIEWCORR);
-	float flSavedCorr[8];
-	for (int i = 0; i < 8; ++i)
-		flSavedCorr[i] = pViewCorr[i];
-	float* const pPlaybackRate = reinterpret_cast<float*>(pProxy + PROXY_OFF_PLAYBACKRATE);
-	const float flSavedRate = *pPlaybackRate;
-
-	static float s_rows[MB_CURVE_SAMPLES][9];
-	float flLiveEye[3] = { 0.0f, 0.0f, 0.0f };
-	if (v_C_Player_EyeAngles)
-		v_C_Player_EyeAngles(reinterpret_cast<void*>(pPlayer), flLiveEye);
-
-	bool bOk = true;
-	float flMaxResid = 0.0f;
-	for (int i = 0; i < MB_CURVE_SAMPLES && bOk; ++i)
-	{
-		const float flCycle = float(i) / float(MB_CURVE_SAMPLES - 1);
-		v_C_BaseAnimating_SetCycle(reinterpret_cast<void*>(pProxy), flCycle);
-		*pPlaybackRate = 0.0f;
-
-		// Zero eye: the native output IS M(cycle); P = SA^T * M * SA.
-		float flOrg[3] = { 0.0f, 0.0f, 0.0f };
-		float flAng[3] = { 0.0f, 0.0f, 0.0f };
-		C_PredictedFirstPersonProxy__GetTraversalViewPosition(pProxy, flOrg, flAng);
-		if (flOrg[0] == 0.0f && flOrg[1] == 0.0f && flOrg[2] == 0.0f)
-		{
-			bOk = false;   // native bailed -- not a usable pose this tick
-			break;
-		}
-
-		matrix3x4_t M, t, P;
-		AngleMatrix(QAngle(flAng[0], flAng[1], flAng[2]), M);
-		ConcatTransforms(M, sa, t);
-		ConcatTransforms(saT, t, P);   // SA^T * M * SA
-		for (int r = 0; r < 3; ++r)
-		{
-			for (int c = 0; c < 3; ++c)
-				s_rows[i][r * 3 + c] = P[r][c];
-		}
-
-		// Every 10th sample: prove the conjugation reproduces the native output
-		// at non-zero eyes (linearity + factorization, end to end).
-		if ((i % 10) == 0)
-		{
-			const QAngle probes[2] = {
-				QAngle(flLiveEye[0], flLiveEye[1], flLiveEye[2]),
-				QAngle(10.0f, flLiveEye[1] + 30.0f, 0.0f),
-			};
-			for (const QAngle& probe : probes)
-			{
-				float flOrgP[3] = { 0.0f, 0.0f, 0.0f };
-				float flAngP[3] = { probe.x, probe.y, probe.z };
-				C_PredictedFirstPersonProxy__GetTraversalViewPosition(pProxy, flOrgP, flAngP);
-				const float flComposed = MantleBoostCurve_ComposePitch(sa, saT, s_rows[i], probe);
-				const float flResid = fabsf(MantleBoostCurve_WrapDeg(flComposed - flAngP[0]));
-				if (flResid > flMaxResid)
-					flMaxResid = flResid;
-			}
-		}
-	}
-
-	// Always put the proxy back on the live traversal frame.
-	v_C_BaseAnimating_SetCycle(reinterpret_cast<void*>(pProxy),
-		*reinterpret_cast<const float*>(pPlayer + CPLAYER_OFF_TRAVERSAL_PROGRESS));
-	*pPlaybackRate = flSavedRate;
-	for (int i = 0; i < 8; ++i)
-		pViewCorr[i] = flSavedCorr[i];
-
-	if (!bOk)
-		return;
-
-	if (flMaxResid > 0.25f)
-	{
-		static uint16_t s_nWarnedStates = 0;
-		if (!(s_nWarnedStates & (1u << nTravState)))
-		{
-			s_nWarnedStates |= uint16_t(1u << nTravState);
-			Warning(eDLL_T::CLIENT, "[MB-CURVE] travState=%d bake REJECTED: probe residual "
-				"%.3f deg -- the conjugation model does not hold for this traversal\n",
-				nTravState, flMaxResid);
-		}
-		return;
-	}
-
-	MBCurves_Store(nTravState, s_rows);
-	const bool bSaved = MBCurves_Save();
-	Warning(eDLL_T::CLIENT, "[MB-CURVE] baked travState=%d maxResid=%.4f deg -> %s%s\n",
-		nTravState, flMaxResid, MBCurves_FilePath(), bSaved ? "" : " (WRITE FAILED)");
-}
-
-//-----------------------------------------------------------------------------
 // Script surface
 //-----------------------------------------------------------------------------
 static SQRESULT ClientScript_MantleBoostGetState(HSQUIRRELVM v)
@@ -445,9 +210,6 @@ static SQRESULT ClientScript_MantleBoostGetTraversalAnimFrac(HSQUIRRELVM v)
 	return SQ_OK;
 }
 
-// Raw traversal cycle -- the domain the sweet-spot window lives in. The ring
-// must be driven by this, not the anim fraction, or it meets the brackets at a
-// different moment than the gate opens.
 static SQRESULT ClientScript_MantleBoostGetTraversalProgress(HSQUIRRELVM v)
 {
 	const uintptr_t pPlayer = MantleBoostRui_LocalPlayer();

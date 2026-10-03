@@ -20,6 +20,9 @@
 #include "game/client/wall_launch.h"
 #include "game/client/double_jump_power.h"
 #include "game/client/demo_natives.h"
+#if defined(SDK_WIP)
+#include "game/client/portal/c_prop_portal.h"
+#endif // SDK_WIP
 #include "vscript/languages/squirrel_re/vsquirrel.h"
 #include "vscript/ivscript.h"
 #include "pluginsystem/modsystem.h"
@@ -81,6 +84,9 @@ static void EnsureLateNativeRegistration(uint8_t vmType, CSquirrelVM* s)
 				MapEditPaks_RegisterClientFunctions(vm);
 				Demo_RegisterClientFunctions(vm);
 				AgentLink_RegisterScriptFunctions(vm);
+#if defined(SDK_WIP)
+				Portal_RegisterClientNatives(vm);
+#endif // SDK_WIP
 			}
 		}
 		break;
@@ -1173,7 +1179,11 @@ static bool FSRes_HasLooseOverride_S21(const char* path)
 	// The status-effect enum is parsed from this list at boot; the disk copy
 	// carries the SDK additions the dedi enum already has.
 	const bool isStatusEffects = _stricmp(path, "scripts/status_effect_types.txt") == 0;
-	if (!isRes && !isMenu && !isLst && !isVguiScreens && !isStatusEffects)
+	// The dedi networks m_aiSettingsIndex as a row of the disk classes.txt, so
+	// the client must build its aisettings table from the same files.
+	const bool isAiSettings = _strnicmp(path, "scripts/aisettings/", 19) == 0
+		|| _strnicmp(path, "scripts\\aisettings\\", 19) == 0;
+	if (!isRes && !isMenu && !isLst && !isVguiScreens && !isStatusEffects && !isAiSettings)
 		return false;
 
 	char disk[1024];

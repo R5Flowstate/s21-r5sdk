@@ -17,8 +17,10 @@
 #define MOD_ATTESTATION_MAX_LEN 256
 #define MOD_MAX_OWNED_FILES 8192
 #define MOD_MAX_MAPS 16
+#define MOD_MAX_WEAPONS 16
 #define MOD_MAX_OVERRIDES 64
 #define MOD_MAX_DEPENDENCIES 64
+#define MOD_MAX_FEATURES 64
 #define MOD_MAX_CONVARS 128
 #define MOD_NAMESPACE_SEPARATOR "__"
 #define MOD_MAX_SCRIPT_WRAPS 64
@@ -66,8 +68,10 @@ public:
 		void Activate();
 		void ParseConVars();
 		void ParseDependencies();
+		bool ParseRequiredFeatures();
 		void ParseLocalizationFiles();
 		bool ParseMaps();
+		bool ParseWeapons();
 		bool ParseOverrides();
 		bool ParseScriptWraps();
 		bool VerifyScriptWraps();
@@ -110,6 +114,7 @@ public:
 		CUtlVector<CUtlString> dependencies;
 		CUtlVector<CUtlString> loadAfter;
 		CUtlVector<CUtlString> maps;
+		CUtlVector<CUtlString> weapons; // declared mp_weapon_* names the base does not ship
 		CUtlVector<CUtlString> datatableOverrides; // stock table stems, lowercase, optional "sub/" prefix
 		CUtlVector<CUtlString> localizationOverrides; // stock human tokens
 
@@ -191,6 +196,10 @@ FORCEINLINE CModSystem* ModSystem()
 
 const char* ModSystem_StateToString(const CModSystem::eModState state);
 const char* ModSystem_RealmToString(const CModSystem::ModInstance_t::eModRealm realm);
+// Win32 leaf-name enumeration of one mod subdirectory. Engine FindFirstEx is
+// unusable on the S21 client, so this never touches the engine filesystem.
+bool ModSystem_ListModFiles(const CModSystem::ModInstance_t* const mod, const char* const pszSubDir,
+	const char* const pszExt, CUtlVector<CUtlString>& outFiles);
 bool ModSystem_ApplyAutoloadLine(const CModSystem::ModInstance_t* const mod, const char* const pszLine);
 
 // FNV-1a checksum over the transmitted payload; detects corruption, not a MAC.

@@ -156,6 +156,12 @@ static SQRESULT Script_Demo_IsFreecam(HSQUIRRELVM v)
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
+static SQRESULT Script_Demo_IsCamFollow(HSQUIRRELVM v)
+{
+	sq_pushbool(v, DemoPlay_IsCamFollow());
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
 static SQRESULT Script_Demo_Stop(HSQUIRRELVM v)
 {
 	if (!DemoPlay_Stop("script") && DemoRecord_IsRecording())
@@ -237,6 +243,146 @@ static SQRESULT Script_Demo_GetCamera(HSQUIRRELVM v)
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
+static SQRESULT Script_Demo_SetCamRoll(HSQUIRRELVM v)
+{
+	SQFloat fl = 0.0f;
+	sq_getfloat(v, 2, &fl);
+	if (fl == fl && fl >= -360.0f && fl <= 360.0f)
+		DemoPlay_SetCamRoll(fl);
+	else
+		Warning(eDLL_T::CLIENT, "[DEMO] Demo_SetCamRoll %.3f outside -360..360 -- ignored\n", fl);
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT Script_Demo_GetCamRoll(HSQUIRRELVM v)
+{
+	sq_pushfloat(v, DemoPlay_GetCamRoll());
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT Script_Demo_SetCamFov(HSQUIRRELVM v)
+{
+	SQFloat fl = 0.0f;
+	sq_getfloat(v, 2, &fl);
+	if (fl == fl && fl >= 0.0f && fl <= 150.0f)
+		DemoPlay_SetCamFov(fl);
+	else
+		Warning(eDLL_T::CLIENT, "[DEMO] Demo_SetCamFov %.3f outside 0..150 -- ignored\n", fl);
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT Script_Demo_GetCamFov(HSQUIRRELVM v)
+{
+	sq_pushfloat(v, DemoPlay_GetCamFov());
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT Script_Demo_SetCamDof(HSQUIRRELVM v)
+{
+	SQFloat flFocus = 0.0f, flRange = 0.0f;
+	sq_getfloat(v, 2, &flFocus);
+	sq_getfloat(v, 3, &flRange);
+	if (flFocus == flFocus && flFocus >= 0.0f && flFocus <= 20000.0f && flRange == flRange && flRange >= 0.0f && flRange <= 10000.0f)
+		DemoPlay_SetCamDof(flFocus, flRange);
+	else
+		Warning(eDLL_T::CLIENT, "[DEMO] Demo_SetCamDof %.1f %.1f outside 0..20000 / 0..10000 -- ignored\n", flFocus, flRange);
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT Script_Demo_GetCamDof(HSQUIRRELVM v)
+{
+	sq_pushfloat(v, DemoPlay_GetCamDof());
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT Script_Demo_GetCamDofRange(HSQUIRRELVM v)
+{
+	sq_pushfloat(v, DemoPlay_GetCamDofRange());
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT Script_Demo_CamKeyAdd(HSQUIRRELVM v)
+{
+	sq_pushbool(v, DemoPlay_CamKeyAdd());
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT Script_Demo_CamKeyRemove(HSQUIRRELVM v)
+{
+	SQInteger n = -1;
+	sq_getinteger(v, 2, &n);
+	sq_pushbool(v, n >= 0 && n < 4096 && DemoPlay_CamKeyRemove(static_cast<int>(n)));
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT Script_Demo_CamKeyClear(HSQUIRRELVM v)
+{
+	DemoPlay_CamKeyClear();
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT Script_Demo_CamKeyGoto(HSQUIRRELVM v)
+{
+	SQInteger n = -1;
+	sq_getinteger(v, 2, &n);
+	sq_pushbool(v, n >= 0 && n < 4096 && DemoPlay_CamKeyGoto(static_cast<int>(n)));
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT Script_Demo_CamKeyStep(HSQUIRRELVM v)
+{
+	SQInteger n = 0;
+	sq_getinteger(v, 2, &n);
+	sq_pushbool(v, n != 0 && DemoPlay_CamKeyStep(n < 0 ? -1 : 1));
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT Script_Demo_GetCamKeyTimes(HSQUIRRELVM v)
+{
+	std::vector<float> times;
+	DemoPlay_GetCamKeyTimes(times);
+	sq_newarray(v, 0);
+	for (const float t : times)
+	{
+		sq_pushfloat(v, t);
+		sq_arrayappend(v, -2);
+	}
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT Script_Demo_GetCamKeyData(HSQUIRRELVM v)
+{
+	std::vector<float> data;
+	DemoPlay_GetCamKeyData(data);
+	sq_newarray(v, 0);
+	for (const float f : data)
+	{
+		sq_pushfloat(v, f);
+		sq_arrayappend(v, -2);
+	}
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT Script_Demo_GetCamKeyAtNow(HSQUIRRELVM v)
+{
+	sq_pushinteger(v, DemoPlay_CamKeyAtNow());
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT Script_Demo_SetCamPathPlaying(HSQUIRRELVM v)
+{
+	SQBool b = SQFalse;
+	sq_getbool(v, 2, &b);
+	sq_pushbool(v, DemoPlay_SetCamPathPlaying(b != SQFalse));
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT Script_Demo_IsCamPathPlaying(HSQUIRRELVM v)
+{
+	sq_pushbool(v, DemoPlay_IsCamPathPlaying());
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
 static SQRESULT Script_Demo_AddBookmark(HSQUIRRELVM v)
 {
 	sq_pushbool(v, DemoPlay_AddBookmark());
@@ -274,6 +420,17 @@ static SQRESULT Script_Demo_SetHud(HSQUIRRELVM v)
 	ConVar* const pHud = g_pCVar ? g_pCVar->FindVar("demo_hud") : nullptr;
 	if (pHud && n >= 0 && n <= 2)
 		pHud->SetValue(static_cast<int>(n));
+	ConVar* const pDiag = g_pCVar ? g_pCVar->FindVar("demo_input_diag") : nullptr;
+	if (pDiag && pDiag->GetBool())
+		Msg(eDLL_T::CLIENT, "[DEMO-INPUT] Demo_SetHud(%lld) -> demo_hud %d\n", static_cast<long long>(n), pHud ? pHud->GetInt() : -1);
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+// demo_input_diag is dev-only; scripts read it through here so a hidden cvar never errors.
+static SQRESULT Script_Demo_InputDiag(HSQUIRRELVM v)
+{
+	ConVar* const pDiag = g_pCVar ? g_pCVar->FindVar("demo_input_diag") : nullptr;
+	sq_pushbool(v, pDiag && pDiag->GetBool());
 	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 }
 
@@ -613,6 +770,7 @@ struct DemoNativeReg_s
 static const DemoNativeReg_s s_sharedNatives[] =
 {
 	{ "Demo_IsPlaying",       (void*)Script_Demo_IsPlaying,       "bool",            "" },
+	{ "Demo_InputDiag",       (void*)Script_Demo_InputDiag,       "bool",            "" },
 	{ "Demo_IsRecording",     (void*)Script_Demo_IsRecording,     "bool",            "" },
 	{ "Demo_GetTime",         (void*)Script_Demo_GetTime,         "float",           "" },
 	{ "Demo_GetDuration",     (void*)Script_Demo_GetDuration,     "float",           "" },
@@ -628,8 +786,26 @@ static const DemoNativeReg_s s_sharedNatives[] =
 	{ "Demo_GetTimescale",    (void*)Script_Demo_GetTimescale,    "float",           "" },
 	{ "Demo_GetView",         (void*)Script_Demo_GetView,         "int",             "" },
 	{ "Demo_IsFreecam",       (void*)Script_Demo_IsFreecam,       "bool",            "" },
+	{ "Demo_IsCamFollow",     (void*)Script_Demo_IsCamFollow,     "bool",            "" },
 	{ "Demo_SetCamera",       (void*)Script_Demo_SetCamera,       "bool",            "int mode" },
 	{ "Demo_GetCamera",       (void*)Script_Demo_GetCamera,       "int",             "" },
+	{ "Demo_SetCamRoll",      (void*)Script_Demo_SetCamRoll,      "void",            "float degrees" },
+	{ "Demo_GetCamRoll",      (void*)Script_Demo_GetCamRoll,      "float",           "" },
+	{ "Demo_SetCamFov",       (void*)Script_Demo_SetCamFov,       "void",            "float degrees" },
+	{ "Demo_GetCamFov",       (void*)Script_Demo_GetCamFov,       "float",           "" },
+	{ "Demo_SetCamDof",       (void*)Script_Demo_SetCamDof,       "void",            "float focus, float range" },
+	{ "Demo_GetCamDof",       (void*)Script_Demo_GetCamDof,       "float",           "" },
+	{ "Demo_GetCamDofRange",  (void*)Script_Demo_GetCamDofRange,  "float",           "" },
+	{ "Demo_CamKeyAdd",       (void*)Script_Demo_CamKeyAdd,       "bool",            "" },
+	{ "Demo_CamKeyRemove",    (void*)Script_Demo_CamKeyRemove,    "bool",            "int index" },
+	{ "Demo_CamKeyClear",     (void*)Script_Demo_CamKeyClear,     "void",            "" },
+	{ "Demo_CamKeyGoto",      (void*)Script_Demo_CamKeyGoto,      "bool",            "int index" },
+	{ "Demo_CamKeyStep",      (void*)Script_Demo_CamKeyStep,      "bool",            "int dir" },
+	{ "Demo_GetCamKeyTimes",  (void*)Script_Demo_GetCamKeyTimes,  "array< float >",  "" },
+	{ "Demo_GetCamKeyData",   (void*)Script_Demo_GetCamKeyData,   "array< float >",  "" },
+	{ "Demo_GetCamKeyAtNow",  (void*)Script_Demo_GetCamKeyAtNow,  "int",             "" },
+	{ "Demo_SetCamPathPlaying", (void*)Script_Demo_SetCamPathPlaying, "bool",        "bool on" },
+	{ "Demo_IsCamPathPlaying", (void*)Script_Demo_IsCamPathPlaying, "bool",          "" },
 	{ "Demo_AddBookmark",     (void*)Script_Demo_AddBookmark,     "bool",            "" },
 	{ "Demo_SaveClip",        (void*)Script_Demo_SaveClip,        "string",          "float startSeconds, float endSeconds" },
 	{ "Demo_Stop",            (void*)Script_Demo_Stop,            "void",            "" },

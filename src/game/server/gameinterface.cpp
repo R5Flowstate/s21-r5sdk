@@ -36,6 +36,12 @@
 #include "game/server/recipientfilter.h"
 #include "game/shared/weapon_script_vars.h"
 #include "game/shared/weapon_heat.h"
+#if defined(SDK_WIP)
+#include "game/server/portal/prop_portal.h"
+#include "game/server/halo_vehicle/halo_vehicle.h"
+#include "game/server/portal/weapon_portalgun.h"
+#include "game/server/portal/portal_teleport.h"
+#endif // SDK_WIP
 #include "game/server/weapon_ammo_pool_mod.h"
 #include "game/shared/offhand_slots_ext.h"
 #include "game/server/energize.h"
@@ -55,6 +61,7 @@
 #include "game/server/glide.h"
 #include "game/server/armored_leap.h"
 #include "game/server/script_mover_traversal.h"
+#include "game/server/titan_diag.h"
 #include "game/server/skyward.h"
 #include "engine/server/precache_natives.h"
 #include "engine/server/skinnames_table_inject.h"
@@ -170,6 +177,12 @@ void ServerGameDLL_RunSdkLevelReset(const char* pszReason)
 	ScriptNetDataExt_LevelShutdown();
 	SNDC_ExtensionLevelShutdown();
 	Translocation_LevelShutdown();
+#if defined(SDK_WIP)
+	Portal_LevelShutdown();
+	PortalGun_LevelShutdown();
+	PortalTeleport_LevelShutdown();
+	HaloVehicle_LevelShutdown();
+#endif // SDK_WIP
 	WeaponCustomAct_LevelShutdown();
 	ServerScript_PlacementLevelShutdown();
 	BreachTrace_LevelShutdown();
@@ -852,7 +865,14 @@ __int64 CServerGameDLL::GameFrame(void* thisptr, unsigned char simulating)
 	}
 	// After the thinks: a segment issued at the think time would never advance.
 	if (simulating)
+	{
 		ScriptMoverTraversal_Frame();
+		TitanDiag_Frame();
+#if defined(SDK_WIP)
+		PortalEntity_Frame();
+		HaloVehicle_Frame();
+#endif // SDK_WIP
+	}
 	return nRet;
 }
 

@@ -16,6 +16,7 @@
 #include "public/gametrace.h"
 #include "mathlib/vector.h"
 #include "game/shared/usercmd.h"
+#include "game/shared/titan_gate.h"
 #include "game/shared/edict_dirty.h"
 #include "game/shared/player_extend_sidecar.h"
 #include "game/shared/sdk_entity_state.h"
@@ -34,6 +35,7 @@ static constexpr ptrdiff_t JP_PLAYER_OFF_JETPACK    = 0x695C; // bool m_jetpack
 static constexpr ptrdiff_t JP_PLAYER_OFF_GLIDEMETER = 0x6960; // float m_glideMeter (native SendProp)
 static constexpr uint32_t  JP_INVALID_HANDLE        = 0xFFFFFFFFu;
 static constexpr int       JP_IN_JUMP               = 0x00000002;
+static constexpr int       JP_IN_MOVEMENT           = 0x10000000; // IN_DODGE
 static constexpr float     JP_GLIDEMETER_MAX        = 1000.0f;
 
 static void Jetpack_FlightLevelShutdown(void);
@@ -644,6 +646,11 @@ static bool Jetpack_Enabled(void)
 	return bridge_jetpack.GetBool() && Jetpack_ResolveFields();
 }
 
+static bool Jetpack_EnabledFor(const void* const pPlayer)
+{
+	return Jetpack_Enabled() && !TitanGate_IsTitanPlayer(pPlayer);
+}
+
 static bool Hook_Jetpack_CanUse(void* pPlayer, const float* vel)
 {
 	// A script-activated jetpack engages on m_activateJetpack alone; the script ran CanUseJetpack itself.
@@ -652,7 +659,7 @@ static bool Hook_Jetpack_CanUse(void* pPlayer, const float* vel)
 			&& !OffhandJumpToggle_IsReleasing(pPlayer);
 	if (!v_Jetpack_CanUse(pPlayer, vel))
 		return false;
-	if (!pPlayer || !Jetpack_Enabled())
+	if (!pPlayer || !Jetpack_EnabledFor(pPlayer))
 		return true;
 
 	// S21 refuses within 0.1 s of the jump press before this one; the S3 player
@@ -660,21 +667,21 @@ static bool Hook_Jetpack_CanUse(void* pPlayer, const float* vel)
 	if (Jetpack_Now() - PlayerExtend_GetF32(pPlayer, offsetof(PlayerExtendWire, m_prevJumpPressTime)) <= 0.1f)
 		return false;
 
-	// S21 also wants the jump pressed on this command when the jetpack takes
-	// more than one jump; S3 only waits out boostOnGroundSafety, so a held
-	// first jump would pass.
+	// S21 also wants the movement ability (IN_DODGE) pressed on this command when
+	// the jetpack takes more than one jump; S3 only waits out boostOnGroundSafety,
+	// so a held first jump would pass.
 	const uint8_t* const p = static_cast<const uint8_t*>(pPlayer);
 	const uint8_t* const pSet = Jetpack_Settings(p);
 	if (p[JP_PLAYER_OFF_BOOSTED] && p[JP_PLAYER_OFF_BOOSTED + 2] && Jetpack_B(pSet, JPF_REPEATED_BOOSTS_SHORT))
 		return true;
 	if (Jetpack_I(pSet, JPF_JUMPS_TO_ACTIVATE) <= 1)
 		return true;
-	return (*reinterpret_cast<const int*>(p + JP_PLAYER_OFF_PRESSED) & JP_IN_JUMP) != 0;
+	return (*reinterpret_cast<const int*>(p + JP_PLAYER_OFF_PRESSED) & JP_IN_MOVEMENT) != 0;
 }
 
 static void Hook_Jetpack_Check(void* pPlayer, void* pUnused, float* vel)
 {
-	if (!pPlayer || !vel || !Jetpack_Enabled())
+	if (!pPlayer || !vel || !Jetpack_EnabledFor(pPlayer))
 		return v_Jetpack_Check(pPlayer, pUnused, vel);
 
 	uint8_t* const p = static_cast<uint8_t*>(pPlayer);
@@ -707,7 +714,7 @@ static void Hook_Jetpack_Check(void* pPlayer, void* pUnused, float* vel)
 static void Hook_Jetpack_Apply(void* pPlayer, float* vel, const float* moveFwd, const float* moveRight,
 	const float* moveUp, const float* lookFwd, const float* lookRight, const float* lookUp)
 {
-	if (!pPlayer || !vel || !Jetpack_Enabled())
+	if (!pPlayer || !vel || !Jetpack_EnabledFor(pPlayer))
 		return v_Jetpack_Apply(pPlayer, vel, moveFwd, moveRight, moveUp, lookFwd, lookRight, lookUp);
 
 	uint8_t* const p = static_cast<uint8_t*>(pPlayer);
@@ -729,7 +736,7 @@ static uint32_t Jetpack_RechargeGroundedOffset(const uint8_t* pSettings)
 
 static int64_t Hook_Jetpack_UpdateMeter(void* pPlayer, char bGrounded)
 {
-	if (!pPlayer || !Jetpack_Enabled())
+	if (!pPlayer || !Jetpack_EnabledFor(pPlayer))
 		return v_Jetpack_UpdateMeter(pPlayer, bGrounded);
 
 	const uint8_t* const p = static_cast<const uint8_t*>(pPlayer);
@@ -767,7 +774,7 @@ static int64_t Hook_Jetpack_UpdateMeter(void* pPlayer, char bGrounded)
 static int64_t Hook_Jetpack_ResetAux(void* pPlayer)
 {
 	const int64_t ret = v_Jetpack_ResetAux(pPlayer);
-	if (!pPlayer || !Jetpack_Enabled())
+	if (!pPlayer || !Jetpack_EnabledFor(pPlayer))
 		return ret;
 
 	uint8_t* const p = static_cast<uint8_t*>(pPlayer);
@@ -786,7 +793,7 @@ static int64_t Hook_Jetpack_ResetAux(void* pPlayer)
 
 bool Jetpack_AirMoveBegin(void* pPlayer)
 {
-	if (!pPlayer || !s_pAirDragFinder || s_bAirDragSwapped || !Jetpack_Enabled())
+	if (!pPlayer || !s_pAirDragFinder || s_bAirDragSwapped || !Jetpack_EnabledFor(pPlayer))
 		return false;
 	if (s_nFieldOff[JPF_POSTEFFECT_DRAG] == JP_FIELD_MISSING)
 		return false;

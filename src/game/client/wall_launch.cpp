@@ -18,6 +18,7 @@
 #include "vscript/languages/squirrel_re/vsquirrel.h"
 #include "game/shared/vscript_gamedll_defs.h"
 #include "game/shared/wall_launch_math.h"
+#include "game/shared/titan_gate.h"
 #include "wall_launch.h"
 #include <cmath>
 
@@ -181,7 +182,7 @@ static void __fastcall Hook_GameMovement_JumpOutOfWallRun(void* ctx)
 	uint8_t* const player = ctx ? *reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(ctx) + WL_CTX_OFF_PLAYER) : nullptr;
 	uint8_t* const mv = ctx ? *reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(ctx) + WL_CTX_OFF_MV) : nullptr;
 	s_state.m_bEnabled = s_bEnabled;
-	if (!player || !mv || !s_state.m_bEnabled || !bridge_wall_launch.GetBool())
+	if (!player || !mv || !s_state.m_bEnabled || !bridge_wall_launch.GetBool() || TitanGate_IsTitanPlayer(player))
 	{
 		v_GameMovement_JumpOutOfWallRun(ctx);
 		return;
@@ -233,7 +234,7 @@ static void __fastcall Hook_GameMovement_AirAccelerate(void* ctx, float* wishDir
 {
 	uint8_t* const player = ctx ? *reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(ctx) + WL_CTX_OFF_PLAYER) : nullptr;
 	uint8_t* const mv = ctx ? *reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(ctx) + WL_CTX_OFF_MV) : nullptr;
-	if (!player || !mv || !wishDir || !s_state.m_bEdgeAir || !bridge_wall_launch.GetBool())
+	if (!player || !mv || !wishDir || !s_state.m_bEdgeAir || !bridge_wall_launch.GetBool() || TitanGate_IsTitanPlayer(player))
 	{
 		v_GameMovement_AirAccelerate(ctx, wishDir, wishSpeed, accel, dt);
 		return;

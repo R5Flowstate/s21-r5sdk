@@ -13,6 +13,7 @@
 #include "tier0/dbg.h"
 #include "tier0/module.h"
 #include <materialsystem/cmaterialsystem.h>
+#include "engine/client/demo_play.h"
 
 //-----------------------------------------------------------------------------
 // Returns the currently attached window
@@ -55,6 +56,27 @@ static void Hook_ApplyRawMouseAccum(int64_t timestamp, void* rawInputRecords, in
 {
 	if (ImguiSystem()->IsSurfaceActive())
 		return;
+
+	// The records are a GetRawInputBuffer block: RAWINPUT entries, 8-aligned.
+	if (rawInputRecords && count > 0 && count <= 4096)
+	{
+		int nDx = 0, nDy = 0;
+		const RAWINPUT* pRec = static_cast<const RAWINPUT*>(rawInputRecords);
+		for (int64_t i = 0; i < count; ++i)
+		{
+			if (pRec->header.dwType == RIM_TYPEMOUSE && !(pRec->data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE))
+			{
+				nDx += pRec->data.mouse.lLastX;
+				nDy += pRec->data.mouse.lLastY;
+			}
+			if (pRec->header.dwSize < sizeof(RAWINPUTHEADER))
+				break;
+			pRec = reinterpret_cast<const RAWINPUT*>(
+				(reinterpret_cast<uintptr_t>(pRec) + pRec->header.dwSize + 7) & ~static_cast<uintptr_t>(7));
+		}
+		if (nDx || nDy)
+			DemoPlay_OnRawMouse(nDx, nDy);
+	}
 
 	v_ApplyRawMouseAccum(timestamp, rawInputRecords, count);
 }

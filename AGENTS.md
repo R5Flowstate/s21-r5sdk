@@ -277,6 +277,28 @@ little, widen it -- do not copy it.
 
 ---
 
+## WIP
+
+Every new feature lands behind `SDK_WIP` until it is finished. No
+branches: this tree is `main`-only, the gate is the preprocessor.
+CMake `OPTION_WIP` defines it (default OFF when `OPTION_CERTAIN=ON`,
+ON otherwise, so dev builds keep the feature and CERT builds drop it).
+
+- New TUs: exclude from CMake unless `OPTION_WIP` (see the portal
+  blocks in `game/CMakeLists.txt`). Call sites: `#if defined(SDK_WIP)`
+  / `#endif // SDK_WIP`.
+- A feature mods may require is advertised in `public/sdk_features.h`
+  only under `SDK_WIP`, so `RequiresFeatures` refuses the mod on
+  release builds.
+- The base build must survive with WIP off: the client still
+  recognizes and drops foreign frames, the dedi still refuses the
+  feature's natives. Never leave a WIP-off build that AVs on live data.
+- Graduation = delete the guards, keep the feature compiling with
+  `OPTION_WIP` both ON and OFF, and confirm the CERT strings are gone
+  from the release DLLs.
+
+---
+
 ## Logs / deploy
 
 File logs are OFF by default (release minimum-disk): stdout is the log, and only
@@ -397,4 +419,5 @@ the whole file's recent history is meant to go.
   dedi caches are handle-keyed.
 - `#endif // !X` on every conditional region.
 - Pattern unique in the target binary.
+- New feature behind `SDK_WIP` until finished.
 - Do not modernize the file you are in.

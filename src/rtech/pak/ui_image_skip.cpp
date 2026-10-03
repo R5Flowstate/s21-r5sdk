@@ -18,7 +18,9 @@
 #include "tier0/module.h"
 #include "tier0/threadtools.h"
 #include "rpak_observe.h"
+#include "tier1/convar.h"
 #include "ui_image_skip.h"
+#include <unordered_set>
 
 static constexpr int kMaxNoUiPaks = 16;
 static char s_szNoUiPaks[kMaxNoUiPaks][64] = {};
@@ -148,4 +150,60 @@ void VUIImageSkipS21::Detour(const bool bAttach) const
 {
 	if (v_UIImage_Load_S21)
 		DetourSetup(&v_UIImage_Load_S21, &Hook_UIImage_Load, bAttach);
+}
+
+//-----------------------------------------------------------------------------
+// RUI image misses: every name that falls back to the "missing" image, once.
+//-----------------------------------------------------------------------------
+static ConVar ui_image_miss_log("ui_image_miss_log", "1", FCVAR_DEVELOPMENTONLY | FCVAR_ACCESSIBLE_FROM_THREADS,
+	"Log each RUI image name that resolves to the missing image (once per name).");
+
+static constexpr size_t kMaxLoggedMisses = 512;
+static std::unordered_set<uint64_t> s_loggedMisses;
+static CThreadFastMutex s_missMutex;
+
+static __int64 Hook_UIImage_Resolve(void* ctx, const char* pszName, unsigned __int64 guid)
+{
+	const __int64 result = v_UIImage_Resolve_S21(ctx, pszName, guid);
+
+	if (!ui_image_miss_log.GetBool() || !pszName || !pszName[0] || !g_pUIImageMissingIdx_S21)
+		return result;
+	if (static_cast<short>(result) != *g_pUIImageMissingIdx_S21 || strcmp(pszName, "missing") == 0)
+		return result;
+
+	uint64_t key = 14695981039346656037ull;
+	for (const char* p = pszName; *p; ++p)
+		key = (key ^ static_cast<unsigned char>(*p)) * 1099511628211ull;
+
+	{
+		AUTO_LOCK(s_missMutex);
+		if (s_loggedMisses.size() >= kMaxLoggedMisses || !s_loggedMisses.insert(key).second)
+			return result;
+	}
+	Warning(eDLL_T::RTECH, "[UI-IMG-MISS] '%s' guid=0x%016llX -> missing image\n", pszName, guid);
+	return result;
+}
+
+void VUIImageMissLog::GetFun(void) const
+{
+	// Image resolve: empty-name check, name -> GUID when none is passed, asset
+	// lookup, then the recursive "missing" fallback whose index lands in a word global.
+	CMemory fn = Module_FindPattern(g_GameDll,
+		"48 89 5C 24 ?? 57 48 83 EC 20 80 3A 00 49 8B C0 48 8B DA 48 8B F9 74 ?? "
+		"48 85 C0 75 ?? 48 8B CA E8 ?? ?? ?? ?? 33 D2 48 8B C8 E8 ?? ?? ?? ?? "
+		"48 85 C0 75 ?? 0F B6 13");
+	fn.GetPtr(v_UIImage_Resolve_S21);
+
+	// +0x6B: mov word ptr [missingIdx], ax
+	if (v_UIImage_Resolve_S21 && fn.Offset(0x6B).CheckOpCodes({ 0x66, 0x89, 0x05 }))
+		g_pUIImageMissingIdx_S21 = fn.Offset(0x6B).ResolveRelativeAddress(3, 7).RCast<short*>();
+
+	if (!v_UIImage_Resolve_S21 || !g_pUIImageMissingIdx_S21)
+		Warning(eDLL_T::RTECH, "[UI-IMG-MISS] image resolve pattern unresolved -- miss log disabled\n");
+}
+
+void VUIImageMissLog::Detour(const bool bAttach) const
+{
+	if (v_UIImage_Resolve_S21 && g_pUIImageMissingIdx_S21)
+		DetourSetup(&v_UIImage_Resolve_S21, &Hook_UIImage_Resolve, bAttach);
 }

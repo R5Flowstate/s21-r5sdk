@@ -284,7 +284,8 @@ static float Missile_WiggleEase(const MissileExpandContractState_t& st, const fl
 
 static float Missile_WiggleRate(const float amp, const float scale, const float halfPeriod, const float rate)
 {
-	return fabsf(amp * scale / halfPeriod) * (rate / fabsf(rate));
+	// A zero rate (zero amplitude or ease-in) keeps its sign; rate / |rate| would be NaN.
+	return fabsf(amp * scale / halfPeriod) * (rate < 0.0f ? -1.0f : 1.0f);
 }
 
 static float Missile_WiggleHalfPeriod(const MissileExpandContractState_t& st, const int first, const int reversals)
@@ -480,6 +481,8 @@ static void Missile_VelocityThink(void* pMissile)
 
 	const Vector3D origin = pEnt->Diag_AbsOrigin();
 	Vector3D vel = Missile_Velocity(st, origin, elapsed - st.m_flPathStartElapsed, dt);
+	if (!std::isfinite(vel.x) || !std::isfinite(vel.y) || !std::isfinite(vel.z))
+		vel.Init();
 
 	// Grace: slide along whatever the next step would hit instead of into it.
 	if (Missile_InGrace(pMissile))
@@ -547,12 +550,14 @@ static bool Missile_GetVector(HSQUIRRELVM v, const SQInteger idx, Vector3D& out)
 
 static constexpr float MISSILE_MAX_SPEED = 100000.0f;
 static constexpr float MISSILE_MAX_PHASE_TIME = 60.0f;
+// Phase times divide the path blend; a denormal one overflows 0.5 / t to inf.
+static constexpr float MISSILE_MIN_PHASE_TIME = 0.001f;
 
 static bool Missile_ValidPhaseTimes(const float* pTimes, const int count)
 {
 	for (int i = 0; i < count; ++i)
 	{
-		if (pTimes[i] < 0.0f || pTimes[i] > MISSILE_MAX_PHASE_TIME)
+		if (pTimes[i] > MISSILE_MAX_PHASE_TIME || (pTimes[i] != 0.0f && pTimes[i] < MISSILE_MIN_PHASE_TIME))
 			return false;
 	}
 	return true;

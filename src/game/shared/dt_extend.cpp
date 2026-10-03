@@ -15,6 +15,9 @@
 #include "public/tier0/memaddr.h"
 #include "thirdparty/detours/include/detours.h"
 #include "game/shared/dt_extend.h"
+#if defined(SDK_WIP)
+#include "game/server/portal/prop_portal.h"
+#endif // SDK_WIP
 #include "game/shared/dt_extend_diag.h"
 #include "game/shared/dt_extend_system14.h"
 #include "game/shared/s21_dt_schema.h"
@@ -617,11 +620,9 @@ PFN_GlobalCreationCB v_GlobalCreationCB = nullptr;
 PFN_GetEntityFactory v_GetEntityFactory = nullptr;
 
 // ActivateEntity
-typedef void (__fastcall* PFN_ActivateEntity)(__int64 classID, __int64 entity);
 PFN_ActivateEntity v_ActivateEntity = nullptr;
 
 // DispatchSpawn: marks entity spawned + links into snapshot tracking
-typedef __int64 (__fastcall* PFN_DispatchSpawn)(__int64 entity);
 PFN_DispatchSpawn v_DispatchSpawn = nullptr;
 
 // SNDC entity init
@@ -833,6 +834,11 @@ static int ReadEntityCreateAllocImm(uintptr_t createFn)
 				return static_cast<int>(imm);
 	}
 	return 0;
+}
+
+int DTExtend_ReadEntityCreateAllocImm(uintptr_t createFn)
+{
+	return ReadEntityCreateAllocImm(createFn);
 }
 
 int PatchEntityCreateAllocImm(uintptr_t createFn, uint32_t targetSize, const char* tag,
@@ -5542,6 +5548,9 @@ static void Hook_AssignClassIds()
 {
 	DTExtend_RegisterNonRewindClass();
 	DTExtend_RegisterS21Classes();
+#if defined(SDK_WIP)
+	Portal_RegisterServerClass();
+#endif // SDK_WIP
 	v_AssignClassIds();
 }
 
@@ -5701,6 +5710,8 @@ static __int64 __fastcall Hook_GlobalCreationCB(__int64 a1)
 	// The 3rd arg indexes unk_1695091F0 (the per-category DEFAULT-VALUE table -- only 5 entries 0..4, NOT the 7-entry scriptNetCategories).
 	if (v_SNDCEntityInit)
 		v_SNDCEntityInit((void*)entity, 0, 0);
+
+	GlobalNonRewind_ApplyPendingToEntity();
 
 	int nrClassID = *(int*)(s_nonRewindFactory + FACT_CLASSID);
 	int16_t edictIdx = *(int16_t*)(entity + 0x58);

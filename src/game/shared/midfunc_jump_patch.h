@@ -71,10 +71,15 @@ public:
 	// Variant for a site whose displaced instructions are position-independent:
 	// the first `replayLen` bytes are copied into the trampoline verbatim, `pTail`
 	// (optional) is emitted after them, then control returns to site+replayLen.
+	// `pHead` (optional) runs before the select call, on both paths: the epilogue
+	// branch skips the rest of the function, so any callee-saved spill the
+	// epilogue reloads but the function has not reached yet must go here.
 	bool InstallReplay(uint8_t* const pSite, const size_t replayLen, const uint8_t* const pTail, const size_t tailLen,
-		uint8_t* const pEpilogue, const MidFuncSelectFn_t pfnSelect)
+		uint8_t* const pEpilogue, const MidFuncSelectFn_t pfnSelect,
+		const uint8_t* const pHead = nullptr, const size_t headLen = 0)
 	{
-		if (m_bInstalled || !pSite || !pEpilogue || !pfnSelect || replayLen < 5 || replayLen > 16 || tailLen > 16)
+		if (m_bInstalled || !pSite || !pEpilogue || !pfnSelect || replayLen < 5 || replayLen > 16 || tailLen > 16
+			|| headLen > 32)
 			return m_bInstalled;
 
 		m_pTramp = AllocNear(pSite, 128);
@@ -82,6 +87,8 @@ public:
 			return false;
 
 		uint8_t* p = m_pTramp;
+		if (pHead && headLen)
+			p = Emit(p, pHead, headLen);
 		p = EmitCall(p, pfnSelect);
 		p = Emit(p, "\x85\xC0", 2);                   // test eax, eax
 		p = Emit(p, "\x78\x05", 2);                   // js +5 (over the jmp below)

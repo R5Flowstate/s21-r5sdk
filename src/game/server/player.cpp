@@ -19,8 +19,12 @@
 #include "bridge_cmd_chain.h"
 #include "game/shared/dt_extend.h"
 #include "translocation.h"
+#if defined(SDK_WIP)
+#include "game/server/portal/weapon_portalgun.h"
+#endif // SDK_WIP
 
 #include "engine/server/server.h"
+#include "vscript/vscript.h"
 
 // NOTE[ AMOS ]: default tick interval (0.05) * default cvar value (10) = total time buffer of 0.5, which is the default of cvar 'sv_maxunlag'.
 static ConVar sv_maxUserCmdProcessTicks("sv_maxUserCmdProcessTicks", "10", FCVAR_NONE, "Maximum number of client-issued UserCmd ticks that can be replayed in packet loss conditions, 0 to allow no restrictions.");
@@ -353,6 +357,9 @@ void CPlayer::PlayerRunCommand(CUserCmd* pUserCmd, IMoveHelper* pMover)
 {
 	CPlayer__PlayerRunCommand(this, pUserCmd, pMover);
 	Translocation_OnPlayerRunCommand(this);
+#if defined(SDK_WIP)
+	Portal_OnPlayerRunCommand(this);
+#endif // SDK_WIP
 	SetLastUserCommand(pUserCmd);
 }
 
@@ -816,7 +823,18 @@ static void CC_CreateFakePlayer_f(const CCommand& args)
 
 	if (args.ArgC() < 3)
 	{
-		Msg(eDLL_T::SERVER, "usage 'sv_addbot': name(string) teamid(int)\n");
+		// No name and team: the script spawner picks a playable team and names the bot.
+		const int count = args.ArgC() == 2 ? atoi(args.Arg(1)) : 1;
+		if (count < 1 || count > g_ServerGlobalVariables->maxClients)
+		{
+			Msg(eDLL_T::SERVER, "usage 'sv_addbot': [count] | name(string) teamid(int)\n");
+			return;
+		}
+
+		char szCode[32];
+		V_snprintf(szCode, sizeof(szCode), "SpawnBots(%d)", count);
+		ThreadJoinServerJob();
+		Script_Execute(szCode, SQCONTEXT::SERVER);
 		return;
 	}
 
@@ -841,7 +859,7 @@ static void CC_CreateFakePlayer_f(const CCommand& args)
 	g_pServerGameClients->ClientFullyConnect(nHandle, false);
 }
 
-static ConCommand sv_addbot("sv_addbot", CC_CreateFakePlayer_f, "Creates a bot on the server", FCVAR_RELEASE);
+static ConCommand sv_addbot("sv_addbot", CC_CreateFakePlayer_f, "Creates bots on the server. Usage: sv_addbot [count] | sv_addbot <name> <teamid>", FCVAR_RELEASE);
 
 void VPlayer::Detour(const bool bAttach) const
 {

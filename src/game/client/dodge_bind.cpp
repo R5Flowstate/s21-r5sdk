@@ -7,19 +7,12 @@
 #include "core/stdafx.h"
 #include "tier0/module.h"
 #include "tier1/cvar.h"
-#include "public/const.h"
-#include "game/client/classvar_natives.h"
 #include "game/client/dodge_bind.h"
+#include "game/client/titan_gate.h"
 
 static ConVar bridge_dodge_jump_couple("bridge_dodge_jump_couple", "1", FCVAR_RELEASE,
 	"When +dodge is unbound, shares jump's key, or controller mode is on, "
 	"+jump also presses in_dodge (bit 28). 0=off.");
-static ConVar bridge_dodge_jump_couple_air_only("bridge_dodge_jump_couple_air_only", "1", FCVAR_RELEASE,
-	"The coupled +jump press reaches in_dodge only while the local player is airborne, "
-	"so a ground jump stays a jump. 0 = couple on the ground too.");
-
-// C_Player::m_fFlags, same slot halfduck_zip_parity reads.
-static constexpr ptrdiff_t PLAYER_OFF_FFLAGS = 200;
 
 typedef bool (*Key_CodeForBindingFn)(const char* binding, int* buttonCode, int* bindType,
 	unsigned int userId, int startCount, int allowJoystick);
@@ -88,22 +81,12 @@ static bool DodgeIsBoundToJump(void)
 	return dodgeCode == jumpCode && dodgeType == jumpType;
 }
 
-static bool LocalPlayerAirborne(void)
-{
-	const uintptr_t player = reinterpret_cast<uintptr_t>(ClassVar_LocalPlayer());
-	if (!player)
-		return false;
-	return (*reinterpret_cast<const int*>(player + PLAYER_OFF_FFLAGS) & FL_ONGROUND) == 0;
-}
-
 static void Hook_IN_JumpDown(void* args)
 {
 	IN_JumpDown(args);
-	if (!bridge_dodge_jump_couple.GetBool() || !DodgeIsBoundToJump() || !IN_DodgeDown)
-		return;
-	if (bridge_dodge_jump_couple_air_only.GetBool() && !LocalPlayerAirborne())
-		return;
-	IN_DodgeDown(args);
+	// Only the press is gated: a release always couples, so a class change while the key is held cannot leave +dodge down.
+	if (bridge_dodge_jump_couple.GetBool() && !TitanGate_IsLocalPlayerTitan() && DodgeIsBoundToJump() && IN_DodgeDown)
+		IN_DodgeDown(args);
 }
 
 static void Hook_IN_JumpUp(void* args)

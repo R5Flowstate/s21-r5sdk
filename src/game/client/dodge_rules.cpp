@@ -8,6 +8,7 @@
 #include "tier1/cvar.h"
 #include "public/const.h"
 #include "game/shared/dodge_rules.h"
+#include "game/shared/titan_gate.h"
 #include "game/client/dodge_rules.h"
 
 static ConVar bridge_dodge_rules("bridge_dodge_rules", "1", FCVAR_RELEASE,
@@ -71,11 +72,36 @@ static void DodgeRules_Diag(const uintptr_t ctx, const DodgeRulesCall_t& st, con
 		*reinterpret_cast<const uint32_t*>(mv));
 }
 
+static void DodgeRules_PatchDuckGate(const bool bAllowDucked)
+{
+	const CMemory jnz = s_duckGate.Offset(DUCK_GATE_JNZ);
+	if (bAllowDucked)
+		jnz.Patch({ 0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00 });
+	else
+		jnz.Patch(vector<uint8_t>(s_duckGateOrig, s_duckGateOrig + sizeof(s_duckGateOrig)));
+}
+
+// A titan keeps the engine's own Jump: the duck gate patched out for pilots is put back
+// for the length of the call while the titan is ducked.
+static char DodgeRules_TitanJump(void* const ctx, const uintptr_t player)
+{
+	if (!s_duckGate || !s_duckGateOrig[0]
+		|| *reinterpret_cast<const int*>(player + PLAYER_OFF_DUCKSTATE) == 0)
+		return v_C_GameMovement__Jump(ctx);
+
+	DodgeRules_PatchDuckGate(false);
+	const char result = v_C_GameMovement__Jump(ctx);
+	DodgeRules_PatchDuckGate(true);
+	return result;
+}
+
 static char __fastcall Hook_C_GameMovement_Jump(void* ctx)
 {
 	const uintptr_t c = reinterpret_cast<uintptr_t>(ctx);
 	const uintptr_t player = *reinterpret_cast<uintptr_t*>(c + DODGE_CTX_OFF_PLAYER);
 	const uintptr_t mv = *reinterpret_cast<uintptr_t*>(c + DODGE_CTX_OFF_MOVEDATA);
+	if (player && TitanGate_IsTitanPlayer(reinterpret_cast<const void*>(player)))
+		return DodgeRules_TitanJump(ctx, player);
 	DodgeRulesFields_t fields;
 	if (!player || !mv || !bridge_dodge_rules.GetBool() || !DodgeRules_LoadFields(s_fieldPtrs, fields))
 		return v_C_GameMovement__Jump(ctx);
@@ -159,16 +185,15 @@ void VDodgeRules::Detour(const bool bAttach) const
 
 	if (!s_duckGate)
 		return;
-	const CMemory jnz = s_duckGate.Offset(DUCK_GATE_JNZ);
 	if (bAttach)
 	{
-		memcpy(s_duckGateOrig, jnz.RCast<const void*>(), sizeof(s_duckGateOrig));
-		jnz.Patch({ 0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00 });
+		memcpy(s_duckGateOrig, s_duckGate.Offset(DUCK_GATE_JNZ).RCast<const void*>(), sizeof(s_duckGateOrig));
+		DodgeRules_PatchDuckGate(true);
 		Msg(eDLL_T::CLIENT, "[DODGE] rules attached (fields %s), ducked dodge allowed\n",
 			DodgeRules_PtrsValid(s_fieldPtrs) ? "resolved" : "UNRESOLVED");
 	}
 	else if (s_duckGateOrig[0])
 	{
-		jnz.Patch(vector<uint8_t>(s_duckGateOrig, s_duckGateOrig + sizeof(s_duckGateOrig)));
+		DodgeRules_PatchDuckGate(false);
 	}
 }

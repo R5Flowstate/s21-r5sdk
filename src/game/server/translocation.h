@@ -26,6 +26,16 @@ void Translocation_LevelShutdown(void);
 void Translocation_SetMoveType(void* pEnt, int moveType);
 bool Translocation_SetMoveTypeResolved(void);
 
+// Portal teleport apply primitives (resolved + twin-guarded in translocation.cpp).
+void Translocation_SetAbsOrigin3(void* pEnt, const float flOrigin[3]);
+void Translocation_SetAbsVelocity3(void* pEnt, const float flVel[3]);
+void Translocation_SetAbsAngles3(void* pEnt, const float flAngles[3]);
+// Any entity: EF_NOINTERP for this frame (no player-only parity touch).
+void Translocation_SetNoInterpEffect(void* pEnt);
+void Translocation_AddNoInterpFlip(void* pEnt);
+void Translocation_DuckImmediateNow(void* pPlayer);
+void Translocation_GetPlayerHull(void* pPlayer, bool bDucked, float flMins[3], float flMaxs[3]);
+
 ///////////////////////////////////////////////////////////////////////////////
 class VTranslocation : public IDetour
 {

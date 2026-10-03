@@ -2998,3 +2998,12 @@ static void DlssSr_Dump_f(const CCommand& args)
 }
 static ConCommand dlss_sr_dump("dlss_sr_dump", DlssSr_Dump_f, "Report what the engine's FSR2 upscale pass is doing.", FCVAR_RELEASE);
 
+ID3D12Resource* DlssSr_ResourceFromTexture(void* pTexture)
+{
+	return DlssSr_FromITexture(pTexture);
+}
+
+unsigned DlssSr_ResourceRestingState(ID3D12Resource* pResource, unsigned fallback)
+{
+	return static_cast<unsigned>(DlssSr_EngineState(pResource, static_cast<D3D12_RESOURCE_STATES>(fallback)));
+}

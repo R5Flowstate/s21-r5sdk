@@ -244,6 +244,7 @@ static bool __fastcall CSquirrelVM_Init_S21(
 	case SQCONTEXT::CLIENT:
 		g_pClientScript = s;
 		++g_nS21ScriptVMGeneration;
+		++g_nS21ClientVMGeneration;
 		Script_RegisterCommandLineDevConstants_S21(s, ctx);
 		ResetLateNativeRegistration_S21(1);
 		ScriptNetData_RegisterLimitsOnClient(s);

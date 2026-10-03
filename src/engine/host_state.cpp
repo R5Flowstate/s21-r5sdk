@@ -10,6 +10,7 @@
 #include "core/stdafx.h"
 #include "tier0/jobthread.h"
 #include "tier0/commandline.h"
+#include <atomic>
 #include "tier0/fasttimer.h"
 #include "tier0/frametask.h"
 #include "tier1/cvar.h"
@@ -780,6 +781,10 @@ static string SV_HashPasswordTag(const char* const pszPassword)
 // Purpose: Send keep alive request to Spire master server.
 // Output: Returns true on success, false otherwise.
 //-----------------------------------------------------------------------------
+// One listing request at a time: each runs on its own detached thread and a
+// slow master outlives the update interval.
+static std::atomic<bool> s_bKeepAliveInFlight{ false };
+
 static void HostState_KeepAlive()
 {
 	// IsEnabled is checked here rather than left to PostServerHost: the request
@@ -850,8 +855,12 @@ static void HostState_KeepAlive()
 			const_cast<NetGameServer_t&>(gameServer).allowedMods.emplace_back(allow[i].String());
 	}
 
+	if (s_bKeepAliveInFlight.exchange(true))
+		return;
+
 	std::thread request([&, gameServer]
 		{
+			struct InFlightClear { ~InFlightClear() { s_bKeepAliveInFlight = false; } } inFlightClear;
 			string errorMsg;
 			string hostToken;
 			string hostIp;
@@ -1289,7 +1298,6 @@ void CHostState::Setup(void)
 {
 	g_pHostState->LoadConfig();
 	LoadModConfigs();
-	MergeModPlaylistsIntoFile(); // Merge mod playlists into base file
 	g_BanSystem.LoadList();
 	ConVar_PurgeHostNames();
 

@@ -88,7 +88,7 @@ void CPluginSystem::Init()
 		{
 			const PluginInstance_t& instance = m_Instances[j];
 
-			if (instance.path.IsEqual_CaseInsensitive(path.String()) == 0)
+			if (instance.path.IsEqual_CaseInsensitive(path.String()))
 			{
 				addInstance = false; // Already exists.
 				break;
@@ -153,7 +153,8 @@ bool CPluginSystem::LoadInstance(PluginInstance_t& pluginInst)
 	if (loadedPlugin == INVALID_HANDLE_VALUE || loadedPlugin == 0)
 		return false;
 
-	CModule pluginModule(pluginInst.name.String());
+	// By base, not name: a same-named module elsewhere would answer GetModuleHandle.
+	CModule pluginModule(reinterpret_cast<QWORD>(loadedPlugin));
 
 	// Pass the SDK module name; listen/dedi/client DLLs are named differently.
 	PluginInstance_t::OnLoad onLoadFn = pluginModule.GetExportedSymbol(

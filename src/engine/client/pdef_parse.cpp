@@ -15,21 +15,34 @@
 
 static bool s_bFlushPatched = false;
 
+static constexpr uint64_t kPdefItemCountOff = 0x30000;
+static constexpr uint64_t kPdefItemMax = 0x1000;
 static constexpr uint64_t kPdefEnumCountOff = 0x3AE28;
 static constexpr uint64_t kPdefEnumNamePoolOff = 0x39008;
 static constexpr uint64_t kPdefEnumCountMax = 192;
 static constexpr uint64_t kPdefEnumNamePoolMax = 4608;
 
-static __int64 __fastcall Hook_PdefAllocItems(__int64 pdef, __int64 nAdd)
+// Refuse here, not in the item allocator: the struct's caller fails closed on null,
+// while a null item block would be stored and dereferenced later.
+static __int64 __fastcall Hook_PdefStartNewStruct(char* name, __int64 pdef, __int64 nAdd)
 {
-	if (!pdef || nAdd <= 0 || static_cast<uint64_t>(nAdd) > 0x1000)
+	if (!pdef)
 		return 0;
 
-	const uint64_t cur = *reinterpret_cast<const uint64_t*>(pdef + 0x30000);
-	if (cur + static_cast<uint64_t>(nAdd) > 0x1000)
+	const uint64_t cur = *reinterpret_cast<const uint64_t*>(pdef + kPdefItemCountOff);
+	if (nAdd < 0 || static_cast<uint64_t>(nAdd) > kPdefItemMax
+		|| cur > kPdefItemMax || cur + static_cast<uint64_t>(nAdd) > kPdefItemMax)
+	{
+		static bool s_itemRefuse = false;
+		if (!s_itemRefuse)
+		{
+			s_itemRefuse = true;
+			Warning(eDLL_T::CLIENT, "[PDEF] struct item refuse count=%llu nAdd=%lld\n", cur, nAdd);
+		}
 		return 0;
+	}
 
-	return v_PdefAllocItems(pdef, nAdd);
+	return v_PdefStartNewStruct(name, pdef, nAdd);
 }
 
 static __int64 __fastcall Hook_PdefStartNewEnum(__int64 pdef, char* name, __int64 nAdd)
@@ -59,8 +72,8 @@ static __int64 __fastcall Hook_PdefStartNewEnum(__int64 pdef, char* name, __int6
 
 void VPdefParseBound::Detour(const bool bAttach) const
 {
-	if (v_PdefAllocItems)
-		DetourSetup(&v_PdefAllocItems, &Hook_PdefAllocItems, bAttach);
+	if (v_PdefStartNewStruct)
+		DetourSetup(&v_PdefStartNewStruct, &Hook_PdefStartNewStruct, bAttach);
 	if (v_PdefStartNewEnum)
 		DetourSetup(&v_PdefStartNewEnum, &Hook_PdefStartNewEnum, bAttach);
 
@@ -80,28 +93,28 @@ void VPdefParseBound::Detour(const bool bAttach) const
 	}
 	if (!cmp)
 	{
-		Warning(eDLL_T::CLIENT, "[PDEF] flush overflow cmp missing -- AllocItems hook only\n");
+		Warning(eDLL_T::CLIENT, "[PDEF] flush overflow cmp missing -- struct hook only\n");
 		return;
 	}
 
 	uint8_t* const afterLog = cmp + 0x19;
 	if (afterLog[0] != 0x48 || afterLog[1] != 0x8B)
 	{
-		Warning(eDLL_T::CLIENT, "[PDEF] flush fallthrough mismatch -- AllocItems hook only\n");
+		Warning(eDLL_T::CLIENT, "[PDEF] flush fallthrough mismatch -- struct hook only\n");
 		return;
 	}
 
 	uint8_t* const fail = cmp + 0x81;
 	if (fail[0] != 0x32 || fail[1] != 0xDB)
 	{
-		Warning(eDLL_T::CLIENT, "[PDEF] flush fail xor missing -- AllocItems hook only\n");
+		Warning(eDLL_T::CLIENT, "[PDEF] flush fail xor missing -- struct hook only\n");
 		return;
 	}
 
 	const int64_t rel64 = static_cast<int64_t>(fail - (afterLog + 5));
 	if (rel64 < INT32_MIN || rel64 > INT32_MAX)
 	{
-		Warning(eDLL_T::CLIENT, "[PDEF] flush fail out of range -- AllocItems hook only\n");
+		Warning(eDLL_T::CLIENT, "[PDEF] flush fail out of range -- struct hook only\n");
 		return;
 	}
 
@@ -110,7 +123,7 @@ void VPdefParseBound::Detour(const bool bAttach) const
 	memcpy(patch + 1, &rel, 4);
 	if (!Mem_PatchCode(afterLog, patch, sizeof(patch)))
 	{
-		Warning(eDLL_T::CLIENT, "[PDEF] flush patch failed -- AllocItems hook only\n");
+		Warning(eDLL_T::CLIENT, "[PDEF] flush patch failed -- struct hook only\n");
 		return;
 	}
 

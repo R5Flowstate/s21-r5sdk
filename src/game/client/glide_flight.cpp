@@ -16,6 +16,7 @@
 #include "game/client/glide_flight.h"
 #include "game/client/pred_authority.h"
 #include "game/shared/glide_tuning.h"
+#include "game/shared/titan_gate.h"
 
 #include <cfloat>
 
@@ -129,7 +130,8 @@ static bool GF_EnsureWritable(uint8_t* const pSettings)
 static void Hook_Glide_Check(uintptr_t pPlayer, void* pForward, float* vel)
 {
 	uint8_t* const pSettings = pPlayer ? GF_Player<uint8_t*>(pPlayer, GF_PLAYER_OFF_SETTINGS) : nullptr;
-	if (!pSettings || !vel || !GF_Ready() || !GF_EnsureWritable(pSettings))
+	if (!pSettings || !vel || TitanGate_IsTitanPlayer(reinterpret_cast<const void*>(pPlayer)) || !GF_Ready()
+		|| !GF_EnsureWritable(pSettings))
 		return v_Glide_Check(pPlayer, pForward, vel);
 
 	const bool bWasGliding = GF_Player<uint8_t>(pPlayer, GF_PLAYER_OFF_GLIDING) != 0;
@@ -150,7 +152,8 @@ static void Hook_Glide_Check(uintptr_t pPlayer, void* pForward, float* vel)
 static void Hook_Glide_Apply(uintptr_t pPlayer, float* vel, const float* fwd, const float* right, uintptr_t a5)
 {
 	uint8_t* const pSettings = pPlayer ? GF_Player<uint8_t*>(pPlayer, GF_PLAYER_OFF_SETTINGS) : nullptr;
-	if (!pSettings || !vel || !fwd || !right || !GF_Ready() || !GF_Player<uint8_t>(pPlayer, GF_PLAYER_OFF_GLIDING)
+	if (!pSettings || !vel || !fwd || !right || TitanGate_IsTitanPlayer(reinterpret_cast<const void*>(pPlayer)) || !GF_Ready()
+		|| !GF_Player<uint8_t>(pPlayer, GF_PLAYER_OFF_GLIDING)
 		|| !GF_EnsureWritable(pSettings))
 		return v_Glide_Apply(pPlayer, vel, fwd, right, a5);
 

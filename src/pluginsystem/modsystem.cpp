@@ -15,6 +15,7 @@
 #include "rtech/rson.h"
 #include "localize/localize.h"
 #include "vscript/script_convar_guard.h"
+#include "public/sdk_features.h"
 #include "modsystem.h"
 
 //-----------------------------------------------------------------------------
@@ -750,7 +751,7 @@ CModSystem::ModInstance_t::ModInstance_t(CModSystem* const _parentClass, const C
 		return;
 	}
 
-	if (!ParseMaps() || !ParseOverrides() || !ParseScriptWraps()
+	if (!ParseRequiredFeatures() || !ParseMaps() || !ParseWeapons() || !ParseOverrides() || !ParseScriptWraps()
 		|| !VerifyOwnedFiles() || !VerifyScriptWraps())
 	{
 		SetState(eModState::UNLOADED);
@@ -1119,19 +1120,7 @@ void CModSystem::ModInstance_t::ParseConVars()
 			if (g_pCVar->FindCommandBase(pszName) != nullptr)
 				continue;
 
-#if defined(CLIENT_DLL)
-			// The S21 ConVar owns its usage string and delete[]s it; the KV node frees its own copy.
-			char* pszOwnedUsage = nullptr;
-			if (pszUsageString && *pszUsageString)
-			{
-				const size_t nUsageLen = strlen(pszUsageString) + 1;
-				pszOwnedUsage = new char[nUsageLen];
-				memcpy(pszOwnedUsage, pszUsageString, nUsageLen);
-			}
-			ConVar* cvar = new ConVar(pszName, pszDefaultValue, flags, pszHelpString, bMin, fMin, bMax, fMax, nullptr, pszOwnedUsage);
-#else
 			ConVar* cvar = new ConVar(pszName, pszDefaultValue, flags, pszHelpString, bMin, fMin, bMax, fMax, nullptr, pszUsageString);
-#endif
 
 			if (!cvar)
 			{
@@ -1200,6 +1189,54 @@ void CModSystem::ModInstance_t::ParseDependencies()
 			pOut[nKey]->AddToTail(pszEntry);
 		}
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: refuses the mod when its "RequiresFeatures" block names a feature
+//          this build does not provide. Only truthy entries count, so
+//          `"portal" "0"` does not require anything.
+//-----------------------------------------------------------------------------
+bool CModSystem::ModInstance_t::ParseRequiredFeatures()
+{
+	Assert(settingsKV);
+
+	const KeyValues* const pFeatures = settingsKV->FindKey("RequiresFeatures");
+	if (!pFeatures)
+		return true;
+
+	int nDeclared = 0;
+	for (KeyValues* pSubKey = pFeatures->GetFirstSubKey();
+		pSubKey != nullptr; pSubKey = pSubKey->GetNextKey())
+	{
+		const char* const pszFeature = pSubKey->GetName();
+		if (!pszFeature || !pszFeature[0] || V_strlen(pszFeature) > 64)
+		{
+			Error(eDLL_T::ENGINE, NO_ERROR,
+				"[MOD-POLICY] Mod '%s' declares a malformed required feature; refusing the mod\n",
+				id.String());
+			return false;
+		}
+
+		if (!pSubKey->GetBool())
+			continue;
+
+		if (++nDeclared > MOD_MAX_FEATURES)
+		{
+			Warning(eDLL_T::MODSYSTEM, "[MOD-LOAD] '%s' declares more than %d RequiresFeatures; rest dropped\n",
+				id.String(), MOD_MAX_FEATURES);
+			break;
+		}
+
+		if (!SDK_HasFeature(pszFeature))
+		{
+			Error(eDLL_T::ENGINE, NO_ERROR,
+				"[MOD-POLICY] Mod '%s' requires feature '%s', which this build does not provide; update the game. Refusing the mod\n",
+				id.String(), pszFeature);
+			return false;
+		}
+	}
+
+	return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -1332,6 +1369,7 @@ static const char* const s_ModFixedFiles[] =
 	"license.txt",
 	"scripts/vscripts/scripts.rson",
 	"paks/win64/preload.rson",
+	"paks/win64_server/preload.rson",
 	"playlists_r5_patch.txt",
 };
 
@@ -1381,6 +1419,56 @@ static bool ModSys_PathExists(const char* const pszRel)
 	return GetFileAttributesA(pszRel) != INVALID_FILE_ATTRIBUTES;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Win32 leaf-name enumeration of one mod subdirectory, for content
+//          whose file name is freeform past the namespace (per-mod Miles
+//          banks). Never touches the engine filesystem.
+//-----------------------------------------------------------------------------
+bool ModSystem_ListModFiles(const CModSystem::ModInstance_t* const mod, const char* const pszSubDir,
+	const char* const pszExt, CUtlVector<CUtlString>& outFiles)
+{
+	if (!mod || !pszSubDir || !pszSubDir[0] || !pszExt || !pszExt[0])
+		return false;
+
+	if (!ModSystem_IsSafeRelativePath(pszSubDir))
+		return false;
+
+	if (strchr(pszExt, '/') || strchr(pszExt, '\\') || strchr(pszExt, '*') || strchr(pszExt, '?'))
+		return false;
+
+	char rel[MAX_PATH];
+	if (_snprintf_s(rel, sizeof(rel), _TRUNCATE, "%s%s/*%s",
+		mod->GetBasePath().String(), pszSubDir, pszExt) <= 0)
+	{
+		return false;
+	}
+
+	char abs[MAX_PATH * 2];
+	if (!ModSys_AbsPath(rel, abs, sizeof(abs)))
+		return false;
+
+	WIN32_FIND_DATAA findData;
+	const HANDLE hFind = FindFirstFileA(abs, &findData);
+	if (hFind == INVALID_HANDLE_VALUE)
+		return true;
+
+	int nFound = 0;
+	do
+	{
+		if (findData.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))
+			continue;
+
+		if (nFound >= 256)
+			break;
+
+		outFiles.AddToTail(findData.cFileName);
+		++nFound;
+	} while (FindNextFileA(hFind, &findData));
+
+	FindClose(hFind);
+	return true;
+}
+
 // The game may already own a folder named like the namespace (id "weapons" vs
 // scripts/weapons); files under it are then game paths, not the mod's.
 static bool ModSys_BaseHasDirectory(const char* const pszRel, const size_t nPrefix)
@@ -1415,6 +1503,14 @@ bool CModSystem::ModInstance_t::OwnsPath(const char* const pszRel) const
 	for (const char* const pFixed : s_ModFixedFiles)
 	{
 		if (!V_strcmp(rel, pFixed))
+			return true;
+	}
+
+	FOR_EACH_VEC(weapons, i)
+	{
+		char szWeapon[MAX_PATH];
+		V_snprintf(szWeapon, sizeof(szWeapon), "scripts/weapons/%s.txt", weapons[i].String());
+		if (!V_strcmp(rel, szWeapon))
 			return true;
 	}
 
@@ -1903,6 +1999,65 @@ bool CModSystem::ModInstance_t::ParseMaps()
 		}
 
 		maps.AddToTail(mapName);
+	}
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: parses "Weapons" { "mp_weapon_name" "1" }; a mod may only add
+//          weapons whose script file the base install does not ship. The packed
+//          weapon data is checked where the client resolves the weapon.
+//-----------------------------------------------------------------------------
+bool CModSystem::ModInstance_t::ParseWeapons()
+{
+	Assert(settingsKV);
+	const KeyValues* const pWeapons = settingsKV->FindKey("Weapons");
+
+	if (!pWeapons)
+		return true;
+
+	static const char s_szPrefix[] = "mp_weapon_";
+	const size_t nPrefix = sizeof(s_szPrefix) - 1;
+
+	for (KeyValues* pSubKey = pWeapons->GetFirstSubKey();
+		pSubKey != nullptr; pSubKey = pSubKey->GetNextKey())
+	{
+		CUtlString weaponName = pSubKey->GetName();
+		weaponName.ToLower();
+
+		const char* const pszWeapon = weaponName.String();
+		const size_t nLen = static_cast<size_t>(weaponName.Length());
+		const bool bShape = nLen > nPrefix && nLen <= 63 && !V_strncmp(pszWeapon, s_szPrefix, nPrefix)
+			&& pszWeapon[strspn(pszWeapon, "abcdefghijklmnopqrstuvwxyz0123456789_")] == '\0';
+
+		if (!bShape)
+		{
+			Error(eDLL_T::ENGINE, NO_ERROR,
+				"[MOD-OWN] Mod '%s' declares weapon '%s'; weapons must be named %s<name> (letters, digits, '_', at most 63). Refusing the mod\n",
+				id.String(), pSubKey->GetName(), s_szPrefix);
+			return false;
+		}
+
+		if (weapons.Count() >= MOD_MAX_WEAPONS)
+		{
+			Error(eDLL_T::ENGINE, NO_ERROR,
+				"[MOD-OWN] Mod '%s' declares more than %d weapons. Refusing the mod\n",
+				id.String(), MOD_MAX_WEAPONS);
+			return false;
+		}
+
+		char rel[MAX_PATH];
+		if (_snprintf_s(rel, sizeof(rel), _TRUNCATE, "platform\\scripts\\weapons\\%s.txt", pszWeapon) <= 0
+			|| ModSys_PathExists(rel))
+		{
+			Error(eDLL_T::ENGINE, NO_ERROR,
+				"[MOD-OWN] Mod '%s' declares weapon '%s', which the game already ships. Refusing the mod\n",
+				id.String(), pszWeapon);
+			return false;
+		}
+
+		weapons.AddToTail(weaponName);
 	}
 
 	return true;

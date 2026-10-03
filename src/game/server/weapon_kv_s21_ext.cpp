@@ -75,6 +75,21 @@ static bool TryReadBoolKey(KeyValues* pBlock, const char* pszKey, bool* pOut)
 	return true;
 }
 
+// True when the key exists; *pHasTrail says whether it names an effect.
+static bool TryReadTrail3pKey(KeyValues* pBlock, int nIndex, bool* pHasTrail)
+{
+	char szKey[48];
+	V_snprintf(szKey, sizeof(szKey), "projectile_trail_effect_%d_3p", nIndex);
+
+	KeyValues* const pKey = pBlock->FindKey(szKey, false);
+	if (!pKey)
+		return false;
+
+	const char* const psz = pKey->GetString();
+	*pHasTrail = psz && psz[0];
+	return true;
+}
+
 static KeyValues* FindWeaponDataBlock(KeyValues* pKv)
 {
 	if (!pKv)
@@ -189,6 +204,9 @@ static WeaponKVS21Ext_t ParseWeaponKVS21Ext(const char* pszWeaponName)
 		}
 	}
 
+	for (int i = 0; i < WEAPON_S21_TRAIL_COUNT; ++i)
+		TryReadTrail3pKey(pData, i, &ext.abTrail3p[i]);
+
 	KeyValues* const pMods = pData->FindKey("Mods", false);
 	if (pMods && pMods->FindKey("heirloom", false))
 	{
@@ -215,6 +233,19 @@ static WeaponKVS21Ext_t ParseWeaponKVS21Ext(const char* pszWeaponName)
 				char szMod[96];
 				V_snprintf(szMod, sizeof(szMod), "%s.%s=%d", pMod->GetName(), s_pszBoolKeys[i], bValue ? 1 : 0);
 				NoteFoundKey(szFound, sizeof(szFound), &nFound, szMod);
+			}
+
+			for (int i = 0; i < WEAPON_S21_TRAIL_COUNT; ++i)
+			{
+				bool bHasTrail = false;
+				if (!TryReadTrail3pKey(pMod, i, &bHasTrail))
+					continue;
+
+				WeaponKVS21ModTrail_t entry;
+				entry.modName = pMod->GetName();
+				entry.nIndex = i;
+				entry.bHasTrail = bHasTrail;
+				ext.modTrails.push_back(entry);
 			}
 		}
 	}
@@ -280,6 +311,31 @@ bool WeaponKVS21Ext_GetBool(const void* pWeapon, WeaponS21Bool_e key)
 			bValue = mod.value;
 	}
 	return bValue;
+}
+
+bool WeaponKVS21Ext_HasTrail3p(const void* pWeapon, const uint32_t nModBits, const int nIndex)
+{
+	if (!pWeapon || nIndex < 0 || nIndex >= WEAPON_S21_TRAIL_COUNT)
+		return false;
+
+	char szName[65];
+	V_strncpy(szName, static_cast<const char*>(pWeapon) + WPNKV_WEAPON_OFF_CLASSNAME, sizeof(szName));
+
+	const WeaponKVS21Ext_t& ext = WeaponKVS21Ext_Get(szName);
+	bool bHasTrail = ext.abTrail3p[nIndex];
+	if (!nModBits)
+		return bHasTrail;
+
+	for (const WeaponKVS21ModTrail_t& mod : ext.modTrails)
+	{
+		if (mod.nIndex != nIndex)
+			continue;
+		if (mod.nBit == -2)
+			mod.nBit = WeaponMods_FindBit(pWeapon, mod.modName.c_str());
+		if (mod.nBit >= 0 && (nModBits & (1u << mod.nBit)))
+			bHasTrail = mod.bHasTrail;
+	}
+	return bHasTrail;
 }
 
 void WeaponKVS21Ext_LevelShutdown(void)

@@ -1860,10 +1860,17 @@ bool KeyValues::LoadFromBuffer(char const* resourceName, const char* pBuffer, IB
 	// Translate Unicode files into UTF-8 before proceeding
 	if (nLen > 2 && (uint8)pBuffer[0] == 0xFF && (uint8)pBuffer[1] == 0xFE)
 	{
-		int nUTF8Len = V_UnicodeToUTF8((wchar_t*)(pBuffer + 2), NULL, 0);
-		char* pUTF8Buf = new char[nUTF8Len];
-		V_UnicodeToUTF8((wchar_t*)(pBuffer + 2), pUTF8Buf, nUTF8Len);
-		buf.AssumeMemory(pUTF8Buf, nUTF8Len, nUTF8Len, CUtlBuffer::READ_ONLY | CUtlBuffer::TEXT_BUFFER);
+		// nLen stops at the first zero byte; convert exactly that run, never up to a wide terminator.
+		const wchar_t* const pWide = reinterpret_cast<const wchar_t*>(pBuffer + 2);
+		const int nWide = static_cast<int>((nLen - 2) / sizeof(wchar_t));
+		int nUTF8Len = nWide > 0 ? WideCharToMultiByte(CP_UTF8, 0, pWide, nWide, NULL, 0, NULL, NULL) : 0;
+		if (nUTF8Len < 0)
+			nUTF8Len = 0;
+		char* const pUTF8Buf = new char[nUTF8Len + 1];
+		if (nUTF8Len > 0)
+			WideCharToMultiByte(CP_UTF8, 0, pWide, nWide, pUTF8Buf, nUTF8Len, NULL, NULL);
+		pUTF8Buf[nUTF8Len] = '\0';
+		buf.AssumeMemory(pUTF8Buf, nUTF8Len + 1, nUTF8Len + 1, CUtlBuffer::READ_ONLY | CUtlBuffer::TEXT_BUFFER);
 	}
 	return LoadFromBuffer(resourceName, buf, pFileSystem, pPathID, pfnEvaluateSymbolProc);
 }
@@ -4085,10 +4092,17 @@ bool KeyValues::LoadFromBuffer(char const* resourceName, const char* pBuffer, IB
 	// Translate Unicode files into UTF-8 before proceeding
 	if (nLen > 2 && (uint8)pBuffer[0] == 0xFF && (uint8)pBuffer[1] == 0xFE)
 	{
-		int nUTF8Len = V_UnicodeToUTF8((wchar_t*)(pBuffer + 2), NULL, 0);
-		char* pUTF8Buf = new char[nUTF8Len];
-		V_UnicodeToUTF8((wchar_t*)(pBuffer + 2), pUTF8Buf, nUTF8Len);
-		buf.AssumeMemory(pUTF8Buf, nUTF8Len, nUTF8Len, CUtlBuffer::READ_ONLY | CUtlBuffer::TEXT_BUFFER);
+		// nLen stops at the first zero byte; convert exactly that run, never up to a wide terminator.
+		const wchar_t* const pWide = reinterpret_cast<const wchar_t*>(pBuffer + 2);
+		const int nWide = static_cast<int>((nLen - 2) / sizeof(wchar_t));
+		int nUTF8Len = nWide > 0 ? WideCharToMultiByte(CP_UTF8, 0, pWide, nWide, NULL, 0, NULL, NULL) : 0;
+		if (nUTF8Len < 0)
+			nUTF8Len = 0;
+		char* const pUTF8Buf = new char[nUTF8Len + 1];
+		if (nUTF8Len > 0)
+			WideCharToMultiByte(CP_UTF8, 0, pWide, nWide, pUTF8Buf, nUTF8Len, NULL, NULL);
+		pUTF8Buf[nUTF8Len] = '\0';
+		buf.AssumeMemory(pUTF8Buf, nUTF8Len + 1, nUTF8Len + 1, CUtlBuffer::READ_ONLY | CUtlBuffer::TEXT_BUFFER);
 	}
 	return LoadFromBuffer(resourceName, buf, pFileSystem, pPathID, pfnEvaluateSymbolProc);
 }

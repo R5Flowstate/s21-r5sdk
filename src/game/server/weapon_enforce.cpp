@@ -12,6 +12,7 @@
 #include "game/shared/sdk_entity_state.h"
 
 #include "game/shared/edict_dirty.h"
+#include "game/shared/dt_extend.h"
 #include "game/server/basecombatcharacter.h"
 #include "game/server/util_server.h"
 #include "game/server/player.h"
@@ -116,6 +117,10 @@ WeaponEnforceResult WeaponEnforce_Check(const void* pPlayer, const void* pWeapon
 void WeaponEnforce_ForceSwapIfNowDisabled(void* pPlayer)
 {
 	if (!sdk_weapon_enforce.GetBool() || !pPlayer)
+		return;
+
+	// DisableWeaponTypes is callable on any entity; only a player carries the inventory below.
+	if (!DTExtend_EntityHasSendTable(pPlayer, "DT_Player"))
 		return;
 
 	// Re-entry guard: if a slot-clear triggers a script callback that calls

@@ -20,6 +20,7 @@
 #include "game/shared/usercmd.h"
 #include "game/shared/edict_dirty.h"
 #include "game/shared/glide_tuning.h"
+#include "game/shared/titan_gate.h"
 #include "game/shared/player_extend_sidecar.h"
 #include "game/shared/sdk_entity_state.h"
 #include "game/shared/vscript_gamedll_defs.h"
@@ -62,6 +63,7 @@ static constexpr ptrdiff_t GL_OFF_HOVERING        = 0x6968;
 static constexpr int      GL_FL_ONGROUND     = 0x1;
 static constexpr int      GL_MOVETYPE_WALK   = 2;
 static constexpr int      GL_IN_JUMP         = 0x00000002;
+static constexpr int      GL_IN_MOVEMENT     = 0x10000000; // IN_DODGE; the engage press, jump presses it unless +dodge is bound apart
 static constexpr uint32_t GL_INVALID_HANDLE  = 0xFFFFFFFFu;
 static constexpr float    GL_LN2             = 0.69314718f;
 // Minimum spacing the S21 client enforces between two jump presses and after a zipline detach.
@@ -245,6 +247,11 @@ static bool Glide_Enabled(void)
 	return bridge_glide.GetBool() && Glide_ResolveFields();
 }
 
+static bool Glide_EnabledFor(const void* const pPlayer)
+{
+	return Glide_Enabled() && !TitanGate_IsTitanPlayer(pPlayer);
+}
+
 static void Glide_MirrorWire(void* pPlayer, const GlideState& st)
 {
 	PlayerExtend_SetI32(pPlayer, offsetof(PlayerExtendWire, m_activateGlide), st.m_bActivate ? 1 : 0);
@@ -364,7 +371,7 @@ static int Glide_CanUse(uint8_t* pPlayer)
 	if (flSinceZipDetach <= GL_MIN_INTERVAL)
 		return GLIDE_ENGAGE_FAILED_OTHER;
 
-	if (!(*reinterpret_cast<const int*>(pPlayer + GL_OFF_BUTTONSPRESSED) & GL_IN_JUMP))
+	if (!(*reinterpret_cast<const int*>(pPlayer + GL_OFF_BUTTONSPRESSED) & GL_IN_MOVEMENT))
 	{
 		if (!Glide_B(pSet, GLF_HOLD_INPUT_ACTIVATION))
 			return GLIDE_ENGAGE_FAILED_OTHER;
@@ -427,7 +434,7 @@ static void Glide_Start(uint8_t* pPlayer, const float* vel)
 
 static void Hook_Glide_Check(void* pPlayer, void* pUnused, float* vel)
 {
-	if (!pPlayer || !vel || !Glide_Enabled())
+	if (!pPlayer || !vel || !Glide_EnabledFor(pPlayer))
 		return v_Glide_Check(pPlayer, pUnused, vel);
 
 	uint8_t* const p = static_cast<uint8_t*>(pPlayer);
@@ -585,7 +592,7 @@ static void Glide_Apply(uint8_t* pPlayer, float* vel, const float* moveFwd, cons
 
 static void Hook_Glide_Apply(void* pPlayer, float* vel, const float* moveFwd, const float* moveRight)
 {
-	if (!pPlayer || !vel || !moveFwd || !moveRight || !Glide_Enabled())
+	if (!pPlayer || !vel || !moveFwd || !moveRight || !Glide_EnabledFor(pPlayer))
 		return v_Glide_Apply(pPlayer, vel, moveFwd, moveRight);
 
 	Glide_Apply(static_cast<uint8_t*>(pPlayer), vel, moveFwd, moveRight);
@@ -593,7 +600,7 @@ static void Hook_Glide_Apply(void* pPlayer, float* vel, const float* moveFwd, co
 
 void Glide_PreRunCommand(CPlayer* pPlayer, CUserCmd* pUserCmd)
 {
-	if (!pPlayer || !pUserCmd || !Glide_Enabled())
+	if (!pPlayer || !pUserCmd || !Glide_EnabledFor(pPlayer))
 		return;
 
 	const uint8_t* const p = reinterpret_cast<const uint8_t*>(pPlayer);
@@ -615,7 +622,7 @@ static void Hook_Player_OnTouchSurface(void* pPlayer)
 {
 	v_Player_OnTouchSurface(pPlayer);
 
-	if (!pPlayer || !Glide_Enabled())
+	if (!pPlayer || !Glide_EnabledFor(pPlayer))
 		return;
 
 	GlideState& st = s_glideMap[pPlayer];
@@ -637,7 +644,7 @@ static bool __fastcall Glide_DuckInputBlocked(const uint8_t* pPlayer)
 
 	if (pPlayer[GL_OFF_JETPACK] && s_pStfJetpackToggleOn && pSet[*s_pStfJetpackToggleOn])
 		return true;
-	if (!Glide_Enabled())
+	if (!Glide_EnabledFor(pPlayer))
 		return false;
 
 	if (pPlayer[GL_OFF_JETPACK] && Glide_B(pSet, GLF_JETPACK_SCRIPT_TO_ACTIVATE))

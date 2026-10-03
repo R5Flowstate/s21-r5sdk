@@ -1,6 +1,7 @@
 #if defined(CLIENT_DLL)
 #include "core/stdafx.h"
 #include "filesystem/filesystem.h"
+#include <new>
 
 ///////////////////////////////////////////////////////////////////////////////
 CFileSystem_Stdio** g_pFullFileSystem  = nullptr;
@@ -38,9 +39,16 @@ char* FileSystem_ReadAll(const char* pszFileName, const char* pszPathID, ssize_t
 	if (!hFile)
 		return nullptr;
 
+	// Callers read text configs (mod rson/manifests, ban list, name filter);
+	// mod files are untrusted, and a failed new[] here is an abort.
+	constexpr ssize_t kMaxReadAllBytes = 64 * 1024 * 1024;
+
 	const ssize_t fileSize = pFS->Size(hFile);
-	if (fileSize <= 0)
+	if (fileSize <= 0 || fileSize > kMaxReadAllBytes)
 	{
+		if (fileSize > kMaxReadAllBytes)
+			Warning(eDLL_T::FS, "[FS] '%s' is %zd bytes, over the %zd byte read cap -- not loaded\n",
+				pszFileName, fileSize, kMaxReadAllBytes);
 		pFS->Close(hFile);
 		return nullptr;
 	}
@@ -48,7 +56,12 @@ char* FileSystem_ReadAll(const char* pszFileName, const char* pszPathID, ssize_t
 	// +2 for the double null terminator -- parsers that detect Unicode via
 	// trailing \0\0 work without special-casing, and strlen-based consumers
 	// see a clean C string.
-	char* const pBuf = new char[fileSize + 2];
+	char* const pBuf = new (std::nothrow) char[fileSize + 2];
+	if (!pBuf)
+	{
+		pFS->Close(hFile);
+		return nullptr;
+	}
 
 	const ssize_t nRead = pFS->Read(pBuf, fileSize, hFile);
 	pFS->Close(hFile);
@@ -91,6 +104,7 @@ bool FileSystem_WriteAll(const char* pszFileName, const char* pszPathID, const v
 #else // !CLIENT_DLL
 #include "core/stdafx.h"
 #include "filesystem/filesystem.h"
+#include <new>
 
 ///////////////////////////////////////////////////////////////////////////////
 CFileSystem_Stdio** g_pFullFileSystem  = nullptr;

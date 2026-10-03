@@ -448,15 +448,18 @@ void Dedicated_Init()
 
 	// Fix entitlement balance count mismatch: the read loop uses r13d
 	// (dedi's parsed count) but the client sends fewer. Trampoline through
-	// the dead rejection path to load the client's count into r13d first.
+	// the dead rejection path to read min(client, dedi) into r13d. The
+	// client count is a wire byte and the balance vector was sized from the
+	// dedi count, so a larger client count would write past it.
 	// Layout: [cmp+jz(7+2)] [dead_code(32)] [test r13d,r13d(3)]
 	CMemory entBalCheck = Module_FindPattern(g_GameDll, "44 39 AD 08 08 00 00 74 20 4C 8B 85");
 	if (entBalCheck)
 	{
 		// byte 7-8: change jz +20 to jmp +0 (land on trampoline at byte 9)
 		entBalCheck.Offset(7).Patch({ 0xEB, 0x00 });
-		// byte 9-17: mov r13d,[rbp+808h]; jmp +17h (to test r13d)
-		entBalCheck.Offset(9).Patch({ 0x44, 0x8B, 0xAD, 0x08, 0x08, 0x00, 0x00, 0xEB, 0x17 });
+		// byte 9-23: mov eax,[rbp+808h]; cmp eax,r13d; cmovb r13d,eax; jmp +11h (to test r13d)
+		entBalCheck.Offset(9).Patch({ 0x8B, 0x85, 0x08, 0x08, 0x00, 0x00, 0x44, 0x39, 0xE8,
+			0x44, 0x0F, 0x42, 0xE8, 0xEB, 0x11 });
 		Msg(eDLL_T::SERVER, "[Dedicated_Init] entitlements balance trampoline at %p\n", entBalCheck.GetPtr());
 	}
 	else

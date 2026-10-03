@@ -20,6 +20,9 @@
 #include "mantle_boost.h"
 #include "bridge_cmd_chain.h"
 #include "game/shared/dt_extend.h"
+#if defined(SDK_WIP)
+#include "game/server/halo_vehicle/halo_vehicle.h"
+#endif // SDK_WIP
 
 
 // Last consumed slot-0 usercmd identity for the SendSnapshot ack-trace probe.
@@ -137,6 +140,9 @@ void CPlayerMove::StaticRunCommand(CPlayerMove* thisp, CPlayer* player, CUserCmd
 
 	// Author velocity before movement integrates it. After would be one command behind.
 	SkydiveBridge_Think(player, ucmd, playerFrameTime);
+#if defined(SDK_WIP)
+	HaloVehicle_OnRunCommand(player, ucmd);
+#endif // SDK_WIP
 
 	const float flFreezeScale = GameTimescale_WorldScale();
 	if (flFreezeScale < 1.0f)

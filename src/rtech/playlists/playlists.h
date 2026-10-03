@@ -6,7 +6,9 @@
 void Playlists_SDKInit(void);
 bool Playlists_Load(const char* pszPlaylist);
 bool Playlists_Parse(const char* pszPlaylist);
+#if defined(CLIENT_DLL)
 void MergeModPlaylistsIntoFile(void);
+#endif // CLIENT_DLL
 KeyValues* Playlists_GetRootKV(void);
 void Playlists_LoadOverlayCatalog(void);
 
@@ -34,6 +36,12 @@ inline bool(*v_Playlists_Load)(const char* pszPlaylist);
 inline bool(*v_Playlists_Parse)(const char* pszPlaylist);
 inline const char* (*v_Playlists_GetCurrent)(void);
 inline void(*v_Playlists_Download_f)(void);
+
+// Reads the playlist file (-playlistFile) into the engine's text buffer and
+// length (+1 for the NUL); the loader parses that buffer next.
+inline bool(*v_Playlists_ReadFile)(void);
+extern char** g_ppPlaylistFileText;
+extern int* g_pnPlaylistFileTextSize;
 
 // Runtime playlist var overrides. Authoring is server-side only; the values ride
 // svc_PlaylistOverrides (S3 msg 34) to every connected client, which the bridge
@@ -64,6 +72,7 @@ class VPlaylists : public IDetour
 		LogFunAdr("Playlists_Parse", v_Playlists_Parse);
 		LogFunAdr("Playlists_GetCurrent", v_Playlists_GetCurrent);
 		LogFunAdr("Playlists_Download_f", v_Playlists_Download_f);
+		LogFunAdr("Playlists_ReadFile", v_Playlists_ReadFile);
 		LogFunAdr("Playlist_SetVarOverride", v_Playlist_SetVarOverride);
 		LogFunAdr("Playlist_ClearVarOverrides", v_Playlist_ClearVarOverrides);
 		LogVarAdr("g_pPlaylistKeyValues", g_pPlaylistKeyValues);
@@ -71,6 +80,8 @@ class VPlaylists : public IDetour
 		LogVarAdr("g_pPlaylistOverrideCount", g_pPlaylistOverrideCount);
 		LogVarAdr("g_pPlaylistOverridesDirty", g_pPlaylistOverridesDirty);
 		LogVarAdr("g_pPlaylistOverrideTable", g_pPlaylistOverrideTable);
+		LogVarAdr("g_ppPlaylistFileText", g_ppPlaylistFileText);
+		LogVarAdr("g_pnPlaylistFileTextSize", g_pnPlaylistFileTextSize);
 	}
 	virtual void GetFun(void) const
 	{
@@ -78,6 +89,12 @@ class VPlaylists : public IDetour
 		Module_FindPattern(g_GameDll, "E8 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? ?? 74 0C").FollowNearCallSelf().GetPtr(v_Playlists_Parse);
 		Module_FindPattern(g_GameDll, "48 8B 05 ?? ?? ?? ?? 48 85 C0 75 08 48 8D 05 ?? ?? ?? ?? C3 0F B7 50 2A").GetPtr(v_Playlists_GetCurrent);
 		Module_FindPattern(g_GameDll, "33 C9 C6 05 ?? ?? ?? ?? ?? E9 ?? ?? ?? ??").GetPtr(v_Playlists_Download_f);
+
+		// The `lea rcx, g_pCmdLine; cmp byte [rip+disp32], r14b` pair is the -playlistFile lookup.
+		Module_FindPattern(g_GameDll, "48 89 5C 24 10 48 89 74 24 18 55 57 41 56 48 8D 6C 24 B9 48 81 EC A0 00 00 00 45 33 F6 48 8D 0D ?? ?? ?? ?? 44 38 35")
+			.GetPtr(v_Playlists_ReadFile);
+		if (!v_Playlists_ReadFile)
+			Warning(eDLL_T::ENGINE, "[PLAYLIST] playlist file reader unresolved; mod playlists will not merge\n");
 
 		// Playlist_SetVarOverride(name, value) -- engine helper. The `83 3D ?? ?? ?? ?? 02`
 		// is the host-state >= 2 test that picks the authoring branch over the client-side
@@ -108,6 +125,19 @@ class VPlaylists : public IDetour
 
 		// First `lea rax, [rip+disp32]` in Playlist_SetVarOverride is the table base on the
 		// append path (the earlier lea in the at-capacity warning targets rcx, not rax).
+		// After the file-size query: `mov rdx, [text]; mov rsi, rax; lea ecx, [rax+1]; mov [size], ecx`.
+		if (v_Playlists_ReadFile)
+		{
+			CMemory sizeSite = CMemory(v_Playlists_ReadFile).FindPatternSelf("48 8B 15 ?? ?? ?? ?? 48 8B F0 8D 48 01 89 0D", CMemory::Direction::DOWN, 0x100);
+			if (sizeSite)
+			{
+				g_ppPlaylistFileText = sizeSite.ResolveRelativeAddress(0x3, 0x7).RCast<char**>();
+				g_pnPlaylistFileTextSize = sizeSite.Offset(0xD).ResolveRelativeAddress(0x2, 0x6).RCast<int*>();
+			}
+			else
+				Warning(eDLL_T::ENGINE, "[PLAYLIST] playlist text buffer unresolved; mod playlists will not merge\n");
+		}
+
 		if (v_Playlist_SetVarOverride)
 			g_pPlaylistOverrideTable = CMemory(v_Playlist_SetVarOverride).FindPatternSelf("48 8D 05", CMemory::Direction::DOWN, 200).ResolveRelativeAddressSelf(0x3, 0x7).RCast<char*>();
 	}

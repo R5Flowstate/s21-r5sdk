@@ -11,6 +11,10 @@
 #include "filesystem/filesystem.h"
 #include "tier0/commandline.h"
 
+#include <algorithm>
+#include <string>
+#include <vector>
+
 static ConVar playlist_debug("playlist_debug", "0", FCVAR_DEVELOPMENTONLY, "Enable debug logging for playlist mod system");
 
 KeyValues** g_pPlaylistKeyValues = nullptr; // The KeyValue for the playlist file.
@@ -208,6 +212,7 @@ void Playlists_LoadOverlayCatalog(void)
 #endif // CLIENT_DLL
 }
 
+#if defined(CLIENT_DLL)
 // Each enabled mod's playlist patch, parsed at most once per merge. The orphan
 // checks run once per base entry, so reloading the file per entry is quadratic.
 struct ModPatchCache_t
@@ -255,7 +260,7 @@ struct ModPatchCache_t
 };
 
 //-----------------------------------------------------------------------------
-// Purpose: Merges mod playlist patches into the base playlist file at startup
+// Purpose: merges mod playlist patches into the client's in-memory catalog
 //-----------------------------------------------------------------------------
 void MergeModPlaylistsIntoFile()
 {
@@ -683,10 +688,8 @@ void MergeModPlaylistsIntoFile()
 	ModSystem()->UnlockModList();
 	} // End mod processing block
 
-	// Save the merged playlist back to the file if we made changes
 	if (hasChanges)
 	{
-#if defined(CLIENT_DLL)
 		if (s_pClientPlaylistFile && s_pClientPlaylistFile != pBaseKV)
 			delete s_pClientPlaylistFile;
 		s_pClientPlaylistFile = pBaseKV;
@@ -706,23 +709,528 @@ void MergeModPlaylistsIntoFile()
 		}
 
 		Msg(eDLL_T::ENGINE, "[PLAYLIST] merged mod patches in memory (no disk write)\n");
-#else
-		CUtlBuffer outBuf;
-		pBaseKV->RecursiveSaveToFile(outBuf, 0);
-		
-		if (FileSystem()->WriteFile(playlistFilePath, "GAME", outBuf))
-		{
-			Msg(eDLL_T::ENGINE, "Successfully updated playlist file with mod patches\n");
-		}
-		else
-		{
-			Warning(eDLL_T::ENGINE, "Failed to write merged playlist file\n");
-		}
-#endif // !CLIENT_DLL
 	}
 
 	delete pBaseKV;
 }
+#endif // CLIENT_DLL
+
+#if !defined(CLIENT_DLL)
+char** g_ppPlaylistFileText = nullptr;
+int* g_pnPlaylistFileTextSize = nullptr;
+
+//-----------------------------------------------------------------------------
+// Mod playlist patches on the dedi. The engine parses playlists only from the
+// text the file reader leaves in its buffer, so accepted mod entries are
+// spliced into that text as written in the mod's own file. The base file on
+// disk is never rewritten, and nothing passes through a KeyValues save, which
+// drops "" values and reprints numbers.
+//-----------------------------------------------------------------------------
+struct PlaylistTextNode_t
+{
+	std::string name;
+	std::string value;
+	bool bBlock = false;
+	size_t nStart = 0;   // first byte of the key token
+	size_t nEnd = 0;     // one past the value, closing brace or trailing conditional
+	size_t nClose = 0;   // the block's '}'
+	std::vector<PlaylistTextNode_t> children;
+};
+
+// Mirrors the KeyValues token reader: '//' comments, quoted strings without
+// escapes, '{' '}' '=' control chars, and '[...]' conditionals.
+class CPlaylistTextScanner
+{
+public:
+	CPlaylistTextScanner(const char* pText, const size_t nLen) : m_pText(pText), m_nLen(nLen), m_nPos(0)
+	{
+		if (nLen >= 3 && static_cast<unsigned char>(pText[0]) == 0xEF
+			&& static_cast<unsigned char>(pText[1]) == 0xBB && static_cast<unsigned char>(pText[2]) == 0xBF)
+			m_nPos = 3;
+	}
+
+	bool Parse(std::vector<PlaylistTextNode_t>& out)
+	{
+		size_t nClose = 0;
+		return ParseBlock(out, true, nClose, 0);
+	}
+
+private:
+	enum Token_e { TOKEN_EOF, TOKEN_STRING, TOKEN_OPEN, TOKEN_CLOSE, TOKEN_EQUALS };
+
+	struct Token_t
+	{
+		Token_e type = TOKEN_EOF;
+		std::string text;
+		bool bConditional = false;
+		size_t nStart = 0;
+		size_t nEnd = 0;
+	};
+
+	void SkipSpaceAndComments(void)
+	{
+		while (m_nPos < m_nLen)
+		{
+			const char c = m_pText[m_nPos];
+			if (!c)
+			{
+				m_nPos = m_nLen;
+				return;
+			}
+			if (V_isspace(c))
+			{
+				m_nPos++;
+				continue;
+			}
+			if (c == '/' && m_nPos + 1 < m_nLen && m_pText[m_nPos + 1] == '/')
+			{
+				while (m_nPos < m_nLen && m_pText[m_nPos] != '\n')
+					m_nPos++;
+				continue;
+			}
+			return;
+		}
+	}
+
+	Token_t Next(void)
+	{
+		Token_t tok;
+		SkipSpaceAndComments();
+		if (m_nPos >= m_nLen)
+			return tok;
+
+		tok.nStart = m_nPos;
+		const char c = m_pText[m_nPos];
+		if (c == '"')
+		{
+			size_t i = m_nPos + 1;
+			while (i < m_nLen && m_pText[i] && m_pText[i] != '"')
+				i++;
+			tok.type = TOKEN_STRING;
+			tok.text.assign(m_pText + m_nPos + 1, i - m_nPos - 1);
+			m_nPos = (i < m_nLen && m_pText[i] == '"') ? i + 1 : i;
+			tok.nEnd = m_nPos;
+			return tok;
+		}
+		if (c == '{' || c == '}' || c == '=')
+		{
+			tok.type = (c == '{') ? TOKEN_OPEN : (c == '}') ? TOKEN_CLOSE : TOKEN_EQUALS;
+			tok.nEnd = ++m_nPos;
+			return tok;
+		}
+
+		bool bInConditional = false;
+		while (m_nPos < m_nLen)
+		{
+			const char ch = m_pText[m_nPos];
+			if (!ch || ch == '"' || ch == '{' || ch == '}' || ch == '=')
+				break;
+			if (ch == '[')
+				bInConditional = true;
+			if (ch == ']' && bInConditional)
+			{
+				tok.bConditional = true;
+				bInConditional = false;
+			}
+			if (V_isspace(ch) && !bInConditional)
+				break;
+			m_nPos++;
+		}
+		tok.type = TOKEN_STRING;
+		tok.text.assign(m_pText + tok.nStart, m_nPos - tok.nStart);
+		tok.nEnd = m_nPos;
+		return tok;
+	}
+
+	Token_t Peek(void)
+	{
+		const size_t nSaved = m_nPos;
+		Token_t tok = Next();
+		m_nPos = nSaved;
+		return tok;
+	}
+
+	bool ParseBlock(std::vector<PlaylistTextNode_t>& out, const bool bTopLevel, size_t& nClose, const int nDepth)
+	{
+		if (nDepth > 32)
+			return false;
+
+		while (true)
+		{
+			const Token_t key = Next();
+			if (key.type == TOKEN_EOF)
+				return bTopLevel;
+			if (key.type == TOKEN_CLOSE)
+			{
+				nClose = key.nStart;
+				return !bTopLevel;
+			}
+			if (key.type != TOKEN_STRING)
+				return false;
+
+			PlaylistTextNode_t node;
+			node.name = key.text;
+			node.nStart = key.nStart;
+
+			Token_t value = Next();
+			if (value.type == TOKEN_EQUALS)
+				value = Next();
+			if (value.type == TOKEN_STRING && value.bConditional)
+				value = Next();
+
+			if (value.type == TOKEN_OPEN)
+			{
+				node.bBlock = true;
+				if (!ParseBlock(node.children, false, node.nClose, nDepth + 1))
+					return false;
+				node.nEnd = node.nClose + 1;
+			}
+			else if (value.type == TOKEN_STRING)
+			{
+				node.value = value.text;
+				node.nEnd = value.nEnd;
+			}
+			else
+				return false;
+
+			const Token_t trailing = Peek();
+			if (trailing.type == TOKEN_STRING && trailing.bConditional)
+			{
+				Next();
+				node.nEnd = trailing.nEnd;
+			}
+
+			out.push_back(std::move(node));
+		}
+	}
+
+	const char* m_pText;
+	size_t m_nLen;
+	size_t m_nPos;
+};
+
+static const PlaylistTextNode_t* PlaylistText_FindChild(const std::vector<PlaylistTextNode_t>& nodes, const char* pszName)
+{
+	for (const PlaylistTextNode_t& node : nodes)
+	{
+		if (!V_stricmp(node.name.c_str(), pszName))
+			return &node;
+	}
+	return nullptr;
+}
+
+// Direct for_mod first, then vars/for_mod -- the same lookup the client merge uses.
+static const char* PlaylistText_GetForMod(const PlaylistTextNode_t& entry)
+{
+	const PlaylistTextNode_t* pForMod = PlaylistText_FindChild(entry.children, "for_mod");
+	if (pForMod && !pForMod->bBlock && !pForMod->value.empty())
+		return pForMod->value.c_str();
+
+	const PlaylistTextNode_t* const pVars = PlaylistText_FindChild(entry.children, "vars");
+	pForMod = pVars ? PlaylistText_FindChild(pVars->children, "for_mod") : nullptr;
+	if (pForMod && !pForMod->bBlock)
+		return pForMod->value.c_str();
+
+	return "";
+}
+
+static bool Playlists_ReadModPatchText(const char* pszPath, std::string& out)
+{
+	FileHandle_t f = FileSystem()->Open(pszPath, "rb", "GAME");
+	if (!f)
+		return false;
+
+	const ssize_t nSize = FileSystem()->Size(f);
+	if (nSize <= 0 || nSize > 4 * 1024 * 1024)
+	{
+		FileSystem()->Close(f);
+		return false;
+	}
+
+	out.resize(static_cast<size_t>(nSize));
+	const ssize_t nRead = FileSystem()->Read(&out[0], nSize, f);
+	FileSystem()->Close(f);
+
+	if (nRead <= 0)
+		return false;
+
+	out.resize(static_cast<size_t>(nRead));
+	return true;
+}
+
+struct PlaylistTextEdit_t
+{
+	size_t nOffset;
+	size_t nRemove;
+	std::string insert;
+};
+
+struct PlaylistModPatch_t
+{
+	std::string id;
+	std::string text;
+	std::vector<PlaylistTextNode_t> nodes;
+};
+
+static const PlaylistTextNode_t* PlaylistText_FindModSection(const PlaylistModPatch_t& patch, const char* pszSection)
+{
+	const PlaylistTextNode_t* const pModRoot = PlaylistText_FindChild(patch.nodes, "playlists");
+	if (!pModRoot || !pModRoot->bBlock)
+		return nullptr;
+
+	const PlaylistTextNode_t* const pSection = PlaylistText_FindChild(pModRoot->children, pszSection);
+	return (pSection && pSection->bBlock) ? pSection : nullptr;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: splices enabled mods' playlist and gamemode entries into the base
+//          playlist text; returns false when there is nothing to change
+//-----------------------------------------------------------------------------
+static bool Playlists_SpliceModPatches(const char* pBase, const size_t nBase, std::string& out)
+{
+	std::vector<PlaylistTextNode_t> baseNodes;
+	if (!CPlaylistTextScanner(pBase, nBase).Parse(baseNodes))
+	{
+		Warning(eDLL_T::ENGINE, "[PLAYLIST] base playlist text did not parse; mod patches not merged\n");
+		return false;
+	}
+
+	const PlaylistTextNode_t* const pRoot = PlaylistText_FindChild(baseNodes, "playlists");
+	if (!pRoot || !pRoot->bBlock)
+		return false;
+
+	std::vector<PlaylistModPatch_t> patches;
+	if (ModSystem()->IsEnabled())
+	{
+		static const char* const kPatchFiles[] = { "playlists_r5_patch.txt", "playlist_r5_patch.txt" };
+
+		ModSystem()->LockModList();
+		FOR_EACH_VEC(ModSystem()->GetModList(), i)
+		{
+			const CModSystem::ModInstance_t* const pMod = ModSystem()->GetModList()[i];
+			if (!pMod || !pMod->IsEnabled())
+				continue;
+
+			for (int j = 0; j < Q_ARRAYSIZE(kPatchFiles); ++j)
+			{
+				CUtlString patchPath = pMod->GetBasePath();
+				patchPath += kPatchFiles[j];
+				if (!FileSystem()->FileExists(patchPath.Get(), "GAME"))
+					continue;
+
+				PlaylistModPatch_t patch;
+				patch.id = pMod->id.String();
+				if (!Playlists_ReadModPatchText(patchPath.Get(), patch.text)
+					|| !CPlaylistTextScanner(patch.text.data(), patch.text.size()).Parse(patch.nodes))
+				{
+					Warning(eDLL_T::ENGINE, "Mod '%s': playlist patch '%s' did not parse - skipped\n",
+						pMod->id.String(), kPatchFiles[j]);
+					break;
+				}
+				patches.push_back(std::move(patch));
+				break; // Only the first patch file per mod.
+			}
+		}
+		ModSystem()->UnlockModList();
+	}
+
+	std::vector<PlaylistTextEdit_t> edits;
+	static const char* const kSections[] = { "Playlists", "Gamemodes" };
+
+	for (const char* const pszSection : kSections)
+	{
+		const PlaylistTextNode_t* const pBaseSection = PlaylistText_FindChild(pRoot->children, pszSection);
+		if (!pBaseSection || !pBaseSection->bBlock)
+			continue;
+
+		// Entries a mod once contributed (for_mod set) are dropped here and
+		// re-added below only if that mod is enabled and still provides them.
+		for (const PlaylistTextNode_t& entry : pBaseSection->children)
+		{
+			const char* const pszForMod = PlaylistText_GetForMod(entry);
+			if (!pszForMod[0])
+				continue;
+
+			bool bProvided = false;
+			for (const PlaylistModPatch_t& patch : patches)
+			{
+				if (V_strcmp(patch.id.c_str(), pszForMod))
+					continue;
+				const PlaylistTextNode_t* const pModSection = PlaylistText_FindModSection(patch, pszSection);
+				bProvided = pModSection && PlaylistText_FindChild(pModSection->children, entry.name.c_str());
+				break;
+			}
+
+			if (!bProvided)
+				Msg(eDLL_T::ENGINE, "Removing orphaned %s entry '%s' (mod '%s' no longer provides it)\n",
+					pszSection, entry.name.c_str(), pszForMod);
+
+			edits.push_back({ entry.nStart, entry.nEnd - entry.nStart, std::string() });
+		}
+
+		std::string inserted;
+		std::vector<std::pair<std::string, std::string>> accepted; // entry name, owning mod
+
+		for (const PlaylistModPatch_t& patch : patches)
+		{
+			const PlaylistTextNode_t* const pModSection = PlaylistText_FindModSection(patch, pszSection);
+			if (!pModSection)
+				continue;
+
+			const char* const pszMod = patch.id.c_str();
+			for (const PlaylistTextNode_t& entry : pModSection->children)
+			{
+				const char* const pszName = entry.name.c_str();
+				if (!entry.bBlock)
+					continue;
+
+				const char* const pszForMod = PlaylistText_GetForMod(entry);
+				if (!pszForMod[0])
+				{
+					Warning(eDLL_T::ENGINE, "Mod '%s': %s entry '%s' missing required 'for_mod' variable - skipping\n",
+						pszMod, pszSection, pszName);
+					continue;
+				}
+				if (V_strcmp(pszForMod, pszMod))
+				{
+					Warning(eDLL_T::ENGINE, "Mod '%s': %s entry '%s' has for_mod='%s' but should be '%s' - skipping\n",
+						pszMod, pszSection, pszName, pszForMod, pszMod);
+					continue;
+				}
+
+				const PlaylistTextNode_t* const pExisting = PlaylistText_FindChild(pBaseSection->children, pszName);
+				if (pExisting && !PlaylistText_GetForMod(*pExisting)[0])
+				{
+					Warning(eDLL_T::ENGINE, "Mod '%s': Cannot override base game %s entry '%s' - skipping\n",
+						pszMod, pszSection, pszName);
+					continue;
+				}
+
+				bool bTaken = false;
+				for (const std::pair<std::string, std::string>& taken : accepted)
+				{
+					if (V_stricmp(taken.first.c_str(), pszName))
+						continue;
+					Warning(eDLL_T::ENGINE, "Mod '%s': %s entry '%s' belongs to mod '%s' - skipping\n",
+						pszMod, pszSection, pszName, taken.second.c_str());
+					bTaken = true;
+					break;
+				}
+				if (bTaken)
+					continue;
+
+				// Engines divide by max_teams as a byte.
+				size_t nCutStart = 0, nCutEnd = 0;
+				const PlaylistTextNode_t* const pVars = PlaylistText_FindChild(entry.children, "vars");
+				const PlaylistTextNode_t* const pMaxTeams = pVars ? PlaylistText_FindChild(pVars->children, "max_teams") : nullptr;
+				if (pMaxTeams)
+				{
+					const unsigned long nTeams = pMaxTeams->bBlock ? 0 : strtoul(pMaxTeams->value.c_str(), nullptr, 10);
+					if (nTeams < 1 || nTeams > 255)
+					{
+						Warning(eDLL_T::ENGINE, "Mod '%s': '%s' max_teams '%s' out of range - dropped\n",
+							pszMod, pszName, pMaxTeams->value.c_str());
+						nCutStart = pMaxTeams->nStart;
+						nCutEnd = pMaxTeams->nEnd;
+					}
+				}
+
+				inserted += "\n\t\t";
+				if (nCutEnd > nCutStart)
+				{
+					inserted.append(patch.text, entry.nStart, nCutStart - entry.nStart);
+					inserted.append(patch.text, nCutEnd, entry.nEnd - nCutEnd);
+				}
+				else
+					inserted.append(patch.text, entry.nStart, entry.nEnd - entry.nStart);
+				inserted += "\n";
+
+				accepted.emplace_back(entry.name, patch.id);
+				Msg(eDLL_T::ENGINE, "Merged %s entry '%s' from mod '%s'\n", pszSection, pszName, pszMod);
+			}
+		}
+
+		if (!inserted.empty())
+			edits.push_back({ pBaseSection->nClose, 0, inserted + "\t" });
+	}
+
+	for (const PlaylistModPatch_t& patch : patches)
+	{
+		const PlaylistTextNode_t* const pModRoot = PlaylistText_FindChild(patch.nodes, "playlists");
+		if (!pModRoot)
+			continue;
+
+		// A patch contributes playlists and gamemodes only; other sections and
+		// repeats of those two are not merged.
+		const PlaylistTextNode_t* const pFirstPlaylists = PlaylistText_FindChild(pModRoot->children, "Playlists");
+		const PlaylistTextNode_t* const pFirstGamemodes = PlaylistText_FindChild(pModRoot->children, "Gamemodes");
+		for (const PlaylistTextNode_t& section : pModRoot->children)
+		{
+			if (&section != pFirstPlaylists && &section != pFirstGamemodes)
+				Warning(eDLL_T::ENGINE, "Mod '%s': playlist patch section '%s' is not allowed - dropped\n",
+					patch.id.c_str(), section.name.c_str());
+		}
+	}
+
+	if (edits.empty())
+		return false;
+
+	std::sort(edits.begin(), edits.end(), [](const PlaylistTextEdit_t& a, const PlaylistTextEdit_t& b)
+		{ return a.nOffset < b.nOffset; });
+
+	out.clear();
+	out.reserve(nBase + 4096);
+	size_t nCursor = 0;
+	for (const PlaylistTextEdit_t& edit : edits)
+	{
+		if (edit.nOffset < nCursor)
+			return false; // Overlapping edits: keep the engine's own text.
+		out.append(pBase + nCursor, edit.nOffset - nCursor);
+		out += edit.insert;
+		nCursor = edit.nOffset + edit.nRemove;
+	}
+	out.append(pBase + nCursor, nBase - nCursor);
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: engine playlist file read; mod patches are merged into the text it
+//          loaded before the engine parses it
+//-----------------------------------------------------------------------------
+static bool Playlists_ReadFile(void)
+{
+	if (!v_Playlists_ReadFile())
+		return false;
+
+	if (!g_ppPlaylistFileText || !g_pnPlaylistFileTextSize || !*g_ppPlaylistFileText || *g_pnPlaylistFileTextSize <= 0)
+		return true;
+
+	const char* const pBase = *g_ppPlaylistFileText;
+	const size_t nBase = strnlen(pBase, static_cast<size_t>(*g_pnPlaylistFileTextSize));
+
+	std::string merged;
+	if (!Playlists_SpliceModPatches(pBase, nBase, merged))
+		return true;
+
+	if (merged.size() >= static_cast<size_t>(INT_MAX))
+		return true;
+
+	// The engine frees and reallocates this buffer through the same allocator.
+	char* const pNew = static_cast<char*>(MemAllocSingleton()->Alloc(merged.size() + 1));
+	if (!pNew)
+		return true;
+
+	memcpy(pNew, merged.data(), merged.size());
+	pNew[merged.size()] = '\0';
+
+	MemAllocSingleton()->Free(*g_ppPlaylistFileText);
+	*g_ppPlaylistFileText = pNew;
+	*g_pnPlaylistFileTextSize = static_cast<int>(merged.size() + 1);
+
+	Msg(eDLL_T::ENGINE, "[PLAYLIST] merged mod patches in memory (no disk write)\n");
+	return true;
+}
+#endif // !CLIENT_DLL
 
 /*
 =====================
@@ -731,11 +1239,13 @@ Host_ReloadPlaylists_f
 */
 static void Host_ReloadPlaylists_f()
 {
-	// First, merge mod playlists into the base file
+#if defined(CLIENT_DLL)
 	MergeModPlaylistsIntoFile();
-	
-	// Then reload the merged playlist file
-	v_Playlists_Download_f();
+#endif // CLIENT_DLL
+
+	// The dedi merges mod patches as the engine reads the file (Playlists_ReadFile).
+	if (v_Playlists_Download_f)
+		v_Playlists_Download_f();
 }
 
 static ConCommand playlist_reload("playlist_reload", Host_ReloadPlaylists_f, "Reloads the playlists file", FCVAR_RELEASE);
@@ -1217,11 +1727,7 @@ bool Playlists_Load(const char* pszPlaylist)
 //-----------------------------------------------------------------------------
 bool Playlists_Parse(const char* pszPlaylist)
 {
-	const bool bResult = v_Playlists_Parse(pszPlaylist);
-	
-	// No runtime merging needed - we modify the file directly at startup
-
-	return bResult;
+	return v_Playlists_Parse(pszPlaylist);
 }
 
 #if defined(CLIENT_DLL)
@@ -1244,4 +1750,8 @@ void VPlaylists::Detour(const bool bAttach) const
 {
 	DetourSetup(&v_Playlists_Load, &Playlists_Load, bAttach);
 	DetourSetup(&v_Playlists_Parse, &Playlists_Parse, bAttach);
+#if !defined(CLIENT_DLL)
+	if (v_Playlists_ReadFile)
+		DetourSetup(&v_Playlists_ReadFile, &Playlists_ReadFile, bAttach);
+#endif // !CLIENT_DLL
 }

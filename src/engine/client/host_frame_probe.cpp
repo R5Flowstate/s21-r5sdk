@@ -11,6 +11,9 @@
 #include "tier1/convar.h"
 #include "host_frame_probe.h"
 #include "engine/agent_link.h"
+#if defined(SDK_WIP)
+#include "game/client/portal/c_prop_portal.h"
+#endif // SDK_WIP
 
 typedef void (__fastcall *PFN_Host_RunFrame)(double realtime, float dt);
 typedef void (__fastcall *PFN_HostState_RunFrame)(void* hostState, double realtime, float dt);
@@ -38,6 +41,9 @@ static void __fastcall Hook_HostState_RunFrame(void* hostState, double realtime,
 static void __fastcall Hook_Host_RunFrame(double realtime, float dt)
 {
 	Pak_CensusTick();
+#if defined(SDK_WIP)
+	Portal_ClientFrameTick();
+#endif // SDK_WIP
 	if (dt == 0.0f && s_flWorkerDt > 0.0f)
 	{
 		++s_nDtLost;

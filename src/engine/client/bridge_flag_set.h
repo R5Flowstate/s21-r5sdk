@@ -10,6 +10,7 @@
 
 #include "tier0/platform.h"
 #include "thirdparty/detours/include/idetour.h"
+#include "vscript/vsquirrel_s21.h"
 #include <atomic>
 
 // Native: -- FlagSet helper. Resolves "FlagSet" function in
@@ -30,9 +31,10 @@ inline UIKeyHandler_t v_UIKeyHandler = nullptr;
 // Total hook invocations (debug counter, lifetime of the DLL).
 inline std::atomic<uint64_t> g_bridgeFlagsetHookCalls{0};
 
-// Piggybacked FlagSets fire once per DLL load. Re-Set after lobby init
-// can re-trigger RunClientConnectScriptsThreaded and respawn lobby entities.
-inline std::atomic<bool> g_bridgeFlagsetPiggybackFired{false};
+// Piggybacked FlagSets fire once per client VM. Re-Set within one level can
+// re-trigger RunClientConnectScriptsThreaded and respawn lobby entities; a new
+// level has fresh flags and parks its connect scripts until they are set.
+inline std::atomic<unsigned int> g_bridgeFlagsetFiredGeneration{0};
 
 inline thread_local int g_uiKeyHandlerDepth = 0;
 
@@ -75,22 +77,19 @@ inline __int64 __fastcall Hook_ClientNetGlobalEntityCallback(__int64 thisptr)
 		return result;
 	}
 
-	// Atomic CAS: only the first invocation runs the FlagSets. Subsequent
-	// invocations log a single "skipped" line and bail.
-	bool expected = false;
-	const bool firstTime = g_bridgeFlagsetPiggybackFired.compare_exchange_strong(
-		expected, true, std::memory_order_acq_rel);
+	const unsigned int vmGeneration = g_nS21ClientVMGeneration;
+	const bool firstTime = g_bridgeFlagsetFiredGeneration.exchange(
+		vmGeneration, std::memory_order_acq_rel) != vmGeneration;
 
 	if (firstTime)
 	{
 		v_FlagSetByName("ClientInitComplete");
 		v_FlagSetByName("ClientNetGlobalNonRewindEntity");
 		Msg(eDLL_T::CLIENT,
-			"[BRIDGE-FLAGS] call#%llu thisptr=%p ONCE-PER-PROCESS piggyback "
+			"[BRIDGE-FLAGS] call#%llu thisptr=%p client VM gen %u piggyback "
 			"fired: FlagSet(\"ClientInitComplete\") + "
-			"FlagSet(\"ClientNetGlobalNonRewindEntity\"). Subsequent invocations "
-			"will be skipped (and counted).\n",
-			(unsigned long long)n, (void*)thisptr);
+			"FlagSet(\"ClientNetGlobalNonRewindEntity\").\n",
+			(unsigned long long)n, (void*)thisptr, vmGeneration);
 	}
 	else if (n <= 5 || (n % 25) == 0)
 	{
@@ -98,7 +97,7 @@ inline __int64 __fastcall Hook_ClientNetGlobalEntityCallback(__int64 thisptr)
 		// driven in a runaway loop on coworker machines without blowing
 		// up the warning.log. First 5 always logged, then every 25.
 		Msg(eDLL_T::CLIENT,
-			"[BRIDGE-FLAGS] call#%llu thisptr=%p skipped (already fired). "
+			"[BRIDGE-FLAGS] call#%llu thisptr=%p skipped (already fired this level). "
 			"If this number climbs continuously, the entity callback is "
 			"being driven in a loop (can force lobby respawn).\n",
 			(unsigned long long)n, (void*)thisptr);

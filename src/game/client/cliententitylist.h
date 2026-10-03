@@ -66,6 +66,11 @@ inline IClientEntity* (*v_ClientEntityList_GetClientEntity)(IClientEntityList* c
 inline IClientEntityList* g_pClientEntityList = nullptr;
 extern CClientEntityList* g_clientEntityList;
 
+// Entity base at entNum (serial < 0 = any serial) from the S21 client's
+// entity info array; nullptr when free or the serial does not match.
+// Does not depend on g_pClientEntityList, which the S21 client never sets.
+void* ClientEntityList_EntityAt(int entNum, int serial);
+
 ///////////////////////////////////////////////////////////////////////////////
 int HSys_Error_Internal(char* fmt, va_list args);
 

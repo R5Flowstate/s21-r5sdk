@@ -17,6 +17,7 @@
 #include "vscript/languages/squirrel_re/vsquirrel.h"
 #include "vscript/languages/squirrel_re/include/squirrel.h"
 #include "vscript_server.h"
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <iterator>
@@ -246,6 +247,9 @@ static __int64 Hook_WeaponFrame(void* pWeapon, void* pPlayer)
 static void WeaponCustomAct_ApplyForcedDuration(void* pWeapon, const float flForceDuration)
 {
 	if (!v_WeaponX_GetViewmodel || !v_WeaponX_AttackTimeBase)
+		return;
+	// Divisor of the replicated playback rate; a tiny or non-finite value stores inf/NaN.
+	if (!std::isfinite(flForceDuration) || flForceDuration < 0.01f || flForceDuration > 3600.0f)
 		return;
 	void* const pViewmodel = v_WeaponX_GetViewmodel(pWeapon);
 	if (!pViewmodel)

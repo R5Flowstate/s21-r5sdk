@@ -8,6 +8,7 @@
 
 #include "player_launch.h"
 #include <cstring>
+#include <cmath>
 #include "translocation.h"
 #include "game/shared/edict_dirty.h"
 #include "game/shared/sdk_entity_state.h"
@@ -302,6 +303,15 @@ void PlayerLaunch_Latch(void* pPlayer, float velX, float velY, float velZ, bool 
 {
 	if (!pPlayer)
 		return;
+
+	// Script supplies the vector; it lands in the movement velocity and a replicated prop.
+	static constexpr float kMaxLaunchComponent = 100000.0f;
+	if (!std::isfinite(velX) || !std::isfinite(velY) || !std::isfinite(velZ)
+		|| fabsf(velX) > kMaxLaunchComponent || fabsf(velY) > kMaxLaunchComponent || fabsf(velZ) > kMaxLaunchComponent)
+	{
+		Warning(eDLL_T::SERVER, "[PLAYER-LAUNCH] rejected launch velocity (%f %f %f)\n", velX, velY, velZ);
+		return;
+	}
 
 	PlayerLaunchState& s = s_launchMap[pPlayer];
 	s.m_activate = true;

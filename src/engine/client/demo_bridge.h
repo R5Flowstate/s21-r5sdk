@@ -36,11 +36,16 @@ void DemoRecord_OnDataBlockEnd(const bool bFull);
 void DemoRecord_OnPacketBegin(const uint8_t* pData, const int nSize);
 void DemoRecord_OnPacketEnd(const bool bFull, const uint32_t nTick, const int nReliableEndBit);
 void DemoRecord_OnSignonState(const int nState);
+struct R5DemUserCmd_s;
+// Each command the local player sends, for the replay's input display.
+void DemoRecord_OnUserCmd(const R5DemUserCmd_s& cmd);
 void DemoRecord_OnHostFrame(void);
 void DemoRecord_Shutdown(void);
 
 // The engine's current view angles (pitch, yaw, roll); false if unresolved.
 bool DemoPlay_GetEngineViewAngles(float* pAngles);
+// Writes the store the next usercmd reads its angles from.
+bool DemoPlay_SetEngineViewAngles(const float* pAngles);
 // The local player's observer mode; -1 when there is no local player.
 int  DemoPlay_LocalObserverMode(void);
 void DemoPlay_LockView(void);

@@ -28,6 +28,9 @@
 #include "game/shared/heap_canary.h"
 #include "game/shared/scriptnetdata_limits.h"
 #include "game/shared/deathfield_system.h"
+#if defined(SDK_WIP)
+#include "game/server/portal/prop_portal.h"
+#endif // SDK_WIP
 #include "game/shared/offhand_slots_ext.h"
 #include "game/shared/activity_s3_to_s21.h"
 #include "game/shared/weapstate_s3_to_s21.h"
@@ -365,9 +368,15 @@ static int DTExtend_AuditTreeBacking(uint8_t* table, const char* className, int 
 		if (width <= 0 || width > 0x10000) width = 4;
 		if (off + width <= alloc) continue;
 
-		// Deathfield ring leaves use non-zero offsets as changeframe slots only;
-		// the value proxy never dereferences entity memory at that offset.
-		if (DeathField_IsRingProxy(*reinterpret_cast<void**>(p + 0x60)))
+		// Deathfield ring leaves and portal fields use non-zero offsets as
+		// changeframe slots only; the value proxy never dereferences entity
+		// memory at that offset.
+		const void* const proxy = *reinterpret_cast<void**>(p + 0x60);
+#if defined(SDK_WIP)
+		if (DeathField_IsRingProxy(proxy) || Portal_IsTailProxy(proxy))
+#else
+		if (DeathField_IsRingProxy(proxy))
+#endif // SDK_WIP
 		{
 			++ringExempted;
 			continue;
@@ -406,7 +415,7 @@ int DTExtend_AuditAllClassBacking()
 
 	if (ringExempted)
 		Msg(eDLL_T::ENGINE,
-			"[dt_extend] class-backing audit: %d deathfield ring props exempted (proxy-sourced)\n",
+			"[dt_extend] class-backing audit: %d deathfield ring / portal props exempted (proxy-sourced)\n",
 			ringExempted);
 
 	if (propsOver)

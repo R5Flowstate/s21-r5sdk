@@ -667,6 +667,7 @@ static constexpr uint64_t NETPROC_STRIKE_WINDOW_MS = 5000;
 struct NetProcStrike_t
 {
     uint64_t m_nLastOverrunMs;
+    uint64_t m_nLastSignonPassMs;
     int m_nConsecutive;
 };
 
@@ -985,7 +986,19 @@ bool CNetChan::_ProcessMessages(CNetChan* pChan, bf_read* pBuf)
     {
         const double flOverrunMs = pExtended->GetNetProcessingTimeMsecs() - flBudgetMs;
 
-        if (g_bDidProcessSignonStateMsg)
+        // The client picks which packets carry a net_SignonState, so the pass is rate-limited
+        // and leaves the strike run alone.
+        bool bSignonPass = g_bDidProcessSignonStateMsg;
+        if (bSignonPass && pStrike)
+        {
+            const uint64_t nNowMs = GetTickCount64();
+            bSignonPass = pStrike->m_nLastSignonPassMs == 0
+                || (nNowMs - pStrike->m_nLastSignonPassMs) > NETPROC_STRIKE_WINDOW_MS;
+            if (bSignonPass)
+                pStrike->m_nLastSignonPassMs = nNowMs;
+        }
+
+        if (bSignonPass)
         {
             DevMsg(eDLL_T::SERVER,
                 "[NETPROC-BUDGET] %s(%s) overran budget by %3.1fms while "
@@ -993,9 +1006,6 @@ bool CNetChan::_ProcessMessages(CNetChan* pChan, bf_read* pBuf)
                 pChan->GetName(), pChan->GetAddress(), flOverrunMs);
             pExtended->SetNetProcessingTimeBase(flCurrentTime);
             pExtended->SetNetProcessingTimeMsecs(flCurrentTime, flCurrentTime);
-
-            if (pStrike)
-                pStrike->m_nConsecutive = 0;
 
             return bResult;
         }

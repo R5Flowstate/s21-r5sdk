@@ -60,7 +60,14 @@
 #include "game/client/classvar_natives.h"
 #include "game/client/fs_1v1_convars.h"
 #include "game/client/fov_limit.h"
+#include "game/client/coll_prop_job.h"
+#include "game/client/titan_use_self.h"
+#include "game/client/weapon_world_proxy.h"
 #include "game/client/phase_door_depth.h"
+#if defined(SDK_WIP)
+#include "game/client/sceneview.h"
+#include "game/client/portal/portal_render.h"
+#endif // SDK_WIP
 #include "game/client/visual_clutter.h"
 #include "game/client/mantle_boost_rui.h"
 #include "game/shared/pose_param.h"
@@ -100,7 +107,6 @@
 #include "rtech/pak/settings_disk.h"
 #include "engine/stringtable_diag.h"
 #include "engine/skinnames_stub.h"
-#include "engine/weapon_precache_redirect.h"
 #include "engine/mdl_precache_client_grow.h"
 #include "engine/client/cl_parse_ents.h"
 #include "engine/client/pdef_parse.h"
@@ -123,6 +129,8 @@
 #include "game/client/glide_flight.h"
 #include "game/client/dodge_bind.h"
 #include "game/client/dodge_rules.h"
+#include "game/client/movement_ability_input.h"
+#include "game/client/titan_gate.h"
 #include "game/client/aimassist.h"
 #include "game/client/trigger_cannon.h"
 #include "game/client/halfduck_zip_parity.h"
@@ -554,6 +562,7 @@ void DetourRegister()
 	//-------------------------------------------------------------------------
 	REGISTER(VPakLobbyWorldS21);
 	REGISTER(VUIImageSkipS21);
+	REGISTER(VUIImageMissLog);
 	REGISTER(VPakRelinkGuard);
 	REGISTER(VVfxAliasNullGuardS21);
 	REGISTER(VSurfDataFallbackGuardS21);
@@ -562,6 +571,9 @@ void DetourRegister()
 	REGISTER(VWeaponAkimboActivity);    // [AKIMBO-ACT] one-handed reload -> akimbo reload set while dual wielding
 	REGISTER(VPoseParamGuardS21);
 	REGISTER(VAnimDescGuardS21);
+	REGISTER(VCollPropJobLock);
+	REGISTER(VTitanUseSelf);
+	REGISTER(VWeaponWorldProxy);
 	REGISTER(VShaderTeardownGuardS21);
 	REGISTER(VTextureStreamAbortFree);
 	REGISTER(VEffectChildLinkGuardS21);
@@ -571,6 +583,10 @@ void DetourRegister()
 	REGISTER(VClassVarNativesCl);
 	REGISTER(VFOVLimit);
 	REGISTER(VPhaseDoorDepth);
+#if defined(SDK_WIP)
+	REGISTER(VSceneView);
+	REGISTER(VPortalSurface);
+#endif // SDK_WIP
 	REGISTER(VVisualClutter);
 
 	//-------------------------------------------------------------------------
@@ -614,7 +630,6 @@ void DetourRegister()
 	REGISTER(VPakOptStreamDropS21);
 	REGISTER(VStringTableDiagS21);
 	REGISTER(VSkinNamesStubS21);
-	REGISTER(VWeaponPrecacheRedirectS21);
 	REGISTER(VWeaponKVDiskS21);
 	REGISTER(VLocalizeDiskS21);
 	REGISTER(V_Datatable);
@@ -634,6 +649,8 @@ void DetourRegister()
 	REGISTER(VGlideFlightClient);
 	REGISTER(VDodgeBind);
 	REGISTER(VDodgeRules);
+	REGISTER(VMovementAbilityInput);
+	REGISTER(VTitanGate);
 	REGISTER(VAimAssist);
 	REGISTER(VMantleBoostRuiCl);
 	REGISTER(VTriggerCannonClient);

@@ -10,6 +10,10 @@
 #include "rtech/pak/pak_opt_stream_drop.h"
 #include "asyncio.h"
 
+#if defined(CLIENT_DLL)
+#include "codecs/miles/miles_banklist.h"
+#endif // CLIENT_DLL
+
 static ConVar async_debugchannel("async_debugchannel", "0", FCVAR_DEVELOPMENTONLY | FCVAR_ACCESSIBLE_FROM_THREADS, "Log async read handles created or destroyed with this channel ID", false, 0.f, false, 0.f, "0 = disabled, -1 = all");
 static int s_fileHandleLogChannelIDs[ASYNC_MAX_FILE_HANDLES];
 
@@ -198,6 +202,27 @@ static int __fastcall FS_OpenAsyncFile_S21(const char* const filePath, const int
             MAX_PATH);
         return FS_ASYNC_FILE_INVALID;
     }
+
+    // A mod Miles bank loads through a patched project image with BankCount
+    // 3, served here; the stock audio.mprj only declares general/custom.
+    // This redirects before the native open because the stock file exists.
+#if defined(CLIENT_DLL)
+    if (MilesBankDisk_ShouldServeProject(filePath))
+    {
+        const char* const pszSidecar = MilesBankDisk_ModProjectPath();
+        if (pszSidecar)
+        {
+            const int sc = v_FS_OpenAsyncFile_S21(pszSidecar, logChannel, fileSizeOut, flags);
+            if (sc != FS_ASYNC_FILE_INVALID)
+            {
+                Msg(eDLL_T::AUDIO, "[MILES-BANK] serving '%s' for '%s'\n", pszSidecar, filePath);
+                return sc;
+            }
+            Warning(eDLL_T::AUDIO, "[MILES-BANK] sidecar '%s' would not open -- serving stock project\n",
+                pszSidecar);
+        }
+    }
+#endif // CLIENT_DLL
 
     const int native = v_FS_OpenAsyncFile_S21(filePath, logChannel, fileSizeOut, flags);
     if (native != FS_ASYNC_FILE_INVALID)

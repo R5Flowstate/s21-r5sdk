@@ -6,6 +6,9 @@
 
 #include "core/stdafx.h"
 #include "translocation.h"
+#if defined(SDK_WIP)
+#include "game/server/portal/portal_teleport.h"
+#endif // SDK_WIP
 #include "game/server/cmd_recorder.h"
 #include "baseentity.h"
 #include "player.h"
@@ -650,9 +653,18 @@ static bool Translocation_ConsumeSticky(void* pPlayer, int cmd)
 static SDKEntityMap<int> s_grenadeStatusFlags(ESide::Server, "transloc.gsf");
 static SDKEntityMap<bool> s_touchesOwnerTriggers(ESide::Server, "transloc.touchOwner");
 
-static int GrenadeStatusFlags_Read(void* pEnt)
+// The natives sit on the base entity class; only a grenade has the DT slot, anything else uses the sidecar.
+static int GrenadeStatusFlags_Offset(void* pEnt)
 {
 	const int off = DTExtend_GetOffset("DT_BaseGrenade", "m_grenadeStatusFlags");
+	if (off <= 0 || !DTExtend_EntityHasSendTable(pEnt, "DT_BaseGrenade"))
+		return -1;
+	return off;
+}
+
+static int GrenadeStatusFlags_Read(void* pEnt)
+{
+	const int off = GrenadeStatusFlags_Offset(pEnt);
 	if (off > 0)
 		return *reinterpret_cast<const int*>(
 			reinterpret_cast<uintptr_t>(pEnt) + static_cast<uintptr_t>(off));
@@ -663,7 +675,7 @@ static int GrenadeStatusFlags_Read(void* pEnt)
 
 static int GrenadeStatusFlags_Write(void* pEnt, int bits)
 {
-	const int off = DTExtend_GetOffset("DT_BaseGrenade", "m_grenadeStatusFlags");
+	const int off = GrenadeStatusFlags_Offset(pEnt);
 	if (off > 0)
 	{
 		*reinterpret_cast<int*>(
@@ -1400,6 +1412,9 @@ static void Hook_PlayerRunCommand(CPlayer* pPlayer, CUserCmd* pUserCmd, IMoveHel
 	JetDrive_PreRunCommand(pPlayer);
 	Glide_PreRunCommand(pPlayer, pUserCmd);
 	SkywardBridge_PreRunCommand(pPlayer);
+#if defined(SDK_WIP)
+	PortalTeleport_PreRunCommand(pPlayer, pUserCmd);
+#endif // SDK_WIP
 	if (pPlayer && pUserCmd && Translocation_ShouldEatAttack(pPlayer))
 	{
 		Translocation_LatchCmdBits(pPlayer, pUserCmd->buttons & kDropClickBits);
@@ -1409,6 +1424,9 @@ static void Hook_PlayerRunCommand(CPlayer* pPlayer, CUserCmd* pUserCmd, IMoveHel
 	CmdRecorder_OnRunCommand(pPlayer, pUserCmd);
 	MantleBoostVmProbe_PostRunCommand(pPlayer);
 	DemoSv_OnUserCmd(pPlayer, pUserCmd);
+#if defined(SDK_WIP)
+	PortalTeleport_PostRunCommand(pPlayer, pUserCmd);
+#endif // SDK_WIP
 	if (pPlayer)
 	{
 		if (Translocation_ShouldEatAttack(pPlayer))
@@ -1562,6 +1580,83 @@ void Translocation_SetMoveType(void* pEnt, int moveType)
 		return;
 	}
 	v_CBaseEntity_SetMoveType(pEnt, moveType, 0);
+}
+
+void Translocation_SetAbsOrigin3(void* pEnt, const float flOrigin[3])
+{
+	Translocation_ResolveSetAbsOrigin();
+	if (!pEnt || !flOrigin || !v_CBaseEntity_SetAbsOrigin)
+		return;
+	v_CBaseEntity_SetAbsOrigin(reinterpret_cast<CBaseEntity*>(pEnt), flOrigin);
+	MarkEntityEdictDirty(pEnt);
+}
+
+static void (*v_CBaseEntity_SetAbsAngles3)(void* pEntity, const QAngle* pAngles) = nullptr;
+static bool s_bSetAbsAnglesResolved = false;
+
+void Translocation_SetAbsAngles3(void* pEnt, const float flAngles[3])
+{
+	if (!s_bSetAbsAnglesResolved)
+	{
+		s_bSetAbsAnglesResolved = true;
+		Module_FindPattern(g_GameDll,
+			"40 55 53 57 48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? 48 8B FA 48 8B D9 E8 ?? ?? ?? ?? "
+			"F3 0F 10 07 0F 2E 83 5C 04 00 00 7A ?? 75 ?? F3 0F 10 47 04 0F 2E 83 60 04 00 00")
+			.GetPtr(v_CBaseEntity_SetAbsAngles3);
+		if (!v_CBaseEntity_SetAbsAngles3)
+			Warning(eDLL_T::SERVER, "[TRANSLOC] SetAbsAngles pattern unresolved -- entities keep their angles\n");
+	}
+	if (!pEnt || !flAngles || !v_CBaseEntity_SetAbsAngles3)
+		return;
+	const QAngle ang(flAngles[0], flAngles[1], flAngles[2]);
+	v_CBaseEntity_SetAbsAngles3(pEnt, &ang);
+	MarkEntityEdictDirty(pEnt);
+}
+
+void Translocation_SetNoInterpEffect(void* pEnt)
+{
+	if (!pEnt)
+		return;
+	static_cast<Translocation_EntityFieldAccess*>(reinterpret_cast<CBaseEntity*>(pEnt))->m_fEffects |= EF_NOINTERP;
+	MarkEntityEdictDirty(pEnt);
+}
+
+void Translocation_SetAbsVelocity3(void* pEnt, const float flVel[3])
+{
+	Translocation_ResolveSetAbsVelocity();
+	if (!pEnt || !flVel || !v_CBaseEntity_SetAbsVelocity)
+		return;
+	const Vector3D vel(flVel[0], flVel[1], flVel[2]);
+	v_CBaseEntity_SetAbsVelocity(pEnt, &vel);
+	MarkEntityEdictDirty(pEnt);
+}
+
+void Translocation_AddNoInterpFlip(void* pEnt)
+{
+	if (!Translocation_IsLivePlayer(pEnt))
+		return;
+	Translocation_AddNoInterp(pEnt);
+}
+
+void Translocation_DuckImmediateNow(void* pPlayer)
+{
+	if (!Translocation_IsLivePlayer(pPlayer) || !v_CPlayer_DuckImmediate)
+		return;
+	v_CPlayer_DuckImmediate(pPlayer);
+	MarkEntityEdictDirty(pPlayer);
+}
+
+void Translocation_GetPlayerHull(void* pPlayer, bool bDucked, float flMins[3], float flMaxs[3])
+{
+	if (!Translocation_IsLivePlayer(pPlayer) || !flMins || !flMaxs)
+		return;
+	const uintptr_t base = reinterpret_cast<uintptr_t>(pPlayer);
+	const Vector3D* const pMins = reinterpret_cast<const Vector3D*>(base +
+		(bDucked ? PLAYER_OFF_DUCK_HULL_MIN : PLAYER_OFF_STAND_HULL_MIN));
+	const Vector3D* const pMaxs = reinterpret_cast<const Vector3D*>(base +
+		(bDucked ? PLAYER_OFF_DUCK_HULL_MAX : PLAYER_OFF_STAND_HULL_MAX));
+	flMins[0] = pMins->x; flMins[1] = pMins->y; flMins[2] = pMins->z;
+	flMaxs[0] = pMaxs->x; flMaxs[1] = pMaxs->y; flMaxs[2] = pMaxs->z;
 }
 
 bool Translocation_SetMoveTypeResolved(void)
