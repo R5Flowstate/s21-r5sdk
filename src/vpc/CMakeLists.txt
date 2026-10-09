@@ -29,5 +29,5 @@ add_sources( SOURCE_GROUP "Private"
     "interfaces.h"
 )
 end_sources()
-target_compile_definitions( vpc_cl PRIVATE "CLIENT_DLL" "GAMEDLL_S21" )
+target_compile_definitions( vpc_cl PRIVATE "CLIENT_DLL" )
 target_precompile_headers( vpc_cl PRIVATE ${GLOBAL_PCH} )

@@ -73,7 +73,7 @@ void JetDrive_Wire_LevelShutdown(void);
 void JetDrive_Begin(CPlayer* player, float speed, float accel,
 	const Vector3D& targetPos, CBaseEntity* targetEnt, const Vector3D& targetEntOffset, float timeOut);
 
-// Per-tick mover. ctx is CGameMovement (player +8, mv +16). Writes S3
+// Per-tick mover. ctx is CGameMovement (player +8, mv +16). Writes dedi
 // CMoveData::m_vecVelocity at +304. Runs inside FullWalkMove after the first
 // half-gravity + CheckVelocity and before Jump/WalkMove/AirMove, the same slot
 // the client's own mover predicts from; dt is that half-gravity frame time.

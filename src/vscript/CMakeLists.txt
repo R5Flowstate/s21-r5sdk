@@ -23,8 +23,8 @@ add_sources( SOURCE_GROUP "Private"
 
 # Client S21 override TUs (client_target_only). Detour registration is
 # client-only (Systems_Init_S21). Shared static lib; dedicated does not
-# reference these symbols so objs stay unlinked there. Force CLIENT_DLL /
-# GAMEDLL_S21 on the .cpp bodies so #ifndef CLIENT_DLL branches match inject.
+# reference these symbols so objs stay unlinked there. Force CLIENT_DLL
+# on the .cpp bodies so #ifndef CLIENT_DLL branches match inject.
 add_sources( SOURCE_GROUP "Private/Client"
     "vscript_s21_override.cpp"
     "vscript_s21_override.h"
@@ -37,7 +37,7 @@ set_source_files_properties(
     "vscript_s21_override.cpp"
     "weapon_kv_disk.cpp"
     "vsquirrel_s21.cpp"
-    PROPERTIES COMPILE_DEFINITIONS "CLIENT_DLL;GAMEDLL_S21"
+    PROPERTIES COMPILE_DEFINITIONS "CLIENT_DLL"
 )
 
 add_sources( SOURCE_GROUP "Squirrel_RE"
@@ -99,7 +99,6 @@ target_include_directories( ${PROJECT_NAME} PRIVATE "${ENGINE_SOURCE_DIR}/vscrip
 if( ${LIB_NAME} STREQUAL "vscript_cl" )
 target_compile_definitions( ${PROJECT_NAME} PRIVATE
     "CLIENT_DLL"
-    "GAMEDLL_S21"
 )
 endif()
 endmacro()

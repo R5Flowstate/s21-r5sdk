@@ -14,6 +14,9 @@ Agent and contributor notes live in `AGENTS.md`.
 The shipping branch of the public tree is `s21-unify`. `main` and
 `S16-S21-MERGE` are upstream credit.
 
+Crash reports: the client uploads a minidump only after the EULA is accepted;
+a dedicated server uploads only when started with `+backtrace_enabled 1`.
+
 Valve Source SDK terms stay in `license/`. See `NOTICE`. This project is
 unaffiliated with, and not endorsed by, Respawn Entertainment or
 Electronic Arts.
@@ -30,8 +33,9 @@ Steps:
 1. Download or clone the project to anywhere on your disk.
     1. Run `CreateSolution.bat` in the root folder, this will generate the files in `build_intermediate`.
        The batch file is the recipe (`OPTION_RETAIL=ON`, `OPTION_CERTAIN=OFF`,
-       `OPTION_LTCG_MODE=ALL`, `OPTION_WARNINGS_AS_ERRORS=OFF`,
-       `BOOST_REGEX_STANDALONE=OFF`). Re-run it after adding or removing source
+       `OPTION_WIP=OFF`, `OPTION_LTCG_MODE=ALL`, `OPTION_WARNINGS_AS_ERRORS=OFF`,
+       `BOOST_REGEX_STANDALONE=OFF`). Unfinished features build only with
+       `OPTION_WIP=ON`. Re-run it after adding or removing source
        files; CMake lists them at configure time.
 2. Open `r5sdk.slnx` (Visual Studio 2026) or `r5sdk.sln` (older generators) and compile the `Release` configuration.
     1. All binaries and symbols are compiled to the `game` folder.

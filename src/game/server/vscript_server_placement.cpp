@@ -82,7 +82,7 @@ static SQRESULT ServerScript_CreatePlayerDecoyS21Shim(HSQUIRRELVM v)
 
     const SQRESULT result = s_s3CreatePlayerDecoyNative(v);
 
-    // The S3 native returns its entity on the VM stack. Do not restore the
+    // The dedi native returns its entity on the VM stack. Do not restore the
     // removed S21-only args over that return value.
     return result;
 }
@@ -1099,7 +1099,7 @@ static bool ServerScript_TraceHitBackFace(const trace_t& tr)
     return byte != 0;
 }
 
-// S3 world traces never write hitBackFace. A back-trace that ends on the
+// dedi world traces never write hitBackFace. A back-trace that ends on the
 // entrance is the thin / one-sided case that byte marks on S21.
 static bool ServerScript_TraceEndedNearPoint(
     const trace_t& tr, const Vector3D& point, float epsSqr)
@@ -2316,7 +2316,7 @@ static Vector3D ServerScript_GetRefinedSurfaceNormal(
             continue;
 
         // S21 collision is one-sided, so a probe from open air only ever hits a
-        // front face. S3 also returns back faces and start-solid hits; drop them.
+        // front face. dedi also returns back faces and start-solid hits; drop them.
         const Vector3D probeDir = ServerScript_Normalized(ServerScript_SubVector(end, start));
         if (probe.fraction != 1.0f &&
             !probe.startsolid &&
@@ -5487,7 +5487,7 @@ static Vector3D ServerScript_SimulateGrenadeImpactPos(
     const uintptr_t weaponAddr = reinterpret_cast<uintptr_t>(pWeapon);
     CPlayer* const owner = ServerScript_GetWeaponOwnerPlayer(pWeapon);
 
-    // -- Phase 1: launch state (S3 ProjectilePath_Init + S21 override tail) --
+    // -- Phase 1: launch state (dedi ProjectilePath_Init + S21 override tail) --
     Vector3D pos = s_zero;
     Vector3D vel = s_zero;
 

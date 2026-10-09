@@ -21,7 +21,7 @@ static void Cvar_ForceS21DeveloperBackingValue()
 	if (!dev)
 		return;
 
-	// Backing float @ +0x60, int @ +0x64. S3 SetValue writes the old offsets.
+	// Backing float @ +0x60, int @ +0x64. dedi SetValue writes the old offsets.
 	const uintptr_t cvAddr = reinterpret_cast<uintptr_t>(dev);
 	MEMORY_BASIC_INFORMATION mbi = {};
 	if (VirtualQuery(reinterpret_cast<void*>(cvAddr + 0x64), &mbi, sizeof(mbi)) != sizeof(mbi))

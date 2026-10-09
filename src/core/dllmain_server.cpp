@@ -63,7 +63,7 @@ void Show_Emblem()
 // INITIALIZATION
 //#############################################################################
 
-// Verbose per-packet / per-flow diagnostic logging for the S21->S3 bridge.
+// Verbose per-packet / per-flow diagnostic logging for the S21->dedi bridge.
 // Toggle via -sv_bridge_verbose on the command line. Default false.
 bool g_bS21BridgeVerbose = false;
 

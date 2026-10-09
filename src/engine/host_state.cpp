@@ -602,7 +602,7 @@ CHostState* g_pHostState = nullptr;
 #include "game/server/gameinterface.h"
 #include "game/shared/vscript_shared.h"
 #include "game/shared/activity.h"
-#include "game/shared/activity_s3_to_s21.h"  // S3->S21 activity ID map
+#include "game/shared/activity_s3_to_s21.h"  // dedi->S21 activity ID map
 #include "game/shared/activitymodifier.h"
 #include <tier2/fileutils.h>
 
@@ -726,6 +726,52 @@ void ModPolicy_GetEffectiveRequired(CUtlVector<CUtlString>& out)
 
 	ModSystem()->LockModList();
 	ModPolicy_CopyFileList(ModSystem()->GetRequiredMods(), out);
+
+	// A mod with content on both sides (map, weapons, shared scripts) only works when the
+	// client runs it too, so the server requires every one it has enabled. A map mod
+	// counts only while its map is the one running.
+	const char* const pszLevel = g_pHostState ? g_pHostState->m_levelName : "";
+	int nSafety = 0;
+	FOR_EACH_VEC(ModSystem()->GetModList(), i)
+	{
+		if (++nSafety > MAX_MODS_TO_LOAD || out.Count() >= kModPolicyListMax)
+			break;
+
+		const CModSystem::ModInstance_t* const pMod = ModSystem()->GetModList()[i];
+		if (!pMod || !pMod->IsEnabled() || pMod->realm != CModSystem::ModInstance_t::MOD_REALM_BOTH)
+			continue;
+
+		const char* const pszId = pMod->id.String();
+		if (!pszId || !pszId[0])
+			continue;
+
+		if (pMod->maps.Count() > 0)
+		{
+			bool bRunning = false;
+			FOR_EACH_VEC(pMod->maps, m)
+			{
+				if (V_stricmp(pMod->maps[m].String(), pszLevel) == 0)
+				{
+					bRunning = true;
+					break;
+				}
+			}
+			if (!bRunning)
+				continue;
+		}
+
+		bool bListed = false;
+		FOR_EACH_VEC(out, j)
+		{
+			if (V_stricmp(out[j].String(), pszId) == 0)
+			{
+				bListed = true;
+				break;
+			}
+		}
+		if (!bListed)
+			out.AddToTail(pszId);
+	}
 	ModSystem()->UnlockModList();
 }
 
@@ -1597,7 +1643,7 @@ void CHostState::State_NewGame(void)
 		s_activitiesLoaded = true;
 	}
 
-	// S3->S21 activity ID map. Server-side resolvers, not the client-side gate.
+	// dedi->S21 activity ID map. Server-side resolvers, not the client-side gate.
 	Bridge_BuildS3ToS21ActivityMap();
 
 	SetState(HostStates_t::HS_RUN);

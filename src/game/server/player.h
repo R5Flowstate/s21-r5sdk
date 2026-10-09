@@ -830,7 +830,7 @@ class VPlayer : public IDetour
 #include "mathlib/vector4d.h"
 #include "mathlib/bitvec.h"
 #include "public/studio.h"
-#include "common/protocol.h" // MAX_QUEUED_COMMANDS_PROCESS (Diag_QueuedCommandCount)
+#include "common/protocol.h" // MAX_QUEUED_COMMANDS_PROCESS (Cmdq_QueuedCommandCount)
 
 #include "game/shared/playerstate.h"
 #include "game/shared/animation.h"
@@ -1018,6 +1018,7 @@ public:
 	void SetLastUserCommand(CUserCmd* pUserCmd);
 	const CUserCmd* GetPlacementUserCommand() const;
 	bool HasCurrentUserCommand() const { return m_pCurrentCommand != nullptr; }
+	const CUserCmd* GetCurrentUserCommand() const { return m_pCurrentCommand; }
 	bool HasLastUserCommand() const { return m_LastCmd.command_number > 0; }
 	void UpdateLastActiveTime(float flTime) { m_lastActiveTime = fmaxf(m_lastActiveTime, flTime); }
 
@@ -1054,18 +1055,19 @@ public:
 	inline float           Diag_LastSimRemainder() const { return m_lastUCmdSimulationRemainderTime; }
 	inline bool            Diag_AtLeastOneCmdRun() const { return m_atLeastOneCommandRunThisServerFrame; }
 
-	// [SIM-SUPPLY] read-only queue accessors. The command buffer is allocated per
+	// Read-only queue accessors. The command buffer is allocated per
 	// client, so it is null on a player that has none yet; the count returns -1
-	// there rather than faulting. Index i must be in [0, Diag_QueuedCommandCount).
-	inline int             Diag_QueuedCommandCount() const { return m_Commands ? m_Commands[MAX_QUEUED_COMMANDS_PROCESS].command_number : -1; }
-	inline float           Diag_QueuedCommandFrameTime(int i) const { return m_Commands ? m_Commands[i].frametime : 0.0f; }
-	inline int             Diag_QueuedCommandButtons(int i) const { return m_Commands ? m_Commands[i].buttons : 0; }
-	inline int             Diag_QueuedCommandCycleslot(int i) const { return m_Commands ? m_Commands[i].cycleslot : 0xFF; }
-	inline int             Diag_QueuedCommandWeaponIndex(int i) const { return m_Commands ? m_Commands[i].weaponindex : 0xFF; }
-	inline int             Diag_QueuedCommandWeaponSelect(int i) const { return m_Commands ? m_Commands[i].weaponselect : 0; }
-	inline int             Diag_QueuedCommandImpulse(int i) const { return m_Commands ? m_Commands[i].impulse : 0; }
+	// there rather than faulting. Index i must be in [0, Cmdq_QueuedCommandCount).
+	inline int             Cmdq_QueuedCommandCount() const { return m_Commands ? m_Commands[MAX_QUEUED_COMMANDS_PROCESS].command_number : -1; }
+	inline float           Cmdq_QueuedCommandFrameTime(int i) const { return m_Commands ? m_Commands[i].frametime : 0.0f; }
+	inline int             Cmdq_QueuedCommandButtons(int i) const { return m_Commands ? m_Commands[i].buttons : 0; }
+	inline int             Cmdq_QueuedCommandCycleslot(int i) const { return m_Commands ? m_Commands[i].cycleslot : 0xFF; }
+	inline int             Cmdq_QueuedCommandWeaponIndex(int i) const { return m_Commands ? m_Commands[i].weaponindex : 0xFF; }
+	inline int             Cmdq_QueuedCommandWeaponSelect(int i) const { return m_Commands ? m_Commands[i].weaponselect : 0; }
+	inline int             Cmdq_QueuedCommandImpulse(int i) const { return m_Commands ? m_Commands[i].impulse : 0; }
+	inline bool            Cmdq_QueuedCommandHasMove(int i) const { return m_Commands && (m_Commands[i].forwardmove != 0.0f || m_Commands[i].sidemove != 0.0f || m_Commands[i].upmove != 0.0f); }
 
-	// [CMDQ-GOV] supply-governor write access; index rules as above.
+	// Supply-governor write access; index rules as above.
 	inline void            Cmdq_SetQueuedCommandFrameTime(int i, float ft) { if (m_Commands) m_Commands[i].frametime = ft; }
 
 	// [CMDQ] PhysicsSimulate stamps this with gpGlobals->curTime on entry and it is
@@ -1681,7 +1683,7 @@ private:
 	int m_armsModelIndex;
 };
 // sizeof + the positional gap_* fields pin every member offset. Collision-watch
-// offsets verified in (S3 r5apex.exe) and locked by this layout
+// offsets verified in (dedi r5apex.exe) and locked by this layout
 // m_StuckLast @ 0x5A88 (gap_5a8c-anchored; CGameMovement::CheckStuck counter)
 // m_StandHullMin @ 0x65FC, m_StandHullMax @ 0x6608, m_DuckHullMin @ 0x6614,
 // m_DuckHullMax @ 0x6620 (UpdatePlayerClassDependentVars writes

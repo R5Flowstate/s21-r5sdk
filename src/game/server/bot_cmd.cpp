@@ -225,7 +225,7 @@ static void BotCmd_Deliver(CPlayer* pPlayer, BotCmdState_s& st, CUserCmd* pCmds,
 	if (nCount <= 0)
 		return;
 
-	if (botcmd_use_queue.GetBool() && pPlayer->Diag_QueuedCommandCount() >= 0)
+	if (botcmd_use_queue.GetBool() && pPlayer->Cmdq_QueuedCommandCount() >= 0)
 	{
 		pPlayer->ProcessUserCmds(pCmds, nCount, nCount, 0, false);
 		return;

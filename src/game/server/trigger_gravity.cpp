@@ -1069,8 +1069,8 @@ static bool TriggerGravity_ApplyBlackholeForce(void* pPlayer, void* pMoveData, v
 			offsetof(PlayerExtendWire, m_jumpPadDebounceExpireTime));
 		if (flDebounce >= flNow)
 		{
-			// Only the jump pad arms this, for bridge_jumppad_debounce_time
-			// seconds -- the cannon and the lift do not.
+			// Only a jump pad launch arms this (one second); the cannon and the
+			// lift do not.
 			if (TriggerGravity_ShouldLogSkip(TG_SITE_BLACKHOLE, TG_SKIP_DEBOUNCE))
 				Warning(eDLL_T::SERVER,
 					"[TRIG-GRAV] blackhole skip: jumppad debounce until=%.3f now=%.3f\n",

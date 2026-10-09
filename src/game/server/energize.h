@@ -21,6 +21,12 @@ bool WeaponBridge_InvokeChangeMod(HSCRIPT hWeaponScript, const char* modName, bo
 // Per-tick FSM on activeWeapons[0..2] that are hasEnergized or mid-FSM.
 void EnergizeBridge_Think(void* pPlayer, void* pUserCmd);
 
+// Each shot that left an ENERGIZED weapon spends energized_time_consumed_per_shot.
+void EnergizeBridge_OnWeaponFired(void* pWeapon);
+
+// Reports who holstered a weapon mid-wind-up (once per wind-up).
+void EnergizeBridge_OnHolster(void* pWeapon);
+
 // Wire accessor: appended slots alias live m_modVars. False if this weapon has no FSM entry.
 bool EnergizeBridge_WireGet(void* pWeapon, int* pState, float* pStartTime, float* pEndTime);
 
@@ -33,7 +39,7 @@ class VEnergize : public IDetour
 	virtual void GetFun(void) const;
 	virtual void GetVar(void) const { }
 	virtual void GetCon(void) const { }
-	virtual void Detour(const bool bAttach) const { }
+	virtual void Detour(const bool bAttach) const;
 };
 ///////////////////////////////////////////////////////////////////////////////
 #endif // !CLIENT_DLL

@@ -42,7 +42,7 @@ static constexpr ptrdiff_t UD_CTX_OFF_MOVEDATA = 16;  // CMoveData*
 static constexpr ptrdiff_t UD_MV_OFF_ORIGIN   = 292; // float[3]
 static constexpr ptrdiff_t UD_MV_OFF_VELOCITY = 304; // float[3]
 
-// m_freefallState -- S3 name for the field the wire renames to m_skydiveState.
+// m_freefallState -- dedi name for the field the wire renames to m_skydiveState.
 static constexpr ptrdiff_t UD_PLAYER_OFF_FREEFALLSTATE = 0x7B60; // 0 = none
 
 // Phase-shift window. Server m_phaseShiftTimeStart @ 0x15B4, end @ 0x15B8. Inclusive vs movement clock.
@@ -72,7 +72,6 @@ static constexpr ptrdiff_t UD_PLAYER_OFF_SETTINGSBLOCK = 0x5F08;
 static constexpr int UD_PLAYERPOSE_STANDING = 0;
 
 // Raw EHANDLE dword at entity+8 (IHandleEntity).
-static constexpr ptrdiff_t UD_ENT_OFF_REFEHANDLE = 0x08;
 static constexpr uint32_t  UD_INVALID_EHANDLE    = 0xFFFFFFFFu;
 
 //-----------------------------------------------------------------------------
@@ -471,14 +470,6 @@ static bool UpdraftBridge_IsUpdraftTrigger(void* pTrigger)
 	return pszClass && strcmp(pszClass, "trigger_updraft") == 0;
 }
 
-static uint32_t UpdraftBridge_EntityHandle(const void* pEntity)
-{
-	if (!pEntity)
-		return UD_INVALID_EHANDLE;
-	return *reinterpret_cast<const uint32_t*>(
-		static_cast<const uint8_t*>(pEntity) + UD_ENT_OFF_REFEHANDLE);
-}
-
 // CodeCallback_PlayerEnter/LeaveUpdraftTrigger(trigger, player). Missing
 // script function is a silent no-op after one Warning (same shape as gravity
 // enter-cb / jetdrive callbacks).
@@ -576,7 +567,7 @@ void UpdraftBridge_OnTriggerStartTouch(void* pTrigger, void* pOther)
 	if (!UpdraftBridge_IsPlayer(pOther))
 		return;
 
-	const uint32_t nTrigHandle = UpdraftBridge_EntityHandle(pTrigger);
+	const uint32_t nTrigHandle = SDKEntityState_GetHandle(pTrigger).Raw();
 	if (nTrigHandle == UD_INVALID_EHANDLE)
 		return;
 
@@ -621,7 +612,7 @@ void UpdraftBridge_OnTriggerEndTouch(void* pTrigger, void* pOther)
 	if (!UpdraftBridge_IsPlayer(pOther))
 		return;
 
-	const uint32_t nTrigHandle = UpdraftBridge_EntityHandle(pTrigger);
+	const uint32_t nTrigHandle = SDKEntityState_GetHandle(pTrigger).Raw();
 
 	UpdraftState* const pState = s_updraftMap.Find(pOther);
 	if (pState && nTrigHandle != UD_INVALID_EHANDLE)

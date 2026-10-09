@@ -13,6 +13,7 @@
 #include "core/bridge_stats.h"
 #include "core/sdk_stage.h"
 #include "game/shared/heap_canary.h"
+#include "game/shared/weapon_mod_names_ext.h"
 #include "tier0/jobthread.h"
 #include "tier0/threadtools.h"
 #include "tier0/tslist.h"
@@ -137,12 +138,15 @@
 #include "game/client/zipline_disconnect.h"
 #include "game/client/move_sim_trace.h"
 #include "game/client/wall_launch.h"
+#include "game/client/slope_launch.h"
+#include "game/client/source_push.h"
 #include "game/client/double_jump_power.h"
 #include "game/client/melee_lunge_probe.h"
 #include "game/client/melee_activity_trace.h"
 #include "game/client/bridge_cmd_seed.h"
 #include "game/client/bridge_fire_tap.h"
-#include "game/client/jumppad_viewpunch_diag.h"
+#include "game/client/jumppad_predict.h"
+#include "game/client/pred_icon_diag.h"
 #include "game/client/ruitracks.h"
 #include "game/client/hud_basechat.h"
 #include "rtech/rui/rui.h"
@@ -201,7 +205,7 @@ static void Systems_Init_S21_PhaseA_Scan()
 	{
 		DetourEntry& entry = const_cast<DetourEntry&>(registry[i]);
 
-		// Skip already-gated entries (SkippedByConfig, SkippedByFlag)
+		// Skip entries the config already disabled.
 		if (entry.state != DetourState::NotAttempted)
 			continue;
 
@@ -617,7 +621,7 @@ void DetourRegister()
 	REGISTER(VBSPCollisionDebug);
 
 	//-------------------------------------------------------------------------
-	// VScript / Squirrel -- S21 client path (S3 VSquirrel* set is not registered here).
+	// VScript / Squirrel -- S21 client path (dedi VSquirrel* set is not registered here).
 	//-------------------------------------------------------------------------
 	REGISTER(VSquirrelS21Core);
 	REGISTER(VScriptS21Override);
@@ -630,6 +634,7 @@ void DetourRegister()
 	REGISTER(VPakOptStreamDropS21);
 	REGISTER(VStringTableDiagS21);
 	REGISTER(VSkinNamesStubS21);
+	REGISTER(VWeaponModNamesExt);
 	REGISTER(VWeaponKVDiskS21);
 	REGISTER(VLocalizeDiskS21);
 	REGISTER(V_Datatable);
@@ -641,9 +646,9 @@ void DetourRegister()
 	// Game/client - prediction diagnostics
 	//-------------------------------------------------------------------------
 	REGISTER(VPredDiag);
+	REGISTER(VPredIconDiag);
 	REGISTER(VGrappleRopeDiag);
-	REGISTER(VJumpPadViewPunchDiag);
-	REGISTER(VTriggerClientPredictForce);
+	REGISTER(VJumpPadPredict);
 	REGISTER(VMantleBoostClient);
 	REGISTER(VMantleBoostAnimClient);
 	REGISTER(VGlideFlightClient);
@@ -659,13 +664,15 @@ void DetourRegister()
 	REGISTER(VHalfDuckZipParityClient);
 	REGISTER(VZipDiscClient);
 	REGISTER(VWallLaunchClient);
+	REGISTER(VSlopeLaunchClient);
+	REGISTER(VSourcePushClient);
 	REGISTER(VDoubleJumpPowerClient);
 	REGISTER(VMoveSimTraceClient);
 	REGISTER(VBridgeCmdSeedClient);
 	REGISTER(VBridgeFireTapClient);
 	// VRuiTracks: S21 already owns ids through that range.
 	// VClockMonotonicFix: Hook_ClockDrift already strips non-monotonic feeds.
-	// V_ViewRender: GetVar pattern is S3-only (0 hits on S21).
+	// V_ViewRender: GetVar pattern is dedi-only (0 hits on S21).
 
 	//-------------------------------------------------------------------------
 	// Rendering / ImGui -- D3D11 globals + WindowProc for input

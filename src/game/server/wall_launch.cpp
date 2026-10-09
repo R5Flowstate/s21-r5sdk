@@ -9,6 +9,7 @@
 
 #include "tier1/cvar.h"
 #include "wall_launch.h"
+#include "source_push.h"
 #include "engine/enginetrace.h"
 #include "game/shared/sdk_entity_state.h"
 #include "game/shared/vscript_gamedll_defs.h"
@@ -164,7 +165,7 @@ static void __fastcall Hook_GameMovement_JumpOutOfWallRun(void* ctx)
 	}
 }
 
-static void __fastcall Hook_GameMovement_AirAccelerate(void* ctx, float* wishDir, float wishSpeed, float accel, float dt)
+static void WallLaunch_AirAccelerate(void* ctx, float* wishDir, float wishSpeed, float accel, float dt)
 {
 	uint8_t* const player = ctx ? *reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(ctx) + WL_CTX_OFF_PLAYER) : nullptr;
 	uint8_t* const mv = ctx ? *reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(ctx) + WL_CTX_OFF_MV) : nullptr;
@@ -198,6 +199,12 @@ static void __fastcall Hook_GameMovement_AirAccelerate(void* ctx, float* wishDir
 	}
 
 	v_GameMovement_AirAccelerate(ctx, bEdge ? dir : wishDir, flWishSpeed, flAccel, dt);
+}
+
+static void __fastcall Hook_GameMovement_AirAccelerate(void* ctx, float* wishDir, float wishSpeed, float accel, float dt)
+{
+	WallLaunch_AirAccelerate(ctx, wishDir, wishSpeed, accel, dt);
+	SourcePush_AfterAirAccelerate(ctx);
 }
 
 void WallLaunch_AfterFullWalkMove(void* ctx)

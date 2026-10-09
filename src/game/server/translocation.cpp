@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: S3 native gap-fills for translocation. See header.
+// Purpose: dedi native gap-fills for translocation. See header.
 //
 //=============================================================================//
 
@@ -21,6 +21,7 @@
 #include "game/server/glide.h"
 #include "game/server/skyward.h"
 #include "game/server/akimbo.h"
+#include "game/server/energize.h"
 #include "game/server/player_launch.h"
 #include "game/server/mantle_boost_vm_probe.h"
 #include "game/server/trigger_cannon.h"
@@ -88,7 +89,7 @@ static constexpr ptrdiff_t PLAYER_OFF_ACTIVE_MAINHAND = 0x16CC; // inventory + a
 static constexpr unsigned int WEAP_STATE_IDLE = 0;
 static constexpr unsigned int WEAP_STATE_HOLSTERED = 2;
 static constexpr unsigned int WEAP_STATE_CUSTOM_ACTIVITY = 12;
-static constexpr unsigned int WEAP_STATE_TOSS = 14; // S3 TOSS; S21 goes POST_TOSS_LOOP here
+static constexpr unsigned int WEAP_STATE_TOSS = 14; // dedi TOSS; S21 goes POST_TOSS_LOOP here
 static constexpr unsigned int WEAP_STATE_POST_TOSS_LOOP = 19;
 static constexpr unsigned int ACT_VM_IDLE_S3 = 468;
 static constexpr unsigned int ACT_VM_HOLSTER_S3 = 453;
@@ -1081,7 +1082,7 @@ static SQRESULT Script_IsGrenadeStatusFlagSet(HSQUIRRELVM v)
 
 //-----------------------------------------------------------------------------
 // projectile.SetProjectileTouchesOwnerTriggers( bool )
-// S3 has no engine twin. Sidecar so the call compiles and is observable;
+// dedi has no engine twin. Sidecar so the call compiles and is observable;
 // SetTouchTriggers (already on the entity class) is the live trigger bit.
 //-----------------------------------------------------------------------------
 static SQRESULT Script_SetProjectileTouchesOwnerTriggers(HSQUIRRELVM v)
@@ -1134,7 +1135,7 @@ static SQRESULT Script_TriggerAndTouchOwnerTouchedTriggers(HSQUIRRELVM v)
 
 //-----------------------------------------------------------------------------
 // player.IsInputCommandPressed( int ) / IsInputCommandHeld( int )
-// S3 binds these on the CLIENT player class only.
+// dedi binds these on the CLIENT player class only.
 //-----------------------------------------------------------------------------
 static SQRESULT Script_IsInputCommandPressed(HSQUIRRELVM v)
 {
@@ -1373,7 +1374,7 @@ void Translocation_RegisterFreeFuncs(CSquirrelVM* s)
 //-----------------------------------------------------------------------------
 // weapon.SetTranslocationFlightHold( bool )
 // Keeps the tac deployed after toss so the S21 client can play toss-hold /
-// one-hand. S3 holsters every toss weapon the same frame as release.
+// one-hand. dedi holsters every toss weapon the same frame as release.
 //-----------------------------------------------------------------------------
 static SQRESULT Script_SetTranslocationFlightHold(HSQUIRRELVM v)
 {
@@ -1452,6 +1453,7 @@ static SQRESULT Hook_IsInputCommandPressed(HSQUIRRELVM v)
 static char Hook_HolsterInternal(void* pWeapon, bool bDoFastHolster)
 {
 	OffhandJumpToggle_OnHolster(pWeapon, bDoFastHolster, _ReturnAddress());
+	EnergizeBridge_OnHolster(pWeapon);
 	const unsigned int weapState = Translocation_WeaponState(pWeapon);
 	const char* const pszName = pWeapon
 		? reinterpret_cast<const char*>(
@@ -1720,7 +1722,7 @@ void VTranslocation::GetFun(void) const
 			"[TRANSLOC] end-of-toss holster callsite unresolved -- "
 			"toss_has_post_loop cannot keep the weapon out\n");
 
-	// Writes weapon+0x1234. Unique (1 hit). S3 POST_TOSS_LOOP is 19.
+	// Writes weapon+0x1234. Unique (1 hit). dedi POST_TOSS_LOOP is 19.
 	Module_FindPattern(g_GameDll,
 		"48 89 5C 24 ?? 55 48 83 EC ?? 8B 81 ?? ?? ?? ?? 8B EA 48 8B D9")
 		.GetPtr(v_WeaponX_SetWeaponState);

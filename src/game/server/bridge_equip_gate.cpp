@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: full S3 ACT_MP_EQUIP_* block for IsPlaying3pEquipActivity.
+// Purpose: full dedi ACT_MP_EQUIP_* block for IsPlaying3pEquipActivity.
 // See bridge_equip_gate.h.
 //
 //=============================================================================//
@@ -37,7 +37,7 @@ static constexpr ptrdiff_t PLAYER_OFF_OVERLAY_ISACTIVE  = 5046; // 0x13B6
 static constexpr ptrdiff_t PLAYER_OFF_OVERLAY_SEQUENCE  = 5096; // 0x13E8, -1 = none
 static constexpr ptrdiff_t PLAYER_OFF_OVERLAY_CYCLE     = 5132; // 0x140C
 
-// S3 ACT_MP_EQUIP_* contiguous block (ActivityList dump).
+// dedi ACT_MP_EQUIP_* contiguous block (ActivityList dump).
 static constexpr int EQUIP_ACT_LO = 802;
 static constexpr int EQUIP_ACT_HI = 810;
 

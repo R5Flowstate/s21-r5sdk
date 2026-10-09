@@ -8,6 +8,7 @@
 
 
 #include "trigger_cannon.h"
+#include "jumppad_parity.h"
 #include "player.h"
 #include "baseentity.h"
 #include "entitylist.h" // g_serverEntityList
@@ -328,6 +329,14 @@ bool TriggerCannon_SetEnableDoubleJump(void* pTrigger, bool bEnable)
 		bEnable ? 1 : 0;
 	MarkEntityEdictDirty(pTrigger);
 	return true;
+}
+
+bool TriggerCannon_GetEnableDoubleJump(const void* pTrigger)
+{
+	if (!pTrigger || TriggerCannon_ResolveNamed("m_enableDoubleJump", &s_nEnableDoubleJumpOff) <= 0)
+		return false;
+
+	return *reinterpret_cast<const int*>(static_cast<const uint8_t*>(pTrigger) + s_nEnableDoubleJumpOff) != 0;
 }
 
 bool TriggerCannon_SetLimitedAirControl(void* pTrigger, bool bLimited)
@@ -900,6 +909,8 @@ static void TriggerCannon_Launch(void* pCtx, void* pPlayer, void* pTrigger, floa
 		flNow + bridge_trigger_cannon_debounce_time.GetFloat());
 
 	MarkEntityEdictDirty(pPlayer);
+
+	JumpPad_OnLauncherLaunched(pPlayer);
 
 	// Hold the arc for the flight. The client half arms the same window off the
 	// same trigger fields in its own predicted launch.

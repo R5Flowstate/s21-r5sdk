@@ -920,7 +920,7 @@ static void SnapSync_WaitJobs(int64_t thisptr)
 			*s_pSnapSendJob = 0;
 		}
 
-		// S3 CServer snapshot-manager offsets
+		// dedi CServer snapshot-manager offsets
 		const uint64_t mgr = *reinterpret_cast<uint64_t*>(
 			reinterpret_cast<char*>(thisptr) + 47855112);
 		if (Mem_IsReadable(reinterpret_cast<const void*>(mgr + 1084096), 4))
@@ -1001,6 +1001,9 @@ static int64_t Hook_CServer_SendClientMessages(int64_t thisptr, char bSendSnapsh
 	}
 	else if (sbArm || bBudget)
 		QueryPerformanceCounter(&tEntry);
+
+	if (bSendSnapshots && g_pfnSnapshotSend_BeforeClientSnapshots)
+		g_pfnSnapshotSend_BeforeClientSnapshots();
 
 	const int64_t r = v_CServer_SendClientMessages(thisptr, bSendSnapshots);
 

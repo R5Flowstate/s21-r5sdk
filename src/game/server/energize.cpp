@@ -39,14 +39,15 @@ static ConVar sdk_energize_bridge("sdk_energize_bridge", "1",
 	FCVAR_DEVELOPMENTONLY | FCVAR_REPLICATED,
 	"Enables the native Energize ('revved') FSM driver (0=off, 1=on).");
 
-// Mirrors the S21 client ConVar of the same name (default "0.25", read off its
-// registration at 0x1400E5030). Both the ENERGIZED edge and the cancel push
-// m_nextEnergizeReadyTime this far past m_nextReadyTime.
+// Mirrors the S21 client ConVar of the same name (default "0.25"). Both the
+// ENERGIZED edge and the cancel push m_nextEnergizeReadyTime this far past m_nextReadyTime.
 static ConVar sdk_energize_next_cooldown("sdk_energize_next_cooldown", "0.25",
 	FCVAR_DEVELOPMENTONLY | FCVAR_REPLICATED,
 	"Seconds added on top of m_nextReadyTime for the re-energize gate "
 	"(the S21 client's nextEnergizeCooldownTime, default 0.25).");
 
+static ConVar sdk_energize_drain_trace("sdk_energize_drain_trace", "0", FCVAR_DEVELOPMENTONLY,
+	"[Energize] log every per-shot pool drain, every cancel and the wind-up input trace.");
 static ConVar bridge_sv_btn_trace("bridge_sv_btn_trace", "0", FCVAR_DEVELOPMENTONLY,
 	"[SV-BTN] Log first-seen button bits on the dedi (0 = off).");
 
@@ -79,10 +80,6 @@ struct EnergizeWeaponConfig
 	// wind-up cancel mask.
 	bool zoomEffects = true;
 
-	// GetFireRateDelay = m_modVars.fireDuration + (fireRate ? 1/fireRate : 0).
-	float fireRate = 0.0f;
-	float fireDuration = 0.0f;
-
 	std::string cbTryEnergize;
 	std::string cbStartEnergizing;
 	std::string cbEnergizedStart;
@@ -106,15 +103,18 @@ struct EnergizeInstanceState
 	// gates our own entry the way the client's copy gates Input_CreateMove.
 	float nextEnergizeReadyTime = 0.0f;
 
-	// Edge detector for per-shot drain: last observed CWeaponX::m_lastPrimaryAttack.
-	// Seeded on enter-ENERGIZED so a stale pre-charge fire time does not
-	// immediately burn a shot.
-	float lastSeenPrimaryAttack = 0.0f;
-	bool lastSeenPrimaryAttackValid = false;
+	// Absolute time the wind-up completes: AE_WPN_ENERGIZED on the charge sequence,
+	// the same clock the client predicts (its weapon+0x2EAC). 0 = not armed yet.
+	float energizedSeqEventTime = 0.0f;
 
 	// m_lastEnergizeState is an edge detector. Leaving last at ENERGIZING re-fires CheckForEnergize every snapshot.
 	int energizingEnteredTick = -1;
 	bool chargeAnimPlayed = false;
+
+	// Ideal activity the charge set; anything else mid-wind-up means the pose was taken.
+	int chargeIdealActivity = -1;
+	bool chargePoseLossReported = false;
+	bool holsterReported = false;
 
 	// Bonus natives: IsWeaponActivelyFiring / NeedsRechambering (sling-weapon gates).
 	bool isActivelyFiringStub = false;
@@ -165,29 +165,39 @@ static bool Energize_GetWeaponInt(void* pWeapon, const char* propName, int* pOut
 	return true;
 }
 
-static float GetWeaponLastPrimaryAttack(void* pWeapon)
+static bool Energize_SetWeaponInt(void* pWeapon, const char* propName, int value)
 {
-	float value = 0.0f;
-	Energize_GetWeaponFloat(pWeapon, "m_lastPrimaryAttack", &value);
-	return value;
+	const int off = pWeapon ? DTExtend_FindNativePropOffset(pWeapon, propName) : -1;
+	if (off <= 0)
+		return false;
+
+	*reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(pWeapon) + off) = value;
+	MarkEntityEdictDirty(pWeapon);
+	return true;
 }
 
-// Charge anim: ACT_VM_ENERGIZE via WeaponCustomAct_ServerExecuteByName. Do not re-translate an S3 id.
+// Charge anim: ACT_VM_ENERGIZE via WeaponCustomAct_ServerExecuteByName. Do not re-translate a dedi id.
 static constexpr ptrdiff_t kWpnOffStudioHdr      = 0xFD8;
 static constexpr ptrdiff_t kWpnOffIdealSequence  = 0x1214;
 static constexpr ptrdiff_t kWpnOffIdealActivity  = 0x1218;
 static constexpr ptrdiff_t kWpnOffWeaponActivity = 0x121C;
 
-// char __fastcall SetIdealWeaponActivity(CWeaponX* this, unsigned activity)
 typedef char (__fastcall* SetIdealWeaponActivity_t)(void* pWeapon, unsigned int activity);
 static SetIdealWeaponActivity_t v_SetIdealWeaponActivity = nullptr;
+
+// Shared by the start-sprint and keep-sprinting checks.
+typedef char (__fastcall* WeaponBlocksSprint_t)(void* pPlayer, int buttons);
+static WeaponBlocksSprint_t v_WeaponBlocksSprint = nullptr;
+
+// Raw animation length with the entity's pose parameters; no weapon KV overrides.
+typedef float (__fastcall* StudioSequenceDuration_t)(void* pEntity, void* pStudioHdr, int sequence);
+static StudioSequenceDuration_t v_StudioSequenceDuration = nullptr;
 
 // Must resolve in GetFun: translocation detours this function, and a scan after
 // attach sees the jmp instead of the prologue. Calls go through that hook.
 void VEnergize::GetFun(void) const
 {
-	// mov [rsp+8],rbx; mov [rsp+10h],rdi; push rbp; mov rbp,rsp;
-	// sub rsp,70h; cmp qword ptr [rcx+0FD8h],0
+	// Opens by testing the weapon's studio header at +0xFD8.
 	Module_FindPattern(g_GameDll,
 		"48 89 5C 24 08 48 89 7C 24 10 55 48 8B EC 48 83 EC 70 "
 		"48 83 B9 D8 0F 00 00 00")
@@ -197,11 +207,94 @@ void VEnergize::GetFun(void) const
 		Warning(eDLL_T::SERVER,
 			"[Energize] SetIdealWeaponActivity pattern unresolved -- the charge "
 			"anim cannot play\n");
+
+	// Validates the studio header, then reads its virtual model at +0x10.
+	Module_FindPattern(g_GameDll,
+		"48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 41 8B F8 48 8B DA 48 8B F1 "
+		"48 85 D2 74 ?? 48 8B CA E8 ?? ?? ?? ?? 84 C0 74 ?? 48 8B 43 10 48 85 C0")
+		.GetPtr(v_StudioSequenceDuration);
+
+	if (!v_StudioSequenceDuration)
+		Warning(eDLL_T::SERVER,
+			"[Energize] SequenceDuration pattern unresolved -- the wind-up falls back "
+			"to energize_activity_time and will not match the client\n");
+
+	// Tests button bit 18, then two player fields before answering true.
+	Module_FindPattern(g_GameDll,
+		"48 83 EC 28 8B C2 4C 8B C1 C1 E8 12 A8 01 74 ?? 83 B9 ?? ?? 00 00 00 7F ?? "
+		"80 B9 ?? ?? 00 00 00 74 ?? B0 01")
+		.GetPtr(v_WeaponBlocksSprint);
+
+	if (!v_WeaponBlocksSprint)
+		Warning(eDLL_T::SERVER,
+			"[Energize] WeaponBlocksSprint pattern unresolved -- players can sprint "
+			"and slide through a wind-up\n");
 }
 
 void VEnergize::GetAdr(void) const
 {
-	LogFunAdr("CWeaponX::SetIdealWeaponActivity (energize)", v_SetIdealWeaponActivity);
+	LogFunAdr("Energize_SetIdealActivity", v_SetIdealWeaponActivity);
+	LogFunAdr("Energize_SequenceDuration", v_StudioSequenceDuration);
+	LogFunAdr("Energize_WeaponBlocksSprint", v_WeaponBlocksSprint);
+}
+
+// Cycle of the first event named pszEvent on the sequence, or defaultCycle.
+// Matched by name: the host assigns the S21 AE_WPN_* events fresh ids at load.
+static constexpr int kSeqDescSize      = 0xD0;
+static constexpr int kSeqEventStride   = 272;
+static constexpr int kSeqEventNameOff  = 268;  // int szeventindex, event-relative
+static constexpr int kMaxSeqEvents     = 512;
+
+static uintptr_t Energize_GetSeqDesc(uintptr_t pStudioHdr, int sequence)
+{
+	if (!pStudioHdr || sequence < 0)
+		return 0;
+
+	const uintptr_t studiohdr = *reinterpret_cast<uintptr_t*>(pStudioHdr + 0x08);
+	const uintptr_t vmodel    = *reinterpret_cast<uintptr_t*>(pStudioHdr + 0x10);
+
+	if (vmodel)
+	{
+		if (sequence >= *reinterpret_cast<int*>(vmodel + 0x20))
+			return 0;
+		const uintptr_t seqs = *reinterpret_cast<uintptr_t*>(vmodel + 0x08);
+		return seqs ? *reinterpret_cast<uintptr_t*>(seqs + 0x18 * static_cast<uintptr_t>(sequence) + 0x08) : 0;
+	}
+
+	if (!studiohdr || sequence >= *reinterpret_cast<int*>(studiohdr + 0xC0)) // numlocalseq
+		return 0;
+
+	return studiohdr + *reinterpret_cast<int*>(studiohdr + 0xC4)            // localseqindex
+		+ kSeqDescSize * static_cast<uintptr_t>(sequence);
+}
+
+static float Energize_GetSeqEventCycle(uintptr_t seqdesc, const char* pszEvent, float defaultCycle,
+	bool* pFound)
+{
+	*pFound = false;
+	if (!seqdesc)
+		return defaultCycle;
+
+	const int numEvents  = *reinterpret_cast<int*>(seqdesc + 0x18);
+	const int eventIndex = *reinterpret_cast<int*>(seqdesc + 0x1C);
+	if (numEvents <= 0 || numEvents > kMaxSeqEvents || !eventIndex)
+		return defaultCycle;
+
+	const uintptr_t events = seqdesc + eventIndex;
+	for (int i = 0; i < numEvents; i++)
+	{
+		const uintptr_t e = events + static_cast<uintptr_t>(i) * kSeqEventStride;
+		const int nameOff = *reinterpret_cast<int*>(e + kSeqEventNameOff);
+		if (!nameOff)
+			continue;
+
+		if (strcmp(reinterpret_cast<const char*>(e + nameOff), pszEvent) == 0)
+		{
+			*pFound = true;
+			return *reinterpret_cast<float*>(e);
+		}
+	}
+	return defaultCycle;
 }
 
 static bool Energize_PlayChargeAnim(void* pPlayer, void* pWeapon)
@@ -268,13 +361,48 @@ static bool Energize_PlayChargeAnim(void* pPlayer, void* pWeapon)
 		DevMsg(eDLL_T::SERVER,
 			"[Energize] charge-anim weapon=%p seq %d->%d ideal %d->%d weapAct %d->%d\n",
 			pWeapon, seqBefore, seqAfter, idealBefore, idealAfter, weapBefore, weapAfter);
-
-		// AE_WPN_ENERGIZED is not portable to this host; completion stays on
-		// energize_activity_time. Opt-in event dumps live on the bind-failed path
-		// and DTExtend helpers -- do not auto-dump on every successful charge.
 	}
 
 	return idealOk != 0;
+}
+
+// The client's ENERGIZING edge: complete at AE_WPN_ENERGIZED, held until AE_WPN_READYTOFIRE,
+// both fractions of the charge sequence (missing = full length), as the client times it.
+static void Energize_ArmChargeClock(void* pWeapon, EnergizeInstanceState& inst,
+	const EnergizeWeaponConfig& config, bool chargeAnimPlayed)
+{
+	const float start = inst.startEnergizingTime;
+	const float kvTime = config.energizeActivityTime > 0.0f ? config.energizeActivityTime : 1.0f;
+
+	uint8_t* const w = reinterpret_cast<uint8_t*>(pWeapon);
+	const uintptr_t pStudioHdr = *reinterpret_cast<uintptr_t*>(w + kWpnOffStudioHdr);
+	const int sequence = *reinterpret_cast<int*>(w + kWpnOffIdealSequence);
+
+	const uintptr_t seqdesc = Energize_GetSeqDesc(pStudioHdr, sequence);
+	if (!chargeAnimPlayed || !v_StudioSequenceDuration || !seqdesc)
+	{
+		inst.energizedSeqEventTime = start + kvTime;
+		static int s_budget = 8;
+		if (s_budget-- > 0)
+			Warning(eDLL_T::SERVER,
+			"[Energize] wind-up clock on energize_activity_time %.3f (anim=%d duration=%d hdr=%p) "
+			"-- the client times it off the charge sequence, expect a mismatch\n",
+			kvTime, chargeAnimPlayed ? 1 : 0, v_StudioSequenceDuration ? 1 : 0,
+			reinterpret_cast<void*>(pStudioHdr));
+		return;
+	}
+
+	const float duration = v_StudioSequenceDuration(pWeapon, reinterpret_cast<void*>(pStudioHdr), sequence);
+
+	bool foundEnergized = false, foundReady = false;
+	const float energizedCycle = Energize_GetSeqEventCycle(seqdesc, "AE_WPN_ENERGIZED", 1.0f, &foundEnergized);
+	const float readyCycle     = Energize_GetSeqEventCycle(seqdesc, "AE_WPN_READYTOFIRE", 1.0f, &foundReady);
+
+	inst.energizedSeqEventTime = start + energizedCycle * duration;
+
+	const float readyTime = start + readyCycle * duration;
+	Energize_SetWeaponFloat(pWeapon, "m_nextReadyTime", readyTime);
+	Energize_SetWeaponFloat(pWeapon, "m_flTimeWeaponIdle", readyTime);
 }
 
 static SDKEntityMap<EnergizeInstanceState> s_energizeStatesServer(ESide::Server, "energize.srv");
@@ -359,10 +487,6 @@ static EnergizeWeaponConfig LoadEnergizeConfigFromFile(const std::string& weapon
 			config.canEnergizeWhenEnergized = (Sdk_ParseInt(value) != 0);
 		else if (key == "zoom_effects")
 			config.zoomEffects = (Sdk_ParseInt(value) != 0);
-		else if (key == "fire_rate" && config.fireRate == 0.0f)
-			config.fireRate = Sdk_ParseFloat(value);   // first hit only: the Mods blocks re-declare it
-		else if (key == "fire_duration" && config.fireDuration == 0.0f)
-			config.fireDuration = Sdk_ParseFloat(value);
 		else if (key == "OnWeaponTryEnergize")
 			config.cbTryEnergize = value;
 		else if (key == "OnWeaponStartEnergizing")
@@ -704,6 +828,9 @@ static constexpr uint8_t kS21ExtraFlag_StartEnergize = 0x80;
 struct EnergizeTriggerState
 {
 	bool lastRawEnergizeBit = false;
+	// Weapon this player is winding up. The FSM only ticks held weapons, so a
+	// swap that skips HOLSTER would otherwise leave it ENERGIZING unticked.
+	SDKEntityHandle hWindUpWeapon;
 };
 static SDKEntityMap<EnergizeTriggerState> s_energizeTriggerServer(ESide::Server, "energize.trig");
 
@@ -798,10 +925,7 @@ static void ApplyEnergizedEdge(void* pWeapon, EnergizeInstanceState& inst,
 	inst.energizeValidated = true;
 	inst.wasEnergizedWhenStartEnergizing = false;
 	inst.lastEnergizeState = ENERGIZE_ENERGIZED;
-	// Seed fire-edge detector so a pre-existing lastPrimaryAttack does not
-	// immediately consume a shot of the fresh charge pool.
-	inst.lastSeenPrimaryAttack = GetWeaponLastPrimaryAttack(pWeapon);
-	inst.lastSeenPrimaryAttackValid = true;
+	inst.energizedSeqEventTime = 0.0f;
 	SyncNetworkedFields(pWeapon, inst);
 }
 
@@ -820,7 +944,7 @@ static void ApplyNoneEdge(void* pPlayer, void* pWeapon, EnergizeInstanceState& i
 
 	inst.energizeValidated = false;
 	inst.wasEnergizedWhenStartEnergizing = false;
-	inst.lastSeenPrimaryAttackValid = false;
+	inst.energizedSeqEventTime = 0.0f;
 	inst.lastEnergizeState = ENERGIZE_NONE;
 	SyncNetworkedFields(pWeapon, inst);
 }
@@ -832,16 +956,8 @@ static constexpr uint32_t kBtn_Speed       = 1u << 15;    // sprint -- NOT in S2
 
 static ConVar sdk_energize_cancel_on_input("sdk_energize_cancel_on_input", "1",
 	FCVAR_DEVELOPMENTONLY | FCVAR_REPLICATED,
-	"Abort an energize wind-up on attack/reload/melee (and ADS when both "
-	"zoomEffects and sdk_energize_cancel_on_ads are set). 0 = wind-up is "
-	"uninterruptible by the input mask.");
-
-// ADS cancel is only valid against the real AE_WPN_ENERGIZED wind-up, not a pose substitute.
-static ConVar sdk_energize_cancel_on_ads("sdk_energize_cancel_on_ads", "0",
-	FCVAR_DEVELOPMENTONLY | FCVAR_REPLICATED,
-	"Also OR the ADS bits into the energize cancel mask when the weapon has "
-	"zoomEffects. Default 0: bridge wind-up timer is still KV-based and longer "
-	"than S21, so hard ADS cancel mid-window desyncs.");
+	"Abort an energize wind-up on attack/reload/melee, and ADS when the weapon "
+	"has zoomEffects. 0 = wind-up is uninterruptible by the input mask.");
 
 // CancelEnergize also has four weapon-lifecycle callers besides the button mask.
 static ConVar sdk_energize_cancel_on_holster("sdk_energize_cancel_on_holster", "1",
@@ -882,7 +998,7 @@ static bool Energize_IsDeployedWeapon(void* pPlayer, const void* pWeapon)
 	return pActive == pWeapon;
 }
 
-// IsHolstering: HOLSTER or LOWER (weapstate 2/4; ordinals 0..7 match S3).
+// IsHolstering: HOLSTER or LOWER (weapstate 2/4; ordinals 0..7 match dedi).
 // LOWER time guard and m_isHolstering are not networked here; test LOWER bare.
 // Engine Lower cancels energize unconditionally.
 static constexpr int kWeapState_Holster = 2;
@@ -897,11 +1013,35 @@ static bool Energize_IsHolstering(void* pWeapon)
 	return weapState == kWeapState_Holster || weapState == kWeapState_Lower;
 }
 
-// C_WeaponX::GetFireRateDelay = m_modVars.fireDuration + (fireRate ? 1/fireRate: 0).
-static float Energize_GetFireRateDelay(const EnergizeWeaponConfig& config)
+// S21 parks the weapon in WEAP_STATE_ENERGIZE for the wind-up; dedi has no such
+// state, so a transitional state left running here finishes mid-charge and
+// plays its exit anim over the charge pose. IDLE is inert until
+// m_flTimeWeaponIdle, which the charge clock holds to READYTOFIRE.
+static constexpr int kWeapStateS3_Idle           = 0;
+static constexpr int kWeapStateS3_Deploy         = 1;
+static constexpr int kWeapStateS3_Raise          = 3;
+static constexpr int kWeapStateS3_Sprint         = 8;
+static constexpr int kWeapStateS3_Attack         = 9;
+static constexpr int kWeapStateS3_CustomActivity = 12;
+
+static void Energize_ParkWeaponState(void* pWeapon)
 {
-	return config.fireDuration
-		+ (config.fireRate != 0.0f ? (1.0f / config.fireRate) : 0.0f);
+	int weapState = kWeapStateS3_Idle;
+	if (!Energize_GetWeaponInt(pWeapon, "m_weapState", &weapState))
+		return;
+
+	// SPRINT matters most: the sprint gate ends the sprint on the next tick and
+	// the weapon would play its raise-from-sprint over the charge.
+	if (weapState != kWeapStateS3_Deploy && weapState != kWeapStateS3_Raise
+		&& weapState != kWeapStateS3_Sprint && weapState != kWeapStateS3_Attack
+		&& weapState != kWeapStateS3_CustomActivity)
+		return;
+
+	Energize_SetWeaponInt(pWeapon, "m_weapState", kWeapStateS3_Idle);
+
+	if (sdk_energize_drain_trace.GetBool())
+		Msg(eDLL_T::SERVER, "[Energize] wind-up parks weapState %d -> IDLE weapon=%p\n",
+			weapState, pWeapon);
 }
 
 // 1p charge pose is authored server-side (m_idealSequence / m_idealPlaybackRate).
@@ -955,7 +1095,7 @@ static bool Energize_CanStart(void* pWeapon, const EnergizeInstanceState& inst, 
 		return false;
 	}
 
-	// The dedi field carries S3 ordinals; translate before comparing against the
+	// The dedi field carries dedi ordinals; translate before comparing against the
 	// S21 constant, exactly as the wire proxy does. (The holster ordinals below
 	// need no translation -- 0..7 are identical on both sides.)
 	int weapStateS3 = 0;
@@ -984,9 +1124,9 @@ static bool Energize_Cancel(void* pPlayer, void* pWeapon, EnergizeInstanceState&
 	if (!config.hasEnergized || inst.energizeState != ENERGIZE_ENERGIZING)
 		return false;
 
+	// S21 releases the weapon at once and only holds the re-energize gate.
 	const float now = gpGlobals ? gpGlobals->curTime : 0.0f;
-	const float fireRateDelay = Energize_GetFireRateDelay(config);
-	const float nextReady = now + fireRateDelay;
+	const float nextReady = now;
 
 	inst.chargeAnimPlayed = false;
 
@@ -1016,10 +1156,11 @@ static bool Energize_Cancel(void* pPlayer, void* pWeapon, EnergizeInstanceState&
 
 	Energize_ReleaseChargePose(pWeapon);
 
-	Msg(eDLL_T::SERVER,
-		"[Energize] CANCEL (%s) weapon=%p state->%d now=%.3f nextReady=%.3f (+%.3f) "
+	if (sdk_energize_drain_trace.GetBool())
+		Msg(eDLL_T::SERVER,
+		"[Energize] CANCEL (%s) weapon=%p state->%d now=%.3f nextReady=%.3f "
 		"nextEnergizeReady=%.3f armed[ready=%d reload=%d idle=%d]\n",
-		reason, pWeapon, inst.energizeState, now, nextReady, fireRateDelay,
+		reason, pWeapon, inst.energizeState, now, nextReady,
 		inst.nextEnergizeReadyTime, armedReady ? 1 : 0, armedReload ? 1 : 0,
 		armedIdle ? 1 : 0);
 
@@ -1040,7 +1181,8 @@ static const char* Energize_GetCancelReason(void* pPlayer, void* pWeapon,
 	if (sdk_energize_cancel_on_input.GetBool())
 	{
 		mask = kCancelMask_Base;
-		if (config.zoomEffects && sdk_energize_cancel_on_ads.GetBool())
+		// The S21 client cancels on ADS whenever the weapon has zoom effects.
+		if (config.zoomEffects)
 			mask |= kCancelMask_Ads;
 		if (sdk_energize_cancel_on_sprint.GetBool())
 			mask |= kBtn_Speed;
@@ -1050,7 +1192,7 @@ static const char* Energize_GetCancelReason(void* pPlayer, void* pWeapon,
 	Energize_GetWeaponInt(pWeapon, "m_weapState", &weapState);
 	const bool deployed = Energize_IsDeployedWeapon(pPlayer, pWeapon);
 
-	// Trace every observed-state transition during wind-up, not just button edges.
+	if (sdk_energize_drain_trace.GetBool())
 	{
 		static uint32_t s_lastButtons = 0;
 		static int s_lastWeapState = -2;
@@ -1156,7 +1298,13 @@ static void TickWeaponEnergize(void* pPlayer, void* pWeapon, bool triggerPressed
 			inst.energizeState = ENERGIZE_ENERGIZING;
 			inst.startEnergizingTime = now;
 			inst.energizingEnteredTick = gpGlobals ? gpGlobals->tickCount : 0;
+			Energize_ParkWeaponState(pWeapon);
 			inst.chargeAnimPlayed = Energize_PlayChargeAnim(pPlayer, pWeapon);
+			inst.chargeIdealActivity = *reinterpret_cast<int*>(
+				reinterpret_cast<uint8_t*>(pWeapon) + kWpnOffIdealActivity);
+			inst.chargePoseLossReported = false;
+			inst.holsterReported = false;
+			Energize_ArmChargeClock(pWeapon, inst, config, inst.chargeAnimPlayed);
 			inst.energizeValidated = true;
 
 			ScriptVariant_t startArgs[2] = { hWeaponScript, hPlayerScript };
@@ -1183,7 +1331,15 @@ static void TickWeaponEnergize(void* pPlayer, void* pWeapon, bool triggerPressed
 			&& gpGlobals->tickCount > inst.energizingEnteredTick)
 		{
 			if (!inst.chargeAnimPlayed)
+			{
 				inst.chargeAnimPlayed = Energize_PlayChargeAnim(pPlayer, pWeapon);
+				if (inst.chargeAnimPlayed)
+				{
+					inst.chargeIdealActivity = *reinterpret_cast<int*>(
+						reinterpret_cast<uint8_t*>(pWeapon) + kWpnOffIdealActivity);
+					Energize_ArmChargeClock(pWeapon, inst, config, true);
+				}
+			}
 
 			inst.lastEnergizeState = ENERGIZE_ENERGIZING;
 			SyncNetworkedFields(pWeapon, inst);
@@ -1205,10 +1361,24 @@ static void TickWeaponEnergize(void* pPlayer, void* pWeapon, bool triggerPressed
 			return;
 		}
 
-		const float activityTime = config.energizeActivityTime > 0.0f
-			? config.energizeActivityTime
-			: 1.0f;
-		if (now - inst.startEnergizingTime >= activityTime)
+		if (inst.chargeAnimPlayed && !inst.chargePoseLossReported)
+		{
+			const uint8_t* const w = reinterpret_cast<const uint8_t*>(pWeapon);
+			const int ideal = *reinterpret_cast<const int*>(w + kWpnOffIdealActivity);
+			if (ideal != inst.chargeIdealActivity)
+			{
+				inst.chargePoseLossReported = true;
+				int weapState = -1;
+				Energize_GetWeaponInt(pWeapon, "m_weapState", &weapState);
+				Warning(eDLL_T::SERVER,
+					"[Energize] charge pose replaced mid-wind-up weapon=%p ideal %d -> %d "
+					"weapState=%d at %.3fs -- the state stays ENERGIZING\n",
+					pWeapon, inst.chargeIdealActivity, ideal, weapState,
+					now - inst.startEnergizingTime);
+			}
+		}
+
+		if (inst.energizedSeqEventTime > 0.0f && now >= inst.energizedSeqEventTime)
 		{
 			// COMPLETE IN ONE SYNC: state=ENERGIZED + AddMod + last=ENERGIZED.
 			// Never leave last=ENERGIZING on the wire while state is ENERGIZED.
@@ -1229,29 +1399,99 @@ static void TickWeaponEnergize(void* pPlayer, void* pWeapon, bool triggerPressed
 	}
 	else if (inst.energizeState == ENERGIZE_ENERGIZED)
 	{
-		// Per-shot pool drain: each engine primary-fire while ENERGIZED subtracts the pool cost.
-		if (config.energizedTimeConsumedPerShot > 0.0f)
-		{
-			const float engineLastAttack = GetWeaponLastPrimaryAttack(pWeapon);
-			if (!inst.lastSeenPrimaryAttackValid)
-			{
-				inst.lastSeenPrimaryAttack = engineLastAttack;
-				inst.lastSeenPrimaryAttackValid = true;
-			}
-			else if (engineLastAttack > inst.lastSeenPrimaryAttack + 0.0001f)
-			{
-				inst.lastSeenPrimaryAttack = engineLastAttack;
-				inst.energizedEndTime -= config.energizedTimeConsumedPerShot;
-				SyncNetworkedFields(pWeapon, inst);
-			}
-		}
-
+		// The per-shot drain lives in the fire path (EnergizeBridge_OnWeaponFired).
 		if (now >= inst.energizedEndTime)
 		{
 			inst.energizeState = ENERGIZE_NONE;
 			ApplyNoneEdge(pPlayer, pWeapon, inst, config, hWeaponScript, hPlayerScript);
 			return;
 		}
+	}
+}
+
+// S21 refuses to start or keep a sprint while any held weapon is winding up,
+// which also rules out sliding. The host build has no energize, so add the case here.
+static bool Energize_PlayerHasWindUp(void* pPlayer)
+{
+	const WeaponInventory* const pInv = reinterpret_cast<const WeaponInventory*>(
+		reinterpret_cast<const uint8_t*>(pPlayer) + kServerInventoryOffset);
+
+	for (int slot = 0; slot < 3; slot++)
+	{
+		const SDKEntityHandle h(static_cast<uint32_t>(pInv->activeWeapons[slot].ToInt()));
+		if (!h.IsValid())
+			continue;
+
+		void* const pWeapon = SDKEntityState_Resolve(h, ESide::Server);
+		const EnergizeInstanceState* const st = pWeapon ? s_energizeStatesServer.Find(pWeapon) : nullptr;
+		if (st && st->energizeState == ENERGIZE_ENERGIZING)
+			return true;
+	}
+	return false;
+}
+
+static char __fastcall Hook_WeaponBlocksSprint(void* pPlayer, int buttons)
+{
+	if (v_WeaponBlocksSprint(pPlayer, buttons))
+		return 1;
+
+	return (pPlayer && sdk_energize_bridge.GetBool() && Energize_PlayerHasWindUp(pPlayer)) ? 1 : 0;
+}
+
+void VEnergize::Detour(const bool bAttach) const
+{
+	if (v_WeaponBlocksSprint)
+		DetourSetup(&v_WeaponBlocksSprint, &Hook_WeaponBlocksSprint, bAttach);
+}
+
+void EnergizeBridge_OnHolster(void* pWeapon)
+{
+	EnergizeInstanceState* const inst = pWeapon ? s_energizeStatesServer.Find(pWeapon) : nullptr;
+	if (!inst || inst->energizeState != ENERGIZE_ENERGIZING || inst->holsterReported)
+		return;
+
+	inst->holsterReported = true;
+
+	void* frames[8] = {};
+	const USHORT nFrames = RtlCaptureStackBackTrace(1, 8, frames, nullptr);
+	const uintptr_t base = g_GameDll.GetModuleBase();
+	const uintptr_t size = g_GameDll.GetModuleSize();
+
+	char szStack[256] = {};
+	size_t len = 0;
+	for (USHORT i = 0; i < nFrames && len < sizeof(szStack) - 20; i++)
+	{
+		const uintptr_t a = reinterpret_cast<uintptr_t>(frames[i]);
+		if (a < base || a >= base + size)
+			continue;
+		const int n = V_snprintf(szStack + len, sizeof(szStack) - len, " 0x%llX",
+			static_cast<unsigned long long>(a - base + 0x140000000ull));
+		if (n <= 0)
+			break;
+		len += static_cast<size_t>(n);
+	}
+
+	const float now = gpGlobals ? gpGlobals->curTime : 0.0f;
+	Warning(eDLL_T::SERVER, "[Energize] holster during wind-up weapon=%p at %.3fs callers:%s\n",
+		pWeapon, now - inst->startEnergizingTime, szStack);
+}
+
+void EnergizeBridge_OnWeaponFired(void* pWeapon)
+{
+	EnergizeInstanceState* const inst = pWeapon ? s_energizeStatesServer.Find(pWeapon) : nullptr;
+	if (!inst || inst->energizeState != ENERGIZE_ENERGIZED)
+		return;
+
+	const EnergizeWeaponConfig& config = GetEnergizeConfig(GetWeaponClassNameRaw(pWeapon));
+	inst->energizedEndTime -= config.energizedTimeConsumedPerShot;
+	SyncNetworkedFields(pWeapon, *inst);
+
+	if (sdk_energize_drain_trace.GetBool())
+	{
+		const float now = gpGlobals ? gpGlobals->curTime : 0.0f;
+		Msg(eDLL_T::SERVER, "[Energize] shot drained %.2f weapon=%p end=%.3f left=%.2f\n",
+			config.energizedTimeConsumedPerShot, pWeapon, inst->energizedEndTime,
+			inst->energizedEndTime - now);
 	}
 }
 
@@ -1312,6 +1552,37 @@ void EnergizeBridge_Think(void* pPlayer, void* pUserCmd)
 	const int nWeapons = CollectEnergizeWeapons(pPlayer, weapons, 3);
 	for (int i = 0; i < nWeapons; i++)
 		TickWeaponEnergize(pPlayer, weapons[i], triggerPressed, buttons, now);
+
+	// S21 cancels on Holster/Deploy/Deactivate; catch a wind-up whose weapon
+	// left the hands without passing through a state we tick.
+	if (trigState.hWindUpWeapon.IsValid())
+	{
+		void* const pPrev = SDKEntityState_Resolve(trigState.hWindUpWeapon, ESide::Server);
+		EnergizeInstanceState* const inst = pPrev ? s_energizeStatesServer.Find(pPrev) : nullptr;
+
+		bool held = false;
+		for (int i = 0; i < nWeapons; i++)
+			held |= weapons[i] == pPrev;
+
+		if (inst && inst->energizeState == ENERGIZE_ENERGIZING && !held)
+		{
+			const HSCRIPT hPlayerScript = reinterpret_cast<CBaseEntity*>(pPlayer)->GetScriptInstance();
+			const HSCRIPT hWeaponScript = reinterpret_cast<CBaseEntity*>(pPrev)->GetScriptInstance();
+			if (hPlayerScript && hWeaponScript)
+			{
+				Energize_Cancel(pPlayer, pPrev, *inst, GetEnergizeConfig(GetWeaponClassNameRaw(pPrev)),
+					hWeaponScript, hPlayerScript, "left-hands");
+			}
+		}
+		trigState.hWindUpWeapon = SDKEntityHandle();
+	}
+
+	for (int i = 0; i < nWeapons; i++)
+	{
+		const EnergizeInstanceState* const inst = s_energizeStatesServer.Find(weapons[i]);
+		if (inst && inst->energizeState == ENERGIZE_ENERGIZING)
+			trigState.hWindUpWeapon = SDKEntityState_GetHandle(weapons[i]);
+	}
 }
 
 

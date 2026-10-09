@@ -67,7 +67,7 @@ static fnSpinPresent s_fnSpinPresent = NULL;
 //#################################################################################
 
 extern void SDK_Log(const char* fmt, ...);
-extern volatile LONG g_imguiWndProcToggleSerial;
+extern volatile bool g_bImguiWndProcSeesKeys;
 
 LRESULT CALLBACK DXGIMsgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -106,25 +106,37 @@ static void Dx12_PollToggleFallback()
 		return;
 	}
 
-	static LONG s_seenWndProcToggleSerial = 0;
-	const LONG wndProcSerial = InterlockedCompareExchange(
-		&g_imguiWndProcToggleSerial, 0, 0);
-	if (wndProcSerial != s_seenWndProcToggleSerial)
+	// The async key state leads WM_KEYDOWN, so acting on an edge here races
+	// the WndProc toggle and cancels it. Defer, and stand down for good once
+	// WndProc is seen receiving keys.
+	static ULONGLONG s_pendingConsoleTick = 0;
+	static ULONGLONG s_pendingDlssTick = 0;
+
+	const bool bConsoleEdge = Dx12_KeyPressedEdge(VK_F10) | Dx12_KeyPressedEdge(VK_OEM_3);
+	const bool bDlssEdge = Dx12_KeyPressedEdge(VK_F9);
+
+	if (g_bImguiWndProcSeesKeys)
 	{
-		s_seenWndProcToggleSerial = wndProcSerial;
-		Dx12_KeyPressedEdge(VK_F10);
-		Dx12_KeyPressedEdge(VK_OEM_3);
-		Dx12_KeyPressedEdge(VK_F9);
+		s_pendingConsoleTick = 0;
+		s_pendingDlssTick = 0;
 		return;
 	}
 
-	if (Dx12_KeyPressedEdge(VK_F10) || Dx12_KeyPressedEdge(VK_OEM_3))
+	const ULONGLONG now = GetTickCount64();
+	if (bConsoleEdge && !s_pendingConsoleTick)
+		s_pendingConsoleTick = now;
+	if (bDlssEdge && !s_pendingDlssTick)
+		s_pendingDlssTick = now;
+
+	if (s_pendingConsoleTick && now - s_pendingConsoleTick >= 150)
 	{
+		s_pendingConsoleTick = 0;
 		g_Console.ToggleTab(CConsole::kTabConsole);
 		SDK_Log("[IMGUI-DX12] console toggle fallback fired\n");
 	}
-	if (Dx12_KeyPressedEdge(VK_F9))
+	if (s_pendingDlssTick && now - s_pendingDlssTick >= 150)
 	{
+		s_pendingDlssTick = 0;
 		g_DlssNrMenu.ToggleActive();
 		ResetInput();
 		SDK_Log("[IMGUI-DX12] DLSS NR menu toggle fallback fired\n");

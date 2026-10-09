@@ -1741,7 +1741,7 @@ static void CC_BridgeDbg_LineTest_f(const CCommand& args)
 }
 static ConCommand bridge_dbg_line_test("bridge_dbg_line_test", CC_BridgeDbg_LineTest_f,
     "Insert engine line overlays and report the list head. Usage: bridge_dbg_line_test [spacing [extent]] | bridge_dbg_line_test x y z [height [duration]]",
-    FCVAR_CHEAT | FCVAR_CLIENTDLL);
+    FCVAR_CHEAT | FCVAR_DEVELOPMENTONLY | FCVAR_CLIENTDLL);
 
 static void DebugOverlay_InsertLine(const Vector3D& origin, const Vector3D& dest,
     const int r, const int g, const int b, const int a, const bool noDepthTest, const float duration)

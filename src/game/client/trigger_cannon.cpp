@@ -17,6 +17,7 @@
 #include "tier1/cvar.h"
 #include "engine/client/net_bridge_internal.h"
 #include "game/client/trigger_cannon.h"
+#include "game/client/jumppad_predict.h"
 
 #include <cmath>
 
@@ -137,14 +138,8 @@ static void TriggerCannonClient_ArmFlightLock(const void* pPlayer, const void* p
 //-----------------------------------------------------------------------------
 static void __fastcall Hook_ApplyGravityCannonLaunch(void* ctx, void* pTrigger)
 {
-	if (!ctx || !pTrigger || !bridge_trigger_cannon_lock.GetBool())
-	{
-		C_GameMovement__ApplyGravityCannonLaunch(ctx, pTrigger);
-		return;
-	}
-
-	const uint8_t* const pPlayer = *reinterpret_cast<uint8_t**>(
-		static_cast<uint8_t*>(ctx) + TCC_CTX_OFF_PLAYER);
+	uint8_t* const pPlayer = (ctx && pTrigger) ? *reinterpret_cast<uint8_t**>(
+		static_cast<uint8_t*>(ctx) + TCC_CTX_OFF_PLAYER) : nullptr;
 	if (!pPlayer)
 	{
 		C_GameMovement__ApplyGravityCannonLaunch(ctx, pTrigger);
@@ -159,7 +154,11 @@ static void __fastcall Hook_ApplyGravityCannonLaunch(void* ctx, void* pTrigger)
 	const float flDebounceAfter = *reinterpret_cast<const float*>(
 		pPlayer + TCC_PLAYER_OFF_DEBOUNCE);
 
-	if (flDebounceAfter != flDebounceBefore)
+	if (flDebounceAfter == flDebounceBefore)
+		return;
+
+	JumpPadPredict_OnLauncherLaunched(pPlayer);
+	if (bridge_trigger_cannon_lock.GetBool())
 		TriggerCannonClient_ArmFlightLock(pPlayer, pTrigger);
 }
 

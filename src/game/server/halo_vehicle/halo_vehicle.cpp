@@ -586,7 +586,7 @@ static SQRESULT ServerScript_HaloVehicleRegister(HSQUIRRELVM v)
 				HaloSim_Reset(s_defs[defIndex].def, e.state, ToWorldUnits(origin), forward, { 0.0f, 0.0f, 1.0f });
 				e.inputFacing = forward;
 				ok = true;
-				// The S3 prop inherits a degenerate box; publish the authored
+				// The dedi prop inherits a degenerate box; publish the authored
 				// model-space bounds so the retail client culls and traces it.
 				if (CCollisionProperty* const pColl = reinterpret_cast<CBaseEntity*>(pProp)->CollisionProp())
 				{

@@ -2,7 +2,7 @@
 //
 // Purpose: slide super-jump (the "boosted_slide_jump" settings mod) for the
 // dedicated server. The S21 client jumps a second time within 0.3s of a
-// slide-jump when the mod is active; S3 has no such path, so the server twin
+// slide-jump when the mod is active; dedi has no such path, so the server twin
 // accepts that press and adds the same vertical impulse.
 //
 //=============================================================================//

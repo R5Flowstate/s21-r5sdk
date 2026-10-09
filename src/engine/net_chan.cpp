@@ -284,7 +284,7 @@ bool CNetChan::ProcessMessages(bf_read* buf)
                 return false;
             }
 
-            // S3 wire IDs -> S21 handler IDs (same numeric ID is a different message).
+            // dedi wire IDs -> S21 handler IDs (same numeric ID is a different message).
             {
                 const int origCmd = cmd;
                 const int translated = S21Bridge_TranslateNetMsgType(cmd, true);
@@ -585,13 +585,13 @@ bool CNetChan::HasPendingReliableData(void)
 void VNetChan::Detour(const bool bAttach) const
 {
 	DetourSetup(&CNetChan__Shutdown, &CNetChan::_Shutdown, bAttach);
-	// Do not hook FlowNewPacket (S3 offsets). Call native from S21Bridge_Hook_ProcessPacket.
+	// Do not hook FlowNewPacket (dedi offsets). Call native from S21Bridge_Hook_ProcessPacket.
 	// DetourSetup(&CNetChan__FlowNewPacket, &CNetChan::_FlowNewPacket, bAttach);
 
 	// ProcessMessages hook off: SDK handler +368 crashes on S21 (+8584).
 	// DetourSetup(&CNetChan__ProcessMessages, &CNetChan::_ProcessMessages, bAttach);
 
-	// S3-format ProcessPacket / SendDatagram. SendDatagram guards outSeq<=1 for OOB.
+	// dedi-format ProcessPacket / SendDatagram. SendDatagram guards outSeq<=1 for OOB.
 	Warning(eDLL_T::ENGINE, "[BRIDGE] VNetChan::Detour(%d): ProcessPacket=%p SendDatagram=%p SendNetMsg(S21)=%p\n",
 		bAttach ? 1 : 0, (void*)CNetChan__ProcessPacket, (void*)CNetChan__SendDatagram, (void*)CNetChan__SendNetMsg);
 	if (CNetChan__ProcessPacket)
@@ -644,7 +644,7 @@ static ConVar bridge_latency_refine_diag("bridge_latency_refine_diag", "0", FCVA
 	"Log [RTT-REFINE] native vs reported vs published latency.");
 
 // Break a slow net_SignonState handler into ActivatePlayer / DataBlock / post.
-static ConVar net_signon_phase_log("net_signon_phase_log", "1", FCVAR_DEVELOPMENTONLY,
+static ConVar net_signon_phase_log("net_signon_phase_log", "0", FCVAR_DEVELOPMENTONLY,
     "Log [SIGNON-PHASE] breakdown for any net_SignonState Process exceeding "
     "net_processTimeLogMs (0 = disable).");
 

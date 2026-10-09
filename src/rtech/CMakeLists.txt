@@ -98,8 +98,7 @@ macro( add_rtech_game_lib LIB_NAME )
 
 	if( ${LIB_NAME} STREQUAL "rtech_game_cl" )
 		target_compile_definitions( ${PROJECT_NAME} PRIVATE
-			"CLIENT_DLL"
-			"GAMEDLL_S21"
+			"CLIENT_DLL"
 		)
 	else()
 		# On the plain (server) lib, force CLIENT_DLL only on client-only TU
@@ -109,7 +108,7 @@ macro( add_rtech_game_lib LIB_NAME )
 			"pak/rpak_observe.cpp"
 			"pak/rpak_sigbypass.cpp"
 			"pak/pak_opt_stream_drop.cpp"
-			PROPERTIES COMPILE_DEFINITIONS "CLIENT_DLL;GAMEDLL_S21"
+			PROPERTIES COMPILE_DEFINITIONS "CLIENT_DLL"
 		)
 	endif()
 endmacro()
@@ -136,8 +135,7 @@ end_sources()
 
 if( ${LIB_NAME} STREQUAL "rson_cl" )
 	target_compile_definitions( ${PROJECT_NAME} PRIVATE
-		"CLIENT_DLL"
-		"GAMEDLL_S21"
+		"CLIENT_DLL"
 	)
 endif()
 endmacro()
@@ -161,8 +159,7 @@ end_sources()
 
 if( ${LIB_NAME} STREQUAL "playlists_cl" )
 	target_compile_definitions( ${PROJECT_NAME} PRIVATE
-		"CLIENT_DLL"
-		"GAMEDLL_S21"
+		"CLIENT_DLL"
 	)
 endif()
 endmacro()
@@ -186,8 +183,7 @@ end_sources()
 
 if( ${LIB_NAME} STREQUAL "datatable_cl" )
 	target_compile_definitions( ${PROJECT_NAME} PRIVATE
-		"CLIENT_DLL"
-		"GAMEDLL_S21"
+		"CLIENT_DLL"
 	)
 endif()
 endmacro()
@@ -198,7 +194,7 @@ add_datatable_lib( "datatable_cl" )
 # Client-inject only: take the CLIENT_DLL half + vpc_cl PCH so the dual-ABI
 # public headers match the rest of client.dll.
 add_module( "lib" "rui" "vpc_cl" ${FOLDER_CONTEXT} TRUE TRUE )
-target_compile_definitions( ${PROJECT_NAME} PRIVATE "CLIENT_DLL" "GAMEDLL_S21" )
+target_compile_definitions( ${PROJECT_NAME} PRIVATE "CLIENT_DLL" )
 
 start_sources()
 
@@ -225,8 +221,7 @@ end_sources()
 
 if( ${LIB_NAME} STREQUAL "stryder_cl" )
 	target_compile_definitions( ${PROJECT_NAME} PRIVATE
-		"CLIENT_DLL"
-		"GAMEDLL_S21"
+		"CLIENT_DLL"
 	)
 endif()
 endmacro()

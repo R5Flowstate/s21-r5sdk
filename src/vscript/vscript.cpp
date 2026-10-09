@@ -571,7 +571,7 @@ SQBool Script_PrecompileScripts(CSquirrelVM* vm)
 #if !defined(CLIENT_DLL)
 		// Engine TraceLine is 6-arg; scripts pass entitiesOnly as 7th.
 		// Re-apply immediately before compile so nothing after VM Init can
-		// leave the S3 prototype in place (same class of trap as GRX_COUNT).
+		// leave the dedi prototype in place (same class of trap as GRX_COUNT).
 		Script_RegisterTraceLineEntitiesOnlyArity(vm);
 #endif
 		result = v_Script_PrecompileServerScripts(vm);

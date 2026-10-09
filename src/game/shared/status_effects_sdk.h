@@ -29,7 +29,7 @@ void StatusEffects_SDK_RegisterClientFunctions(CSquirrelVM* vm);
 void StatusEffects_SDK_RegisterUIFunctions(CSquirrelVM* vm);
 
 ///////////////////////////////////////////////////////////////////////////////
-// NOP the S3 parser's fatal log when a code-required effect name is absent.
+// NOP the dedi parser's fatal log when a code-required effect name is absent.
 ///////////////////////////////////////////////////////////////////////////////
 class VStatusEffectParseFix : public IDetour
 {

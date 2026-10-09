@@ -286,7 +286,7 @@ ServerClass* CServerGameDLL::GetAllServerClasses(void)
 	return CallVFunc<ServerClass*>(index, this);
 }
 
-static ConVar chat_debug("chat_debug", "0", FCVAR_RELEASE, "Enables chat-related debug printing.");
+static ConVar chat_debug("chat_debug", "0", FCVAR_DEVELOPMENTONLY, "Enables chat-related debug printing.");
 static ConVar sv_chat_commands("sv_chat_commands", "1", FCVAR_RELEASE,
 	"Treat chat lines starting with '!' as client commands (not broadcast).");
 
@@ -751,7 +751,7 @@ void CServerGameClients::_ProcessUserCmds(CServerGameClients* thisp, edict_t edi
 		ReadUserCmd(buf, to, from);
 
 		// The bridge client flags an object-placement pose trailer with this
-		// otherwise unused S3 bool.
+		// otherwise unused dedi bool.
 		uint8_t* const pPoseTrailerFlag = reinterpret_cast<uint8_t*>(to) + 0x18C;
 		if (*pPoseTrailerFlag)
 		{

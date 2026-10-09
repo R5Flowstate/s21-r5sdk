@@ -26,8 +26,7 @@ end_sources()
 
 if( ${LIB_NAME} STREQUAL "vphysics_cl" )
 target_compile_definitions( ${PROJECT_NAME} PRIVATE
-    "CLIENT_DLL"
-    "GAMEDLL_S21"
+    "CLIENT_DLL"
 )
 endif()
 endmacro()

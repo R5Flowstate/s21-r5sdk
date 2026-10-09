@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: mantle_boost on S3 TraversalMove -- sweet-spot trigger pre-orig,
+// Purpose: mantle_boost on dedi TraversalMove -- sweet-spot trigger pre-orig,
 // Region-3 finish boost post-orig.
 //
 //=============================================================================//

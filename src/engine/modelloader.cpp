@@ -18,7 +18,6 @@
 #include <filesystem/filesystem.h>
 
 static ConVar vis_validate_on_load("vis_validate_on_load", "0", FCVAR_DEVELOPMENTONLY, "Validate visibility tree data on load");
-static ConVar vis_dump_on_load("vis_dump_on_load", "0", FCVAR_DEVELOPMENTONLY, "Dump visibility tree data on load");
 
 // Cached lump data for cross-lump validation
 static const dcellaabbnode_t* s_pCellAABBNodes = nullptr;
@@ -556,7 +555,6 @@ void VModelLoader::Detour(const bool bAttach) const
 #include <filesystem/filesystem.h>
 
 static ConVar vis_validate_on_load("vis_validate_on_load", "0", FCVAR_DEVELOPMENTONLY, "Validate visibility tree data on load");
-static ConVar vis_dump_on_load("vis_dump_on_load", "0", FCVAR_DEVELOPMENTONLY, "Dump visibility tree data on load");
 
 // Cached lump data for cross-lump validation
 static const dcellaabbnode_t* s_pCellAABBNodes = nullptr;

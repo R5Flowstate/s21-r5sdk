@@ -2,7 +2,7 @@
 //
 // Purpose: Engine-free scalar decode core for ScriptRemote wire params.
 // The reader is a policy (live: adapter over bf_read; tests: bit cursor),
-// values come out as plain data. Wire type bytes are the frozen S3 protocol
+// values come out as plain data. Wire type bytes are the frozen dedi protocol
 // (FLOAT 1, VECTOR 3, INT 5, BOOL 6, ITEMFLAVOR 42); both sides pass their
 // enum cast to uint8_t. Reject detail travels out for the caller's log line;
 // the core itself never logs, allocates, or touches engine state.

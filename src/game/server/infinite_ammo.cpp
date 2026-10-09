@@ -17,7 +17,7 @@ static constexpr int64_t INFINITE_AMMO_COUNT = 999;
 // reserve, so infinite ammo must not override it.
 static constexpr uintptr_t WEAPONX_OFF_USESAMMO = 0x122C;
 
-// S3 has no native infinite-ammo surface. Per-weapon sidecar; empty is stock passthrough.
+// dedi has no native infinite-ammo surface. Per-weapon sidecar; empty is stock passthrough.
 static ConVar bridge_infinite_ammo("bridge_infinite_ammo", "1", FCVAR_RELEASE,
 	"Honor InfiniteAmmoState on the S3 dedi's native ammo paths (999 reserve, "
 	"no-op remove, reload gates answered as if the reserve were full) so the "

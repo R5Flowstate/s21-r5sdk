@@ -32,10 +32,6 @@ macro( apply_project_settings )
     option( OPTION_CERTAIN "This build is certain; debug statements (such as DevMsg(...)) will NOT be compiled" OFF )
     option( OPTION_RETAIL "This build is retail; enable this among with 'OPTION_CERTAIN' to form a release build" OFF )
 
-    # Legacy single game_shared_static CLIENT_DLL force (client-only rebuilds).
-    # Dual product builds use game_shared_static_cl instead; leave OFF.
-    option( R5SDK_UNIFY_CLIENT_SHARED "Force CLIENT_DLL on plain game_shared_static (legacy single-shared rebuilds)" OFF )
-
     # Set common defines
     add_compile_definitions(
         "_CRT_SECURE_NO_WARNINGS"
@@ -87,6 +83,16 @@ macro( apply_project_settings )
     )
     endif()
 
+    set( OPTION_RING "live" CACHE STRING "Release ring: live, or playtest (own wire gate, listed only to playtest builds)" )
+    set_property( CACHE OPTION_RING PROPERTY STRINGS live playtest )
+    if( OPTION_RING STREQUAL "playtest" )
+    add_compile_definitions(
+        "SDK_RING_PLAYTEST"
+    )
+    elseif( NOT OPTION_RING STREQUAL "live" )
+        message( FATAL_ERROR "OPTION_RING must be live or playtest, got '${OPTION_RING}'" )
+    endif()
+
     # Set settings for Debug configuration
     add_compile_options(
         $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Debug>>:/MTd>
@@ -109,6 +115,21 @@ macro( apply_project_settings )
         $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/MT>
         $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/EHsc>
     )
+
+    # A release build is reproducible: the same source and toolset give the same
+    # bytes wherever they are built, so anyone can check a shipped DLL.
+    if( ${OPTION_CERTAIN} )
+        file( TO_NATIVE_PATH "${CMAKE_SOURCE_DIR}/" SOURCE_ROOT_NATIVE )
+        add_compile_options(
+            $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/Brepro>
+            "$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/d1trimfile:${SOURCE_ROOT_NATIVE}>"
+        )
+        add_link_options(
+            $<$<CONFIG:Release>:/Brepro>
+            "$<$<CONFIG:Release>:/PDBALTPATH:%_PDB%>"
+        )
+        set( CMAKE_STATIC_LINKER_FLAGS_RELEASE "${CMAKE_STATIC_LINKER_FLAGS_RELEASE} /Brepro" )
+    endif()
 
     if( ${OPTION_LTCG_MODE} STREQUAL "ALL" )
         set( CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON )

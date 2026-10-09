@@ -30,7 +30,7 @@ static constexpr int kSplitBuf = 262176;
 static constexpr int kPktScratch = 0x30;
 static constexpr int kPktSize = 0x78;
 #else
-// The S3 entry stride is 264060 with the fragment region starting at +1896.
+// The dedi entry stride is 264060 with the fragment region starting at +1896.
 static constexpr int kSplitBuf = 262164;
 // netpacket_t: scratch pointer at +0x28, size at +0x70.
 static constexpr int kPktScratch = 0x28;

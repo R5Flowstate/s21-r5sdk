@@ -12,12 +12,12 @@
 #include "thirdparty/detours/include/idetour.h"
 
 //-----------------------------------------------------------------------------
-// The S3 dedi never calls CodeCallback_GetExtendedRangeUseEntitiesForPlayer
+// The dedi never calls CodeCallback_GetExtendedRangeUseEntitiesForPlayer
 // and has no extended-range use search. Hooks the use-candidate sort seam so
 // script entities (Alter deathbox, Void Nexus) reach EnumEntity under the
 // extended cones before the list is ranked. Also NOPs the count<=0 early-out
 // so pure extended-range targets still reach that seam, and honors
-// USABLE_NO_LOS_REQUIREMENT on the post-trace accept path (S3 never reads it).
+// USABLE_NO_LOS_REQUIREMENT on the post-trace accept path (dedi never reads it).
 //-----------------------------------------------------------------------------
 void ExtendedUse_LevelShutdown(void);
 

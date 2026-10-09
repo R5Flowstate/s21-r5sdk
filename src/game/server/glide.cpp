@@ -14,6 +14,7 @@
 #include "tier1/cvar.h"
 #include "glide.h"
 #include "jetpack.h"
+#include "offhand_jump_toggle.h"
 #include "baseentity.h"
 #include "engine/server/snapshot_diag.h"
 #include "engine/host_state.h"
@@ -400,6 +401,15 @@ static void Glide_Stop(uint8_t* pPlayer, const char* pszWhy)
 
 	static bool s_bWarned = false;
 	Glide_FireCallback("CodeCallback_OnPlayerGlideStop", pPlayer, &s_bWarned);
+
+	if (!strcmp(pszWhy, "ground"))
+		OffhandJumpToggle_ReleaseOnLanding(pPlayer);
+}
+
+void Glide_StopOnLaunch(void* pPlayer)
+{
+	if (pPlayer)
+		Glide_Stop(static_cast<uint8_t*>(pPlayer), "launch");
 }
 
 static void Glide_Start(uint8_t* pPlayer, const float* vel)

@@ -1,7 +1,7 @@
 //=============================================================================//
 //
 // Purpose: server half of the airborne dodge rules (game/shared/dodge_rules.h)
-// plus the crouch/slide dodge: S3's Jump refuses any dodge while ducked.
+// plus the crouch/slide dodge: dedi's Jump refuses any dodge while ducked.
 //
 //=============================================================================//
 #include "core/stdafx.h"

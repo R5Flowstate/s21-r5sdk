@@ -427,7 +427,7 @@ void Mat_StaticProp_f(const CCommand& args)
 		if (StaticProp_LookupModelName(propIndex, nameBuf, sizeof(nameBuf)))
 			Msg(eDLL_T::MS, " |-- Model name: %s\n", nameBuf);
 		else
-			Msg(eDLL_T::MS, " |-- Model name: <not recorded> -- offline: python tools/prop_id_diag.py <mapdir> <mapname> <dec_rpak> %u\n",
+			Msg(eDLL_T::MS, " |-- Model name: <not recorded> (static prop %u)\n",
 				propIndex);
 	}
 

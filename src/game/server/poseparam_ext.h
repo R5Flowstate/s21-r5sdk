@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: Extend script pose-parameter accessors past the S3 native 12 slots.
+// Purpose: Extend script pose-parameter accessors past the dedi native 12 slots.
 // Indices 12..23 live in a side table keyed by edict; wire via dt_extend.
 // Also authors move_yaw onto the native array after server animstate Update.
 //

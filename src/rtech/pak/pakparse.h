@@ -34,7 +34,7 @@ inline void (*Pak_FinalizeLoadedInfo)(PakLoadedInfo_s* a1, int a2);
 extern const char* const Pak_AllowedModuleStems[];
 extern const size_t Pak_AllowedModuleStemCount;
 
-// S21 native pak object (not S3 PakFile_s).
+// S21 native pak object (not dedi PakFile_s).
 inline constexpr size_t kS21Pak_PakIdOffset = 0x582C;
 inline constexpr size_t kS21Pak_MemPageBuffersOffset = 0x5838;
 inline constexpr size_t kS21Pak_PageHeadersOffset = 0x5878; // PakPageHeader_s*

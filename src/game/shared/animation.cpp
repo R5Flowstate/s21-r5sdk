@@ -10,7 +10,7 @@
 #include "tier1/cvar.h"
 
 static ConVar sdk_log_seq_lookup("sdk_log_seq_lookup", "0",
-	FCVAR_RELEASE,
+	FCVAR_DEVELOPMENTONLY,
 	"Log every server-side CBaseAnimating::LookupSequence: model, requested "
 	"name, resolved index and label, virtual model presence, inline seq count.");
 

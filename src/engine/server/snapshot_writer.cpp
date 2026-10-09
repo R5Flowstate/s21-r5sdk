@@ -2385,7 +2385,7 @@ static int64_t Hook_SGE_WriteEntityProps(int64_t a1, int64_t a2, int64_t a3,
 	return ret;
 }
 
-// Per-prop value encoder. Replaces the divergent S3 Time/Ticks codec with the
+// Per-prop value encoder. Replaces the divergent dedi Time/Ticks codec with the
 // S21 wire form (bridge_time_encode) and hosts the read-only [ARR-DIAG] array
 // element-count probe.
 static int64_t Hook_DT_EncodePropValue(int a1, int a2, int a3, uint32_t a4,
@@ -2719,7 +2719,7 @@ void VSnapshotWriterTrace::GetFun() const
 		"48 89 74 24 30 8B F5 48 89 7C 24 38 8B FD")
 		.GetPtr(v_SGE_SnapPoolDtor);
 
-	// -- S3 anim re-anchor (sets m_animStartTime/StartCycle per tick).
+	// -- dedi anim re-anchor (sets m_animStartTime/StartCycle per tick).
 	// Distinctive: movss [rcx+0FECh] + mov esi,200h + movss [rcx+0FE4h]. Single-match.
 	Module_FindPattern(g_GameDll,
 		"48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B 3D ?? ?? ?? ?? "

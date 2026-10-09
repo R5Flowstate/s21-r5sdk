@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: S21 jetpack on the dedicated server -- the fuel natives the S3
+// Purpose: S21 jetpack on the dedicated server -- the fuel natives the dedi
 // script VM lacks and the S21 flight model the S21 client predicts.
 //
 //=============================================================================//
@@ -46,7 +46,7 @@ void Jetpack_LevelShutdown(void)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: player.SetGlideMeter( float ) -- the S3 server VM only has the getter
+// Purpose: player.SetGlideMeter( float ) -- the dedi VM only has the getter
 //-----------------------------------------------------------------------------
 static SQRESULT Script_SetGlideMeter(HSQUIRRELVM v)
 {
@@ -98,7 +98,7 @@ void Jetpack_RegisterScriptFunctions(ScriptClassDescriptor_t* playerStruct)
 }
 
 //=============================================================================
-// Flight model. The S21 client predicts the jetpack with fields the S3 server
+// Flight model. The S21 client predicts the jetpack with fields the dedi
 // half never reads -- thrust ramp on activation, vertical-speed scale on
 // activation and release, post-effect gravity and drag, per-activation fuel,
 // tactical fuel rate -- so the server runs the same math.
@@ -183,7 +183,7 @@ enum JetpackField_e
 struct JetpackFieldDesc_t
 {
 	const char* pszName;
-	float flMissing; // the S3 behaviour when the layout does not carry the field
+	float flMissing; // the dedi behaviour when the layout does not carry the field
 };
 
 static const JetpackFieldDesc_t s_jetpackFields[JPF_COUNT] =
@@ -399,7 +399,7 @@ static void Jetpack_Stop(uint8_t* pPlayer, float* vel, const char* pszWhy)
 			*reinterpret_cast<const float*>(pPlayer + JP_PLAYER_OFF_GRAVITY));
 }
 
-// S3 CPlayer offsets, S21 ApplyJetpack math.
+// dedi CPlayer offsets, S21 ApplyJetpack math.
 static void Jetpack_Apply(uint8_t* pPlayer, float* vel,
 	const float* moveFwd, const float* moveRight, const float* moveUp,
 	const float* lookFwd, const float* lookRight, const float* lookUp)
@@ -420,7 +420,7 @@ static void Jetpack_Apply(uint8_t* pPlayer, float* vel,
 		return Jetpack_Stop(pPlayer, vel, "grapple");
 
 	// S21 runs the jets' deactivate callback inside the releasing command's
-	// offhand frame; S3 defers it past movement, so read the holster here.
+	// offhand frame; dedi defers it past movement, so read the holster here.
 	const bool bScript = Jetpack_B(pSet, JPF_SCRIPT_TO_ACTIVATE);
 	if (bScript && !pPlayer[JP_PLAYER_OFF_ACTIVATEJET])
 		return Jetpack_Stop(pPlayer, vel, "script");
@@ -662,13 +662,13 @@ static bool Hook_Jetpack_CanUse(void* pPlayer, const float* vel)
 	if (!pPlayer || !Jetpack_EnabledFor(pPlayer))
 		return true;
 
-	// S21 refuses within 0.1 s of the jump press before this one; the S3 player
+	// S21 refuses within 0.1 s of the jump press before this one; the dedi player
 	// has no such field, so read the value the wire carries.
 	if (Jetpack_Now() - PlayerExtend_GetF32(pPlayer, offsetof(PlayerExtendWire, m_prevJumpPressTime)) <= 0.1f)
 		return false;
 
 	// S21 also wants the movement ability (IN_DODGE) pressed on this command when
-	// the jetpack takes more than one jump; S3 only waits out boostOnGroundSafety,
+	// the jetpack takes more than one jump; dedi only waits out boostOnGroundSafety,
 	// so a held first jump would pass.
 	const uint8_t* const p = static_cast<const uint8_t*>(pPlayer);
 	const uint8_t* const pSet = Jetpack_Settings(p);
@@ -722,7 +722,7 @@ static void Hook_Jetpack_Apply(void* pPlayer, float* vel, const float* moveFwd, 
 	Jetpack_PostEffectTick(p);
 }
 
-// The S3 recharge gate reads glideRechargeOnlyWhenGrounded, which the S21 layout
+// The dedi recharge gate reads glideRechargeOnlyWhenGrounded, which the S21 layout
 // replaces with two flags (either one blocks airborne recharge); it is pointed
 // at whichever of them is set for this player.
 static uint32_t Jetpack_RechargeGroundedOffset(const uint8_t* pSettings)
@@ -768,7 +768,7 @@ static int64_t Hook_Jetpack_UpdateMeter(void* pPlayer, char bGrounded)
 	return ret;
 }
 
-// The S3 aux reset refills the fuel meter for glide and hover only and zeroes
+// The dedi aux reset refills the fuel meter for glide and hover only and zeroes
 // it otherwise; the S21 meter serves the jetpack too, so a jetpack-only setfile
 // spawned empty.
 static int64_t Hook_Jetpack_ResetAux(void* pPlayer)

@@ -855,7 +855,7 @@ static SQRESULT ServerScript_CanPutPlayerInSafeSpot(HSQUIRRELVM v)
 	CBaseEntity* const pGroundEnt = reinterpret_cast<CBaseEntity*>(
 		ServerScript_EntityPtrFromStackIdx(v, 4));
 
-	// S3 has no testHighCollision / allowNavNodesAsBackup; read for arity only.
+	// dedi has no testHighCollision / allowNavNodesAsBackup; read for arity only.
 	SQBool bTestHighCollision = SQFalse;
 	SQBool bAllowNavNodesAsBackup = SQFalse;
 	sq_getbool(v, 5, &bTestHighCollision);
@@ -1102,7 +1102,7 @@ static void __fastcall Hook_EngineTraceRayFiltered(
 	v_EngineTraceRayFiltered(pThis, pRay, mask, pFilter, pTrace);
 }
 
-// S21 binds TraceHullHighDetail natively. S3 only has ScriptTraceHull (NORMAL).
+// S21 binds TraceHullHighDetail natively. dedi only has ScriptTraceHull (NORMAL).
 // Reuse engine arg parse + TraceResults pack; force HIGH via TraceRayFiltered patch.
 static SQRESULT ServerScript_TraceHullHighDetail(HSQUIRRELVM v)
 {
@@ -1135,7 +1135,7 @@ static SQRESULT ServerScript_TraceHullHighDetail(HSQUIRRELVM v)
 }
 
 // S21 scripts pass a 7th entitiesOnly arg. Engine body ignores stack 8.
-// S3 type compiler accepts bool defaults as 0/1 (not the token 'false').
+// dedi type compiler accepts bool defaults as 0/1 (not the token 'false').
 static constexpr const char* kTraceLineParamsEntitiesOnly =
 	"vector startPos, vector endPos, var ignoreEntOrArrayOfEnts = null, "
 	"int traceMask = 0, int collisionGroup = 0, entity tracingEntity = null, "
@@ -1572,7 +1572,7 @@ static SQRESULT ServerScript_BreachTrace(HSQUIRRELVM v)
 			BreachTrace_TraceHullBack(probe, start, dir, mins, maxs, hullTr);
 			const float dist = BreachTrace_Dist3(start, hullTr.endpos);
 			hullThickEnough = dist > wallMin;
-			// Valid hull exit: thickness ok, not fraction1, not startsolid. plane.normal*dir>0 is front-face (S3 has no backface flag).
+			// Valid hull exit: thickness ok, not fraction1, not startsolid. plane.normal*dir>0 is front-face (dedi has no backface flag).
 			const float nDot = hullTr.plane.normal.x * dir.x
 				+ hullTr.plane.normal.y * dir.y
 				+ hullTr.plane.normal.z * dir.z;
@@ -2632,7 +2632,7 @@ void Script_RegisterDedicatedS21ServerNatives(CSquirrelVM* s)
 	HaloVehicle_RegisterServerNatives(s);
 #endif // SDK_WIP
 
-	// S3 parity with S21 native TraceHullHighDetail (ray.m_detailLevel = HIGH).
+	// dedi parity with S21 native TraceHullHighDetail (ray.m_detailLevel = HIGH).
 	// Signature matches engine TraceHull (array ignore + optional upDir/tracingEntity).
 	Script_RegisterFuncNamed(s, "TraceHullHighDetail",
 		"Server_Script_TraceHullHighDetail",
@@ -2642,7 +2642,7 @@ void Script_RegisterDedicatedS21ServerNatives(CSquirrelVM* s)
 		true,
 		ServerScript_TraceHullHighDetail);
 
-	// S3 has no engine BreachTrace; native implementation below.
+	// dedi has no engine BreachTrace; native implementation below.
 	Script_RegisterFuncNamed(s, "BreachTrace",
 		"Server_Script_BreachTrace",
 		"Trace through geo along direction to find a valid breach exit",
@@ -2651,7 +2651,7 @@ void Script_RegisterDedicatedS21ServerNatives(CSquirrelVM* s)
 		true,
 		ServerScript_BreachTrace);
 
-	// Calc*Entity: EntityToWorldTransform + mathlib (S3 has no natives).
+	// Calc*Entity: EntityToWorldTransform + mathlib (dedi has no natives).
 	if (v_CBaseEntity_EntityToWorldTransform)
 	{
 		Script_RegisterFuncNamed(s, "CalcLocalToWorldOrigin_Entity",

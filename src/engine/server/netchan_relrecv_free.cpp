@@ -20,7 +20,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-// dataFragments_t::buffer on the S3 CNetChan receive list.
+// dataFragments_t::buffer on the dedi CNetChan receive list.
 static constexpr ptrdiff_t NETCHAN_RECV_BUFFER = 0x118;
 
 static uint8_t* s_pStoreSite = nullptr;

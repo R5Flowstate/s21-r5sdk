@@ -852,7 +852,7 @@ struct PakFile_s
 
 
 static_assert(sizeof(PakTracker_s) == 0x11D410);
-static_assert(sizeof(PakFile_s) == 2224); // S3+
+static_assert(sizeof(PakFile_s) == 2224); // dedi+
 static_assert(sizeof(PakLoadedInfo_s) == 184);
 static_assert(sizeof(PakDecoder_s) == 136);
 static_assert(sizeof(PakPatchFileHeader_s) == 16);

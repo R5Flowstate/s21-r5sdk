@@ -89,7 +89,7 @@ int  RegisterCustomActivity(const char* activityName);
 // Call once after a batch of RegisterCustomActivity. Does not rebuild the
 // process-wide activity->sequence map -- registration order is the real constraint.
 void InvalidateModelActivityBindings();
-// True if CLIENT activity list is up (games.dll / client binary). On the S3
+// True if CLIENT activity list is up (games.dll / client binary). On the dedi
 // dedicated binary the client-side patterns 0-hit -- use IsActivitySystemReady.
 bool IsActivitySystemInitialized();
 // True if either client OR server activity list is usable. Dedi load of

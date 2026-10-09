@@ -714,7 +714,7 @@ static bool Trigger_IsUserPtr(const void* p)
 
 static constexpr int kTriggerMaxClasses = 32;
 static constexpr int kTriggerMaxRealms = 64;
-// S3 CBaseEntity layout (static_assert sizeof==0xB08): m_Collision@0x328,
+// dedi CBaseEntity layout (static_assert sizeof==0xB08): m_Collision@0x328,
 // m_contents@0x3A8, m_realmsBitMask@0xAE8.
 static constexpr size_t kCBaseEntity_Contents = 0x3A8;
 static constexpr size_t kCBaseEntity_RealmsBitMask = 0xAE8;
@@ -804,7 +804,7 @@ static bool TriggerClassMatches(const char* const* classes, int classCount,
 
 // Realm match: (entity.m_realmsBitMask & queryRealmBitMask) != 0.
 // queryMask is precomputed once (bit i for realm index i). Entity mask 0 is
-// match-all on S3 (many ents never write realms).
+// match-all on dedi (many ents never write realms).
 static uint64_t TriggerBuildRealmQueryMask(const int* realms, int realmCount)
 {
 	uint64_t queryMask = 0;
@@ -887,7 +887,7 @@ static bool TriggerOverlapsQuery(CBaseEntity* ent,
 	return tr.startsolid || tr.allsolid || tr.fraction < 1.0f;
 }
 
-// S3 has no SpatialAccel_ForEachInQuery / TriggersByClassesEnumerator.
+// dedi has no SpatialAccel_ForEachInQuery / TriggersByClassesEnumerator.
 // Walk the entity list, filter class+realm+contents, then collideable clip.
 static SQRESULT Script_PushTriggersByClassesInRealms(HSQUIRRELVM v,
 	const char* const* classes, int classCount,
@@ -1642,7 +1642,7 @@ void Script_RegisterPrecacheServerNatives(CSquirrelVM* s)
 	s->RegisterConstant("ODL_SKINS",    kOdlPool_SKINS);
 	s->RegisterConstant("ODL_INVALID",  kOdlPool_INVALID);
 
-	// S21 client engine registers these usable flags; this S3 build does not.
+	// S21 client engine registers these usable flags; this dedi build does not.
 	// Values from the S21 client script-constant registrar (name-then-value order).
 	s->RegisterConstant("USABLE_FROM_EXTENDED_RANGE", 0x20);
 	s->RegisterConstant("USABLE_NO_LOS_REQUIREMENT",  0x40);

@@ -1,11 +1,11 @@
 //=============================================================================//
 //
-// Purpose: S21 melee-over-offhand rule on the S3 melee test.
+// Purpose: S21 melee-over-offhand rule on the dedi melee test.
 //
 // With an offhand selected in the main hand, the S21 client allows melee only
 // when that weapon sets offhand_cancelled_by_melee, and an offhand in the
 // attack state no longer blocks melee through the button-press protection.
-// The S3 test only knows the older charge / interrupt-resumeable rule.
+// The dedi test only knows the older charge / interrupt-resumeable rule.
 //
 //=============================================================================//
 #ifndef OFFHAND_MELEE_CANCEL_H

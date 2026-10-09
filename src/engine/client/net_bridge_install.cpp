@@ -45,13 +45,14 @@
 #include "game/shared/activity_s3_to_s21_client.h"
 
 // [S2C-SCRIPTREMOTE] name-resolve (C_BaseScriptRemoteFunctions local entries) +
-// injection (CSquirrelVM::ExecuteFunction) surface for the dedi(S3)->client(S21) ScriptRemote lane.
+// injection (CSquirrelVM::ExecuteFunction) surface for the dedi(dedi)->client(S21) ScriptRemote lane.
 #include "game/client/c_baseentity.h"
 #include "game/client/mantle_boost.h"
 #include "game/client/pred_authority.h"
 #include "game/client/cliententitylist.h"
 #include "game/client/melee_activity_trace.h"
 #include "game/client/titan_diag.h"
+#include "game/client/jumppad_predict.h"
 #include "game/shared/heap_canary.h"
 #include "vscript/languages/squirrel_re/vsquirrel.h"
 #include "vscript/vsquirrel_s21.h"
@@ -171,8 +172,8 @@ static PFN_CL_FullyConnected s_origCL_FullyConnected = nullptr;
 typedef uintptr_t     (__fastcall* PFN_GetLocalPlayer)(int slot);
 static PFN_GetLocalPlayer s_pathAGetLocal  = nullptr;
 
-// Activity selector: S3 dedi activity ordinals are not S21 ordinals (e.g. jump).
-// Translate queued activity S3->S21 before the selector emits a sequence.
+// Activity selector: dedi activity ordinals are not S21 ordinals (e.g. jump).
+// Translate queued activity dedi->S21 before the selector emits a sequence.
 typedef __int16 (__fastcall* PFN_ActivitySelector)(__int64 animstate);
 static PFN_ActivitySelector s_origActivitySelector = nullptr;
 
@@ -305,7 +306,7 @@ static bool s_bInstalled = false;
 // After handshake, NET_ReceiveDatagram polls this socket for S2C.
 //-----------------------------------------------------------------------------
 SOCKET      s_bridgeSocket  = INVALID_SOCKET;
-sockaddr_in6 s_bridgeDest   = {};        // S3 server address (IPv6 dual-stack)
+sockaddr_in6 s_bridgeDest   = {};        // dedi server address (IPv6 dual-stack)
 bool        s_bridgeActive  = false;     // true after bridge handshake completes
 
 // --- Async handshake state machine ---
@@ -673,8 +674,8 @@ void S21Bridge_ExtractRecvTableNames()
 }
 
 // Helper: check if a table name exists in the S21 RecvTable set.
-// Uses case-insensitive matching because S3 and S21 can differ in casing
-// (e.g. S3 sends 'DT_WORLD', S21 has 'DT_World').
+// Uses case-insensitive matching because dedi and S21 can differ in casing
+// (e.g. dedi sends 'DT_WORLD', S21 has 'DT_World').
 bool S21Bridge_HasRecvTable(const char* name)
 {
 	S21Bridge_ExtractRecvTableNames(); // lazy init
@@ -1031,7 +1032,7 @@ bool s_dbSawSendTables = false; // Did ANY transfer contain svc_SendTable?
 
 //-----------------------------------------------------------------------------
 // Packet capture removed (per-packet fopen froze the game thread).
-// S3 SendDatagram / WriteSubChannelData header layout matches live captures.
+// dedi SendDatagram / WriteSubChannelData header layout matches live captures.
 //-----------------------------------------------------------------------------
 uint32_t s_c2sSeqCounter     = 0;          // Bridge-local C2S sequence counter
 
@@ -1106,7 +1107,7 @@ void S21Bridge_ClearUserInfo(void)
 	s_userInfoNextMs = 0;
 }
 
-// S3 CHANGELEVEL=9, S21 MAYRECONNECT=9 / CHANGELEVEL=10. Remap 9->10.
+// dedi CHANGELEVEL=9, S21 MAYRECONNECT=9 / CHANGELEVEL=10. Remap 9->10.
 // Track sequence key vs spawn count separately; SV_ActivateServer sends spawn -1.
 int  s_signonSeqKey   = -1;   // raw wire spawn that identifies the sequence
 int  s_signonSeqSpawn = -1;   // last real spawn count, used on C2S echoes
@@ -1155,7 +1156,7 @@ StringCmdResend_s s_stringCmdRing[32];
 int s_nStringCmdRingHead = 0;
 SetConVarResend_s s_setConVarRing[4];
 int s_nSetConVarRingHead = 0;
-// [SEC prio14] Gate permanent net crypto force-off (S3 interop still needs plaintext today).
+// [SEC prio14] Gate permanent net crypto force-off (dedi interop still needs plaintext today).
 static ConVar bridge_force_encryption_off("bridge_force_encryption_off", "1", FCVAR_RELEASE,
 	"[SEC] Force net_encryptionEnable/DTLS off for S3 bridge interop. Default 1 (required "
 	"today; traffic is plaintext on the wire -- MITM risk on shared nets). Set 0 to leave "
@@ -1181,7 +1182,7 @@ ConVar bridge_net_flow_reconcile("bridge_net_flow_reconcile", "1", FCVAR_RELEASE
 // S21Bridge_ResetAllState to clear it regardless of which thread calls reset.
 S21BridgeCmd::State s_bridgeC2sPrevCmd = {};
 
-// Last emitted S3 impulse byte (post-smuggle), not client impulse. Delta baseline
+// Last emitted dedi impulse byte (post-smuggle), not client impulse. Delta baseline
 // must match the dedi's last store. Reset with s_bridgeC2sPrevCmd.
 uint8_t s_bridgeC2sPrevS3ImpulseWire = 0;
 
@@ -1193,7 +1194,7 @@ AckXlate_s s_ackXlate[1024];
 // Forward: defined with the other sockaddr helpers further down.
 static void FormatSockaddr(const sockaddr* addr, char* buf, size_t bufSize);
 
-// Engine sendto sockaddr (often loopback). Distinct from s_bridgeDest (real S3 peer).
+// Engine sendto sockaddr (often loopback). Distinct from s_bridgeDest (real dedi peer).
 static sockaddr_storage s_engineServerAddr = {};
 static int              s_engineServerAddrLen = 0;
 static bool             s_engineServerAddrCaptured = false;
@@ -1612,7 +1613,7 @@ static void Bridge_NoteEngineServerSendto(const sockaddr* to, const int tolen)
 	s_engineServerAddrLen = tolen;
 	s_engineServerAddrCaptured = true;
 
-	// Real S3 dest: keep remote if we already have one and this send is loopback
+	// Real dedi dest: keep remote if we already have one and this send is loopback
 	// (post-netchan local shortcut). Update when non-loopback, or when connect
 	// itself is loopback, or when we have no dest yet.
 	if (!isLb || s_connectTargetIsLoopback || !s_bridgeDestResolved)
@@ -1863,7 +1864,7 @@ static ConVar bridge_noclip_surface_friction("bridge_noclip_surface_friction", "
 static ConVar bridge_noclip_diag("bridge_noclip_diag", "0", FCVAR_DEVELOPMENTONLY,
 	"[NOCLIP-SIM] windowed telemetry: frametime source/spread, simRatio (integrated sim time "
 	"vs elapsed curtime, ~1.0 = step size matches the dedi), tier split, wishspeed/speed.");
-// [DUCK-RESTORE] Duck timer at player+0x242C is replay-mutated; S3/S21 recv tables do not pair the networked duck transition field.
+// [DUCK-RESTORE] Duck timer at player+0x242C is replay-mutated; dedi/S21 recv tables do not pair the networked duck transition field.
 // Ring by cmd number: record post-cmd timer after K, restore K-1 value before re-executing K so replays do not multi-decrement.
 static ConVar bridge_duck_restore("bridge_duck_restore", "1", FCVAR_RELEASE,
 	"[DUCK-RESTORE] per-command restore chain for the working duck-transition timer "
@@ -3006,7 +3007,7 @@ void Bridge_InstallEarlyPipeHooks(void)
 
 //=============================================================================
 // [GTSFIX] Bridge leaves m_gameTimescale unmatched so it stays garbage; clamp/seed it so host_frametime cannot underflow and starve C2S send rate.
-// Hook g_ClientDLL->GetGameTimescale and force ~1.0 when out of range (S3 does not network this field).
+// Hook g_ClientDLL->GetGameTimescale and force ~1.0 when out of range (dedi does not network this field).
 //=============================================================================
 typedef float (__fastcall *PFN_GetGameTimescale)(void* thisptr);
 static PFN_GetGameTimescale s_origGetGameTimescale = nullptr;
@@ -3312,7 +3313,7 @@ static void CC_DumpSeqTable(const CCommand& args)
 		dumped, s_seqSweepEnt, s_seqSweepNoHdr, s_seqSweepNoResolve, s_seqSweepDumped, s_seqIfaceDelta);
 }
 static ConCommand sdk_dump_seqtable("sdk_dump_seqtable", CC_DumpSeqTable,
-	"Dump sequence tables (index->name) to bridge_trace.log. No arg = all unique loaded models; [slot] = that entity slot only.", FCVAR_RELEASE);
+	"Dump sequence tables (index->name) to bridge_trace.log. No arg = all unique loaded models; [slot] = that entity slot only.", FCVAR_DEVELOPMENTONLY);
 
 // Last local-player SelectWeightedSequence snapshot. invokeCount==0 => hook never fired.
 struct SeqPickSnapshot_t
@@ -3325,7 +3326,7 @@ struct SeqPickSnapshot_t
 };
 
 // Locomotion fallback: 689+dir walk / 679+dir run. LEFT/RIGHT unbound on legends.
-// Translate player+8118 queued activity S3->S21. Unlisted IDs pass through.
+// Translate player+8118 queued activity dedi->S21. Unlisted IDs pass through.
 static ConVar bridge_act_xlat_qact("bridge_act_xlat_qact", "1", FCVAR_RELEASE,
 	"[ACT-XLAT] SHIP DEFAULT 1 (jump T-pose PROVEN FIXED): translate queued activity "
 	"(player+8118) S3 enum -> S21 before reads it. Fixes the"
@@ -3366,15 +3367,15 @@ static __int16 __fastcall Hook_ActivitySelector(__int64 animstate)
 				if (qFlag)
 				{
 					qActOld = *(uint16_t*)(player + 8118);
-					// Skip translation for local-written S21 values (713 = JUMP_START, not S3 713).
+					// Skip translation for local-written S21 values (713 = JUMP_START, not dedi 713).
 					if (!Bridge_IsLocalWrittenQAct(qActOld))
 					{
 						qActNew = Bridge_TranslateS3ActivityToS21_Static((int)qActOld);
 						if (qActNew != (int)qActOld && qActNew > 0 && qActNew < 0x10000)
 						{
 							// TRANSLATE-AND-RESTORE: write S21 value so orig reads it,
-							// then put the S3 value back after orig returns so the next
-							// frame translates from the same S3 input (no chaining).
+							// then put the dedi value back after orig returns so the next
+							// frame translates from the same dedi input (no chaining).
 							*(uint16_t*)(player + 8118) = (uint16_t)qActNew;
 							translated = true;
 						}
@@ -3391,7 +3392,7 @@ static __int16 __fastcall Hook_ActivitySelector(__int64 animstate)
 	{
 		__try
 		{
-			*(uint16_t*)(player + 8118) = qActOld;     // RESTORE original S3 value
+			*(uint16_t*)(player + 8118) = qActOld;     // RESTORE original dedi value
 		}
 		__except (EXCEPTION_EXECUTE_HANDLER) {}
 	}
@@ -3544,7 +3545,7 @@ static char __fastcall Hook_CS_SetSignonState(__int64 a1, int newState, int spaw
 	if (s_bridgeActive && newState >= 2 && newState <= 8
 		&& newState >= s_lastSentSignonState)
 	{
-		// S2C used -1 so S21 skips the future-spawn reject. S3 still
+		// S2C used -1 so S21 skips the future-spawn reject. dedi still
 		// wants the real spawn count on C2S or the walk dies at PRESPAWN.
 		int c2sSpawn = spawnCount;
 		if (s_signonRewalk && s_signonSeqSpawn >= 0)
@@ -4172,7 +4173,7 @@ static __int64 __fastcall Hook_AnimStateApply(uintptr_t ent, unsigned int a2)
 	return s_origAnimStateApply ? s_origAnimStateApply(ent, a2) : 0;
 }
 
-// [ANIM-WIRE-SKIP] ClientThink tears down local animstate when !ShouldDrawLocalPlayer (normal 1P). Force skip only while animstate live (+0x3610 / 3P windows) so S3 wire cannot stomp client author.
+// [ANIM-WIRE-SKIP] ClientThink tears down local animstate when !ShouldDrawLocalPlayer (normal 1P). Force skip only while animstate live (+0x3610 / 3P windows) so dedi wire cannot stomp client author.
 static bool AnimWireSkip_IsClientAuthored(uintptr_t ent)
 {
 	if (!bridge_anim_wire_skip.GetBool() || !ent)
@@ -4321,8 +4322,8 @@ static __int64 __fastcall Hook_PlayerRunCmdPred(__int64 a1, __int64 a2, __int64 
 	return nPredResult;
 }
 
-// S3 PlayerMove case 9: pick factor/accel from buttons, then FullNoClipMove.
-// S3 SetMoveType does not zero velocity; leftover |vel| is Accelerate's max(old, wish) cap.
+// dedi PlayerMove case 9: pick factor/accel from buttons, then FullNoClipMove.
+// dedi SetMoveType does not zero velocity; leftover |vel| is Accelerate's max(old, wish) cap.
 static void NoClipSim_Run(__int64 thisptr)
 {
 	const uintptr_t pPlayer = *reinterpret_cast<const uintptr_t*>(thisptr + 0x08);
@@ -4350,7 +4351,7 @@ static void NoClipSim_Run(__int64 thisptr)
 	}
 	if (!(flFrametime > 0.0f) || flFrametime > 0.25f)
 	{
-		flFrametime = 0.05f;   // last-ditch: S3 server tick interval
+		flFrametime = 0.05f;   // last-ditch: dedi server tick interval
 		nFtSource   = 2;
 	}
 	if (nFtSource != 0)
@@ -4540,10 +4541,14 @@ static void NoClipSim_Run(__int64 thisptr)
 // [NOCLIP-SIM] after native PlayerMove (case 9 is empty on S21), inject noclip move on live C_MoveData so FinishMove consumes it.
 static void __fastcall Hook_PlayerMoveClient(__int64 thisptr)
 {
+	void* const pMoveCtx = reinterpret_cast<void*>(thisptr);
+	JumpPadPredict_OnPlayerMoveBegin(pMoveCtx);
+
 	if (!bridge_noclip_sim.GetBool())
 	{
 		if (s_origPlayerMoveClient)
 			s_origPlayerMoveClient(thisptr);
+		JumpPadPredict_OnPlayerMoveEnd(pMoveCtx);
 		return;
 	}
 
@@ -4557,6 +4562,7 @@ static void __fastcall Hook_PlayerMoveClient(__int64 thisptr)
 		if (++s_nFaults <= 8)
 			Warning(eDLL_T::CLIENT, "[NOCLIP-SIM] exception #%u in sim -- skipped this command\n", s_nFaults);
 	}
+	JumpPadPredict_OnPlayerMoveEnd(pMoveCtx);
 }
 
 static double __fastcall Hook_HostFrame(double a1, float a2)
@@ -6002,7 +6008,7 @@ static const char* Bridge_StringTableGet(void* table, int idx)
 	return name;
 }
 
-// S3 m_iName is a string_t pointer; S21 GetTargetName reads char[260] at +0x481.
+// dedi m_iName is a string_t pointer; S21 GetTargetName reads char[260] at +0x481.
 // If the string never lands, copy ScriptNames[m_scriptNameIndex] into that buffer
 // after apply and before PostDataUpdate / OnEntityCreation.
 static void Bridge_PromoteScriptNameToTargetName(__int64 entity)
@@ -6738,7 +6744,7 @@ static void CC_DumpPlaylistOverrides(const CCommand& args)
 			s_playlistOverrides[i].m_szName, s_playlistOverrides[i].m_szValue);
 }
 static ConCommand bridge_playlist_overrides_dump("bridge_playlist_overrides_dump", CC_DumpPlaylistOverrides,
-	"Lists the playlist var overrides received from the server.", FCVAR_RELEASE);
+	"Lists the playlist var overrides received from the server.", FCVAR_DEVELOPMENTONLY);
 
 void Bridge_InstallApplyPipeHooks(void)
 {
@@ -6914,7 +6920,7 @@ void Bridge_InstallApplyPipeHooks(void)
 	}
 	else Warning(eDLL_T::ENGINE, "[ACK-RESET] resolve FAILED \n");
 
-	// Translate player+8118 S3->S21 on the activity selector. Gated by bridge_act_xlat_qact.
+	// Translate player+8118 dedi->S21 on the activity selector. Gated by bridge_act_xlat_qact.
 	s_origActivitySelector = (PFN_ActivitySelector) NetObs_Sym(NetObsSym_t::ActivitySelector);
 	if (s_origActivitySelector && DetourTransactionBegin() == NO_ERROR) {
 		DetourUpdateThread(GetCurrentThread());
@@ -7309,7 +7315,7 @@ static void Bridge_InstallVEH()
 {
     if (s_vehLog == INVALID_HANDLE_VALUE)
     {
-        // Relative to the game CWD (the s21-full dir) -> platform\veh_crash.log.
+        // Relative to the game CWD (the game root) -> platform\veh_crash.log.
         s_vehLog = CreateFileA("platform\\veh_crash.log",
             FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
             OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -7955,7 +7961,7 @@ static int WSAAPI Hook_sendto(SOCKET s, const char* buf, int len, int flags,
 			int sent;
 			if (isSplitPacket)
 			{
-				// Do not queue split packets from this hook: they are S21-format C2S, not S3 S2C.
+				// Do not queue split packets from this hook: they are S21-format C2S, not dedi S2C.
 				static long long s_splitSuppressed = 0;
 				if (++s_splitSuppressed <= 10 || (s_splitSuppressed % 500) == 0)
 					SDK_Log("[BRIDGE-OUT] #%lld: suppressed native split C2S %d bytes (reqID=%d)\n",
@@ -8031,7 +8037,7 @@ static int WSAAPI Hook_WSASendTo(SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCou
 		lpTo, iTolen, lpOverlapped, lpCompletionRoutine);
 }
 
-// Recvfrom: S3 S2C_CHALLENGE is 0x49 + body. S21 wants 0x04 + bare map name.
+// Recvfrom: dedi S2C_CHALLENGE is 0x49 + body. S21 wants 0x04 + bare map name.
 // Map from dedi suffix, else g_bridgeConnMapName, else mp_lobby.
 bool Bridge_IsBareMapName(const char* psz)
 {
@@ -8363,7 +8369,7 @@ static volatile long long s_netSendLoopCount   = 0;
 // Handshake: Idle -> ChallengeSent -> ConnectSent -> Active. Driven by PollReceive.
 //=============================================================================
 
-// Build the S3 C2S_CHALLENGE datagram ("connect" OOB + platform user id).
+// Build the dedi C2S_CHALLENGE datagram ("connect" OOB + platform user id).
 static int S21Bridge_BuildS3Challenge(uint8_t* out, size_t outSize)
 {
     if (outSize < 21) return 0;
@@ -8422,7 +8428,7 @@ static void S21Bridge_ResolveDest(sockaddr_in6& dest)
 		s_bridgeDestResolved ? 1 : 0);
 }
 
-// Stage 0 -> 1. Creates a dual-stack IPv6 socket, sends S3 C2S_CHALLENGE,
+// Stage 0 -> 1. Creates a dual-stack IPv6 socket, sends dedi C2S_CHALLENGE,
 // arms the stage deadline. Non-blocking from here -- S2C_CHALLENGE will be
 // picked up in PollReceive.
 static bool S21Bridge_StartHandshake()
@@ -8823,7 +8829,7 @@ static __int64 Hook_NET_SendPacket_Inner(__int64 a1, __int64 a2, __int64 a3,
                                          const void* a4, int a5, unsigned int* a6, char a7)
 {
     // S21 Bridge: strip per-packet encrypt flag for active bridge traffic when
-    // force-off is enabled (S3 cannot decrypt S21 DTLS). [SEC] Gated by
+    // force-off is enabled (dedi cannot decrypt S21 DTLS). [SEC] Gated by
     // bridge_force_encryption_off; when 0, leave engine encrypt bit alone.
     if (s_bridgeActive && a7 && bridge_force_encryption_off.GetBool())
     {
@@ -8889,7 +8895,7 @@ static __int64 Hook_NET_SendPacket_Inner(__int64 a1, __int64 a2, __int64 a3,
     // Call the original send
     const __int64 ret = s_origNetSendPacketInner(a1, a2, a3, a4, a5, a6, a7);
 
-    // On C2S_CHALLENGE, start the async S3 handshake. Waits run in PollReceive, not here.
+    // On C2S_CHALLENGE, start the async dedi handshake. Waits run in PollReceive, not here.
     if (isChallengeSend && a3 && a3 != (__int64)INVALID_SOCKET)
     {
         ++s_challengesSent;
@@ -8900,7 +8906,7 @@ static __int64 Hook_NET_SendPacket_Inner(__int64 a1, __int64 a2, __int64 a3,
         // thrash sockets while the server is warming up.
         const ULONGLONG now = GetTickCount64();
 
-        // A live bridge already completed the S3 handshake. The engine keeps
+        // A live bridge already completed the dedi handshake. The engine keeps
         // emitting C2S_CHALLENGE on its own socket; another handshake would
         // be a second client on the dedi.
         if (s_bridgeActive)
@@ -8929,7 +8935,7 @@ static void Hook_NET_SendLoopback(unsigned int a1, int a2, const void* a3, __int
 
         // CRITICAL: if our connect packet ends up here it means the engine
         // routed it through the in-process queue and it WILL NEVER reach
-        // the wire. The S3 dedicated server will never see it.
+        // the wire. The dedicated server will never see it.
         SDK_Log("[NET-OBS] NET_SendLoopback   #%lld sock=%u len=%d head=%02x%02x%02x%02x%02x%02x%02x%02x  <-- IN-PROCESS, not wire\n",
             n, a1, a2,
             head[0], head[1], head[2], head[3],
@@ -9099,7 +9105,7 @@ static BOOL WINAPI Hook_MiniDumpWriteDump(HANDLE hProc, DWORD pid, HANDLE hFile,
 // ClassInfo / CHANGELEVEL probes. Flush so the last line survives process death.
 //=============================================================================
 
-// Canonical 18 S3-only DTs first-join stubs (CLASS-MAP NULL set).
+// Canonical 18 dedi-only DTs first-join stubs (CLASS-MAP NULL set).
 static const char* const s_ciS3OnlyDts[] = {
 	"DT_Beam",
 	"DT_PhysBox",
@@ -9202,7 +9208,7 @@ void S21Bridge_CIDiag_ReadClassMeta(int* outN, uintptr_t* outArr)
 	}
 }
 
-// Snapshot of S3-only DT health: hasName (HasRecvTable), stubPtr, pending count.
+// Snapshot of dedi-only DT health: hasName (HasRecvTable), stubPtr, pending count.
 static void S21Bridge_CIDiag_LogS3Only(const char* where)
 {
 	int hasName = 0, hasStub = 0, miss = 0;
@@ -9230,7 +9236,7 @@ static void S21Bridge_CIDiag_LogS3Only(const char* where)
 		s_s21RecvTableNames.size());
 }
 
-// Full gate: map + class registry + stub census + S3-only DT health.
+// Full gate: map + class registry + stub census + dedi-only DT health.
 void S21Bridge_CIDiag_Gate(const char* where)
 {
 	if (!S21Bridge_CIDiag_On())
@@ -9351,7 +9357,7 @@ static char Hook_CBaseClient_SetSignonState(__int64 a1, unsigned int state, int 
     if (state == 2 || state == 6)
         WeapConst_EnsurePopulated_S21();
 
-    // Queue synthetic net_SignonState; S21 C2S body is not S3-parseable.
+    // Queue synthetic net_SignonState; S21 C2S body is not dedi-parseable.
     if (s_bridgeActive && state >= 2 && state <= 8)
     {
         // Echo only. Dedi reconnects on spawn mismatch (state>2) or skip-ahead;
@@ -9532,7 +9538,7 @@ void VScriptCreateNotifyS21::Detour(const bool bAttach) const
 
 
 //=============================================================================
-// S21->S3 Network Bridge: State Query
+// S21->dedi Network Bridge: State Query
 //=============================================================================
 bool S21Bridge_IsActive()
 {
@@ -9547,14 +9553,14 @@ double S21BridgeDiag_MsSinceEngineFrame(void)
 }
 
 //=============================================================================
-// Translate 7-bit netmessage IDs S3<->S21. -1 = suppress.
+// Translate 7-bit netmessage IDs dedi<->S21. -1 = suppress.
 //=============================================================================
 
-// S3->S21 translation table (for incoming messages from S3 server)
-// Index = S3 type ID, value = S21 type ID (-1 = suppress/skip)
+// dedi->S21 translation table (for incoming messages from dedi server)
+// Index = dedi type ID, value = S21 type ID (-1 = suppress/skip)
 
 // The old table was from analysis and had wrong type numbers for S21.
-// S21 renumbered all svc_ types (inserted new types, different offsets from S3).
+// S21 renumbered all svc_ types (inserted new types, different offsets from dedi).
 const int s_S3ToS21[69] = {
 	/* 0 */ 0, // net_NOP
 	/* 1 */ 1, // net_Disconnect
@@ -9577,7 +9583,7 @@ const int s_S3ToS21[69] = {
 	/* 18 */ 21, // svc_FixAngle [: RFB reads 3 floats]
 	/* 19 */ 22, // svc_CrosshairAngle
 	/* 20 */ 23, // svc_GrantClientSidePickup
-	/* 21 */ -1, // (gap in S3)
+	/* 21 */ -1, // (gap in dedi)
 	/* 22 */ -2, // svc_ServerTick [S21 type TBD -- skip for now, format changed]
 	/* 23 */ 25, // svc_PersistenceDefFile [VERIFIED: msgArray[25] vtbl GetType=25 and its vtable is the one SendServerInfo writes on the full-send path; 26 is UseCached]
 	/* 24 */ 26, // svc_UseCachedPersistenceDefFile [VERIFIED: slot 26 RFB reads 64-bit version into msg+32, matches s3. Old table mapped to 27 = Baseline -- latent bug, s3=24 hasn't flowed yet]
@@ -9589,35 +9595,35 @@ const int s_S3ToS21[69] = {
 	/* 30 */ 32, // svc_MatchmakingStatus
 	/* 31 */ 33, // svc_MTXUserInfo
 	/* 32 */ -2, // svc_PlaylistChange [S21 type TBD -- skip for now, format changed to 7b index]
-	/* 33 */ 35, // svc_SetTeam [S21 35 reads 7 bits like S3; 36 is the 15b-length blob]
+	/* 33 */ 35, // svc_SetTeam [S21 35 reads 7 bits like dedi; 36 is the 15b-length blob]
 	/* 34 */ -1, // svc_PlaylistOverrides (removed in S21)
 	/* 35 */ -1, // svc_AntiCheat -- consume-and-drop; never native ProcessAntiCheat
 	/* 36 */ -1, // svc_AntiCheatChallenge (removed in S21)
 	/* 37 */ 49, // svc_UserMessage -- PLACEHOLDER INDEX, NEVER DISPATCHED. S21 slot
 	              // Slot 49 is svc_Menu, not svc_UserMessage. Keep it in range; s3cmd==37 dispatches native.
-	/* 38 */ -1, // (gap in S3)
-	/* 39 */ -1, // (gap in S3)
+	/* 38 */ -1, // (gap in dedi)
+	/* 39 */ -1, // (gap in dedi)
 	/* 40 */ 50, // svc_Snapshot
-	/* 41 */ 48, // svc_TempEntities -- S21 type 48 (NOT 51; 51 is an unrelated inline-records msg).: RFB reads 32b m_tick(@+0x88) + 10b m_nNumEntries(@+0x20) + 24b m_nLength + blob, then Seek -- field offsets match S3. FORMAT BRIDGE (S3 22b len -> S21 24b len).
+	/* 41 */ 48, // svc_TempEntities -- S21 type 48 (NOT 51; 51 is an unrelated inline-records msg).: RFB reads 32b m_tick(@+0x88) + 10b m_nNumEntries(@+0x20) + 24b m_nLength + blob, then Seek -- field offsets match dedi. FORMAT BRIDGE (dedi 22b len -> S21 24b len).
 	/* 42 */ -1, // svc_Menu -- suppressed. The old mapping to S21 52 was wrong (52's
 	              // Dedi never emits VGUI menu; do not feed unverified KV to the binary parser.
 	/* 43 */ -1, // svc_CmdKeyValues (removed in S21)
-	/* 44 */ -2, // svc_DatatableChecksum -- FORMAT BRIDGE (S3 [64b checksum][string];
+	/* 44 */ -2, // svc_DatatableChecksum -- FORMAT BRIDGE (dedi [64b checksum][string];
 	              // S21 slot 53 body differs and under-consumed, shearing the stream)
 	/* 45 */ -1, // clc_ClientInfo
 	/* 46 */ -1, // clc_Move -- -VERIFIED via CLC_Move::GetType (= `return 57`)
 	/* 47 */ -1, // clc_VoiceData
 	/* 48 */ -1, // clc_DurangoVoiceData
-	/* 49 */ -1, // (gap in S3)
+	/* 49 */ -1, // (gap in dedi)
 	/* 50 */ -1, // clc_FileCRCCheck (removed in S21)
-	/* 51 */ -1, // (gap in S3)
+	/* 51 */ -1, // (gap in dedi)
 	/* 52 */ -1, // clc_LoadingProgress (UNVERIFIED on S21 -- type may differ)
 	/* 53 */ -1, // clc_PersistenceRequestSave (removed in S21)
 	/* 54 */ -1, // clc_PersistenceClientToken
 	/* 55 */ -1, // clc_SetClientEntitlements
 	/* 56 */ -1, // clc_SetPlaylistVarOverride (removed in S21)
 	/* 57 */ -1, // clc_ClaimClientSidePickup (UNVERIFIED on S21 -- type may differ)
-	/* 58 */ -1, // (gap in S3)
+	/* 58 */ -1, // (gap in dedi)
 	/* 59 */ -1, // clc_CmdKeyValues (removed in S21)
 	/* 60 */ -1, // clc_ClientTick -- -VERIFIED via CLC_ClientTick::GetType (= `return 65`)
 	/* 61 */ -1, // clc_ClientSayText -> S21 71 DISPROVEN (S21 71 is binary, not chat); -symbol guess. Real S21 chat type unknown.
@@ -9756,7 +9762,7 @@ void S21Bridge_OnDataBlockComplete(const uint8_t* rawBuf, int rawSize)
 		}
 	}
 
-	// Inject signon via ProcessMessages (S3 IDs translated at dispatch).
+	// Inject signon via ProcessMessages (dedi IDs translated at dispatch).
 
 	// The cached channel must still be a live entry in the engine's registry;
 	// a pointer that outlived a disconnect points at freed memory.

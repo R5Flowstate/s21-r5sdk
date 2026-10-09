@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: S21 jetpack on the dedicated server -- the fuel natives the S3
+// Purpose: S21 jetpack on the dedicated server -- the fuel natives the dedi
 // script VM lacks and the S21 flight model the S21 client predicts.
 //
 //=============================================================================//

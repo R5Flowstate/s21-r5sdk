@@ -26,7 +26,6 @@ macro( add_filesystem_lib LIB_NAME )
 	if( ${LIB_NAME} STREQUAL "filesystem_cl" )
 		target_compile_definitions( ${PROJECT_NAME} PRIVATE
 			"CLIENT_DLL"
-			"GAMEDLL_S21"
 		)
 	endif()
 endmacro()

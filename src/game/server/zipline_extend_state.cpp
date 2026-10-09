@@ -54,7 +54,7 @@ static void __fastcall ZiplineRopeColor_ValueProxy(void* /*pProp*/, void* pStruc
 	Zipline_GetRopeColorModulation(pStruct, (float*)pOut);
 }
 
-// S3 CZipline carries neither field. Idle values, not aliased entity memory:
+// dedi CZipline carries neither field. Idle values, not aliased entity memory:
 // 0 reverse-mount distance and manual detach allowed.
 static void __fastcall ZiplineZero_ValueProxy(void* /*pProp*/, void* /*pStruct*/,
 	void* /*pData*/, void* pOut, int /*iElement*/, int /*objectID*/)

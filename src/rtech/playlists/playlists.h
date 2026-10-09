@@ -44,7 +44,7 @@ extern char** g_ppPlaylistFileText;
 extern int* g_pnPlaylistFileTextSize;
 
 // Runtime playlist var overrides. Authoring is server-side only; the values ride
-// svc_PlaylistOverrides (S3 msg 34) to every connected client, which the bridge
+// svc_PlaylistOverrides (dedi msg 34) to every connected client, which the bridge
 // client decodes and applies (S21 deleted its own override subsystem).
 inline void(*v_Playlist_SetVarOverride)(const char* pszName, const char* pszValue);
 inline void(*v_Playlist_ClearVarOverrides)(void);

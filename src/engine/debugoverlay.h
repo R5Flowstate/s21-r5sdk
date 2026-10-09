@@ -254,7 +254,7 @@ static constexpr int kDebugOverlayS2CItemBytes = 58;
 static constexpr int kDebugOverlayS2CMaxBytes = 1 + kDebugOverlayS2CMax * kDebugOverlayS2CItemBytes;
 
 #if defined(CLIENT_DLL)
-// S3 type 69 -- dedi replicates script/engine overlay adds to the client list.
+// dedi type 69 -- dedi replicates script/engine overlay adds to the client list.
 void DebugOverlay_ApplyS2CPayload(const uint8_t* data, int nBytes);
 #endif // CLIENT_DLL
 

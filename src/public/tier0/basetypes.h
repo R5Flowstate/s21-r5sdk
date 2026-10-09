@@ -141,8 +141,20 @@
 #define MAX_MAP_NAME      64 // Max BSP file name len.
 #define MAX_PLAYLIST_NAME 64 // Max playlist name len.
 
-#define SDK_VERSION "R5FlowstateSDK004" // Increment this with every /breaking/ SDK change (i.e. security/backend changes breaking compatibility).
-#define SDK_DISPLAY_VERSION "1.35" // Player-facing product label. Not the wire gate.
+#define SDK_VERSION_BASE "R5FlowstateSDK005" // Increment this with every /breaking/ SDK change (i.e. security/backend changes breaking compatibility).
+#define SDK_DISPLAY_VERSION_BASE "1.3" // Player-facing product label. Not the wire gate.
+
+// A playtest build carries its own wire gate, so the master server only lists
+// it to other playtest builds.
+#ifdef SDK_RING_PLAYTEST
+#define SDK_RING "playtest"
+#define SDK_VERSION SDK_VERSION_BASE "-pt"
+#define SDK_DISPLAY_VERSION SDK_DISPLAY_VERSION_BASE " playtest"
+#else
+#define SDK_RING "live"
+#define SDK_VERSION SDK_VERSION_BASE
+#define SDK_DISPLAY_VERSION SDK_DISPLAY_VERSION_BASE
+#endif // SDK_RING_PLAYTEST
 #define SDK_ARRAYSIZE(arr) ((sizeof(arr) / sizeof(*arr))) // Name due to IMGUI implementation and NT implementation that we shouldn't share across everywhere.
 
 #define SDK_SYSTEM_CFG_PATH "cfg/system/"

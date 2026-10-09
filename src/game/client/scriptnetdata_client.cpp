@@ -699,7 +699,7 @@ void ScriptNetData_RegisterUIFunctions(CSquirrelVM* vm)
 	vm->RegisterConstant("SNDC_GLOBAL_NON_REWIND", 1);
 	Warning(eDLL_T::CLIENT, "[SNDC] SNDC_GLOBAL_NON_REWIND=1 (engine native)\n");
 
-	// DEDI/S3 half: S3 ScriptFunctionBinding_t path. S21 client UI registration
+	// DEDI/dedi half: dedi ScriptFunctionBinding_t path. S21 client UI registration
 	// lives in the CLIENT_DLL half (Script_RegisterFunc_S21 GetPlayerNet only).
 	DEFINE_UI_SCRIPTFUNC_NAMED(vm, RegisterNetworkedVariableChangeCallback_bool,
 		"Registers a callback for bool netvar changes",

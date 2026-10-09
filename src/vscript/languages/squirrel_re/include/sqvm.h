@@ -76,7 +76,7 @@ static const size_t SQVM_S21_BOTTOM    = 0x44;
 // Read as a 16-byte object by the engine's own sq_pushroottable, which tests the
 // type at +0xD0 and takes the value from +0xD8.
 static const size_t SQVM_S21_ROOTTABLE = 0xD0;
-// S21 _sharedstate at +0x50, not the S3 field in SQVM above.
+// S21 _sharedstate at +0x50, not the dedi field in SQVM above.
 static const size_t SQVM_S21_SHAREDSTATE = 0x50;
 
 inline SQObjectPtr* SQVM_S21_Field(HSQUIRRELVM v, size_t offset)
@@ -108,7 +108,7 @@ inline SQObjectPtr& stack_get(HSQUIRRELVM v, SQInteger idx)
 	return SQVM_S21_Field(v, SQVM_S21_STACKDATA)[SQVM_S21_Top(v) + idx];
 }
 
-// Push/Pop use _stack[_top] via the S21 fields, not the S3 SQVM members.
+// Push/Pop use _stack[_top] via the S21 fields, not the dedi SQVM members.
 inline void SQVM_S21_Push(HSQUIRRELVM v, const SQObjectPtr& o)
 {
 	SQVM_S21_Field(v, SQVM_S21_STACKDATA)[SQVM_S21_Top(v)++] = o;

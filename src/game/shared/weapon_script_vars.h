@@ -23,7 +23,7 @@ void WeaponScriptVars_RegisterWeaponTypeDisableFuncs(ScriptClassDescriptor_t* en
 // Server refcounted weapon-type disable, the natives behind DisableWeaponTypes / EnableWeaponTypes.
 void WeaponScriptVars_DisableWeaponTypes(void* pEntity, uint32_t flags);
 void WeaponScriptVars_EnableWeaponTypes(void* pEntity, uint32_t flags);
-// WPT_* masks: the server keeps S3 bit order, the S21 client reads its own.
+// WPT_* masks: the server keeps dedi bit order, the S21 client reads its own.
 uint32_t WeaponScriptVars_WeaponTypesToS21(uint32_t s3Flags);
 uint32_t WeaponScriptVars_WeaponTypesFromS21(uint32_t s21Flags);
 void WeaponScriptVars_RegisterWPTConstants(CSquirrelVM* s);
@@ -33,6 +33,9 @@ const char* WeaponScriptVars_GetReservedSlot(const char* s21Key);
 float WeaponScriptVars_GetScriptFloat0(void* pWeapon);
 void WeaponScriptVars_SetScriptFloat0(void* pWeapon, float value);
 void WeaponScriptVars_LevelShutdown();
+
+// Every match of a byte pattern in the game .text (Module_FindPattern returns only the first).
+int WeaponScriptVars_FindAllPatternMatches(const char* pattern, size_t patternLen, uint8_t** outMatches, int maxHits);
 void WeaponScriptVars_PhaseShift_LevelShutdown();
 void WeaponScriptVars_WeaponLockedSet_LevelShutdown();
 // PhaseShiftBegin belongs to the base-combat-character class in both engines;
@@ -114,7 +117,7 @@ inline uint8_t* g_pOffhandCommandByte = nullptr;
 inline void*** g_pWeaponListMem = nullptr;
 inline int* g_pWeaponListCount = nullptr;
 
-// Engine: CWeaponX::HolsterInternal(weapon, doFastHolster) -- S3 2-arg form.
+// Engine: CWeaponX::HolsterInternal(weapon, doFastHolster) -- dedi 2-arg form.
 // Backs Script_WeaponHolster / Script_WeaponFastHolster.
 inline char(*v_WeaponX_HolsterInternal)(void* pWeapon, bool bDoFastHolster) = nullptr;
 
@@ -253,7 +256,7 @@ class VWeaponScriptVars : public IDetour
 			.GetPtr(v_OffhandComputeModsBitfield);
 
 		// CWeaponX::HolsterInternal(weapon, doFastHolster).
-		// S3's 2-arg variant (no fastHolsterScale; the twin is 3-arg).
+		// dedi's 2-arg variant (no fastHolsterScale; the twin is 3-arg).
 		// Prologue reads owner handle at weapon+0x11F0. Verified unique (1 hit)
 
 		Module_FindPattern(g_GameDll,

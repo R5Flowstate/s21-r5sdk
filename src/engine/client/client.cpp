@@ -1120,7 +1120,7 @@ void CClient::Disconnect(const Reputation_t nRepLvl, const char* szReason, ...)
 
 //---------------------------------------------------------------------------------
 // Forge svc_UserMessage type 54 at SIGNONSTATE_FULL (S21 ClientInitComplete).
-// S3 slot 54 is SetMixLayerTriggerFactor / RemoteFunctionCallsChecksum by name.
+// dedi slot 54 is SetMixLayerTriggerFactor / RemoteFunctionCallsChecksum by name.
 //---------------------------------------------------------------------------------
 static void Bridge_SendClientInitComplete(const CPlayer* pTarget, int nUserID)
 {
@@ -1130,7 +1130,7 @@ static void Bridge_SendClientInitComplete(const CPlayer* pTarget, int nUserID)
 	CSingleUserRecipientFilter filter(pTarget);
 	filter.MakeReliable();
 
-	// Name must match S3 enum slot 54 or UserMessageBegin rejects; wire carries the int.
+	// Name must match dedi enum slot 54 or UserMessageBegin rejects; wire carries the int.
 	v_UserMessageBegin(&filter, "RemoteFunctionCallsChecksum",
 		static_cast<int>(UserMessages_t::RemoteFunctionCallsChecksum));
 

@@ -2,9 +2,9 @@
 //
 // Purpose: S21 expand-contract missile path on the dedicated server.
 //
-// The S3 CMissile carries a two-phase expand-contract path. S21 adds a third
+// The dedi CMissile carries a two-phase expand-contract path. S21 adds a third
 // phase, a blend into the target, a velocity wiggle and a no-collide grace
-// period, and moves target selection into a weapon native. The S3 think keeps
+// period, and moves target selection into a weapon native. The dedi think keeps
 // its schedule; the velocity it writes is replaced with the S21 one.
 //
 //=============================================================================//
@@ -41,18 +41,18 @@ static ConVar bridge_missile_expand_contract_diag("bridge_missile_expand_contrac
 // CMissile (server half).
 static constexpr ptrdiff_t MISSILE_OFF_COLLISION  = 0x328;  // CCollisionProperty; solid flags at +0x28
 static constexpr ptrdiff_t MISSILE_OFF_ABS_VELOCITY = 0x3DC; // valid after CalcAbsoluteVelocity
-static constexpr ptrdiff_t MISSILE_OFF_SPAWN_TIME = 0x23C8; // time base of the S3 velocity think
-static constexpr ptrdiff_t MISSILE_OFF_LAUNCHED   = 0x2400; // byte; the S3 think does nothing until set
-static constexpr ptrdiff_t MISSILE_OFF_SPEED      = 0x2470; // speed the S3 path and homing scale by
+static constexpr ptrdiff_t MISSILE_OFF_SPAWN_TIME = 0x23C8; // time base of the dedi velocity think
+static constexpr ptrdiff_t MISSILE_OFF_LAUNCHED   = 0x2400; // byte; the dedi think does nothing until set
+static constexpr ptrdiff_t MISSILE_OFF_SPEED      = 0x2470; // speed the dedi path and homing scale by
 static constexpr ptrdiff_t MISSILE_OFF_GRACE_END  = 0x24EC; // main think clears FSOLID_NOT_SOLID past it
 static constexpr ptrdiff_t MISSILE_OFF_LAST_THINK = 0x2550; // main think stamps curtime
 
-// CGlobalVars frame time; the S3 velocity think reads the same slot.
+// CGlobalVars frame time; the dedi velocity think reads the same slot.
 static constexpr ptrdiff_t GLOBALS_OFF_FRAMETIME = 0x30;
 
 static constexpr int FSOLID_NOT_SOLID_BIT = 0x4;
 
-// S21 collision groups PLAYER (7) and BLOCK_WEAPONS (21) in the S3 enum.
+// S21 collision groups PLAYER (7) and BLOCK_WEAPONS (21) in the dedi enum.
 static constexpr int COLLISION_GROUP_PLAYER_S3        = 6;
 static constexpr int COLLISION_GROUP_BLOCK_WEAPONS_S3 = 19;
 
@@ -447,7 +447,7 @@ static void Missile_MainThink(void* pMissile)
 }
 
 //-----------------------------------------------------------------------------
-// Runs after the S3 velocity think has rescheduled itself.
+// Runs after the dedi velocity think has rescheduled itself.
 //-----------------------------------------------------------------------------
 static void Missile_VelocityThink(void* pMissile)
 {
@@ -610,7 +610,7 @@ static SQRESULT Script_InitMissileExpandContract(HSQUIRRELVM v)
 		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
 	}
 
-	// Installs the S3 velocity think; the S21 velocity replaces its output.
+	// Installs the dedi velocity think; the S21 velocity replaces its output.
 	v_Missile_InitExpandContract(pMissile, &p1, &p2, times[0], times[1], times[2], times[3], &target, false);
 
 	MissileExpandContractState_t& st = s_missileStates[pMissile];
@@ -985,7 +985,7 @@ void MissileExpandContract_RegisterWeaponFuncs(ScriptClassDescriptor_t* weaponSt
 }
 
 //-----------------------------------------------------------------------------
-// CMissile script class: the S3 two-phase InitMissileExpandContract moves
+// CMissile script class: the dedi two-phase InitMissileExpandContract moves
 // aside so the S21 signature owns the name.
 //-----------------------------------------------------------------------------
 static void Missile_RenameBinding(CUtlVector<ScriptFunctionBinding_t>& bindings,

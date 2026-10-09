@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: airborne dodge rules the S21/S3 Jump lacks, applied identically
+// Purpose: airborne dodge rules the S21/dedi Jump lacks, applied identically
 // around each engine's Jump so prediction and the server agree:
 //   - once per airtime (dodgeOnlyOnceInAir)
 //   - no directional input dashes along horizontal velocity

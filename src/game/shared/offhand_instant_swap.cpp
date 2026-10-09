@@ -110,7 +110,7 @@ void VOffhandInstantSwap::GetVar(void) const
 void VOffhandInstantSwap::Detour(const bool bAttach) const
 {
 	// Without the gate return address the override cannot be scoped to the
-	// single -parity call site -- attaching would wrongly widen all 4 S3
+	// single -parity call site -- attaching would wrongly widen all 4 dedi
 	// callers of the predicate. Skip loudly instead.
 	if (!v_IsOffhandInInteruptResumeableState || !s_pGateRetAddr)
 	{

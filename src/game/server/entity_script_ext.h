@@ -1,8 +1,8 @@
 //=============================================================================//
 //
-// Purpose: S21 server entity/player script natives the S3 dedicated server
+// Purpose: S21 server entity/player script natives the dedicated server
 // lacks: never-crush movers, velocity at a point, Dissolve with optional
-// arguments, local gravity, and the bleedout bookkeeping natives.
+// arguments, local gravity, single class mods, and the bleedout bookkeeping natives.
 //
 //=============================================================================//
 #ifndef ENTITY_SCRIPT_EXT_H

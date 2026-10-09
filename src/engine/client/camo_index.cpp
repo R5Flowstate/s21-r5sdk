@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: Hostile / S3 camo index must not reach table[8*idx].
+// Purpose: Hostile / dedi camo index must not reach table[8*idx].
 //
 //=============================================================================//
 #include "core/stdafx.h"

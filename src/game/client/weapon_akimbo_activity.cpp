@@ -14,6 +14,7 @@
 #include "weapon_akimbo_activity.h"
 #include "weapon_mod_visual.h"
 #include "game/client/cliententitylist.h"
+#include "public/client_class.h"
 #include "rtech/pak/settings_disk.h"
 #include "rtech/pak/rpak_observe.h"
 
@@ -21,7 +22,7 @@ static ConVar sdk_akimbo_reload_anims("sdk_akimbo_reload_anims", "1", FCVAR_RELE
 	"Translate the one-handed reload activities to the akimbo reload set while dual wielding.");
 
 static ConVar sdk_akimbo_activity_log("sdk_akimbo_activity_log", "0", FCVAR_DEVELOPMENTONLY,
-	"Log akimbo reload activity translations. [AKIMBO-ACT]");
+	"Log akimbo activity translations, hand state, fire and zoom decisions. [AKIMBO-ACT] [AKIMBO-CL]");
 
 static constexpr int kActOneHandedReloadFirst = 0x267; // ACT_VM_ONEHANDED_RELOAD
 static constexpr int kActOneHandedReloadCount = 12;    // ..ACT_VM_ONEHANDED_RELOADEMPTY_LATE5
@@ -50,6 +51,11 @@ static void (__fastcall* v_C_Player_AkimboSetState)(void* pPlayer, char newState
 static char (__fastcall* v_C_WeaponX_FireGate)(void* pWeapon, unsigned __int8 a2) = nullptr;
 static char (__fastcall* v_C_WeaponX_SetIdealActivityWithModifiers)(void* pWeapon, uint16_t act, const uint16_t* pMods, unsigned int count) = nullptr;
 static constexpr uintptr_t kWeaponIdealSequenceOffset = 0x1584;
+static constexpr uintptr_t kWeaponIdealActivityOffset = 0x1586;
+static constexpr int kActVmDrawFirst = 472; // the four draw activities SetIdealActivity keeps running
+static constexpr int kActVmDrawLast = 475;
+static constexpr uint16_t kActVmIdle = 601;
+static char (__fastcall* v_C_WeaponX_SetIdealActivity)(void* pWeapon, uint16_t act) = nullptr;
 static constexpr uintptr_t kWeaponIsAkimboOffset = 0x2BBE;
 static constexpr uintptr_t kWeaponActiveSlotOffset = 0x2E44;
 static const char* s_pEntityList = nullptr;
@@ -140,7 +146,7 @@ static unsigned int __fastcall Hook_C_WeaponX_GetActivityModifiers(void* pWeapon
 	static int s_budget = 24;
 	const uint64_t key = (reinterpret_cast<uint64_t>(pWeapon) << 16) ^ (static_cast<uint64_t>(state & 0xF) << 8)
 		^ (static_cast<uint64_t>(slot & 0xF) << 4) ^ (count & 0xF);
-	if (key == s_lastKey || s_budget <= 0)
+	if (!sdk_akimbo_activity_log.GetBool() || key == s_lastKey || s_budget <= 0)
 		return count;
 	s_lastKey = key;
 	--s_budget;
@@ -158,7 +164,7 @@ static unsigned int __fastcall Hook_C_WeaponX_GetActivityModifiers(void* pWeapon
 static void LogAkimboModelBinding(const void* pWeapon)
 {
 	static bool s_done = false;
-	if (s_done || !v_Pak_FindAssetVoid_S21)
+	if (s_done || !sdk_akimbo_activity_log.GetBool() || !v_Pak_FindAssetVoid_S21)
 		return;
 	s_done = true;
 
@@ -193,7 +199,7 @@ static char __fastcall Hook_C_WeaponX_FireGate(void* pWeapon, unsigned __int8 a2
 	const uint32_t nOwner = *reinterpret_cast<const uint32_t*>(reinterpret_cast<const char*>(pWeapon) + kWeaponOwnerOffset);
 	const char* const pOwner = reinterpret_cast<const char*>(EntityFromHandle(nOwner));
 	static int s_budget = 48;
-	if (s_budget-- > 0)
+	if (sdk_akimbo_activity_log.GetBool() && s_budget-- > 0)
 		Msg(eDLL_T::CLIENT, "[AKIMBO-CL] fire weapon=%p slot=%d state=%d shouldAlt=%d -> %d\n",
 			pWeapon, *reinterpret_cast<const int*>(reinterpret_cast<const char*>(pWeapon) + kWeaponActiveSlotOffset),
 			pOwner ? pOwner[kAkimboStateOffset] : -1, pOwner ? pOwner[kAkimboStateOffset + 1] : -1, static_cast<int>(result));
@@ -210,12 +216,10 @@ static char __fastcall Hook_C_WeaponX_SetIdealActivityWithModifiers(void* pWeapo
 	if (slot == 1)
 		LogAkimboModelBinding(pWeapon);
 	static uint64_t s_lastKey = 0;
-	static int s_budget = 40;
 	const uint64_t key = (reinterpret_cast<uint64_t>(pWeapon) << 20) ^ (static_cast<uint64_t>(act) << 4) ^ (static_cast<uint64_t>(seq & 0xFFFF) << 24) ^ (slot & 0xF);
-	if (key == s_lastKey || (s_budget <= 0 && !sdk_akimbo_activity_log.GetBool()))
+	if (!sdk_akimbo_activity_log.GetBool() || key == s_lastKey)
 		return result;
 	s_lastKey = key;
-	--s_budget;
 	Msg(eDLL_T::CLIENT, "[AKIMBO-CL] ideal weapon=%p slot=%d act=%u mods=%u -> seq=%d ok=%d\n",
 		pWeapon, slot, static_cast<unsigned>(act), count, seq, static_cast<int>(result));
 	return result;
@@ -232,6 +236,35 @@ static constexpr uintptr_t kWeaponInfoOffset = 0x17A8;
 static constexpr uintptr_t kEntityScriptInstanceOffset = 0xB0;
 static constexpr uintptr_t kPlayerActiveWeaponsOffset = 0x1930;
 static constexpr int kAkimboWireSlots = 256;
+static constexpr int kNetworkableGetClientClassSlot = 3;
+static const ClientClass* s_pWeaponXClass = nullptr;
+
+// The wire chooses what a weapon handle resolves to; only a CWeaponX may
+// reach the weapon calls and offsets below.
+static bool AkimboClient_IsWeaponX(const void* pEntity)
+{
+	const char* const pNetworkable = static_cast<const char*>(pEntity) + kNetworkableToEntity;
+	typedef const ClientClass* (__fastcall* GetClientClassFn)(const void*);
+	const GetClientClassFn pfn = reinterpret_cast<GetClientClassFn>(
+		(*reinterpret_cast<const uintptr_t* const*>(pNetworkable))[kNetworkableGetClientClassSlot]);
+	const ClientClass* const pClass = pfn(pNetworkable);
+	if (!pClass)
+		return false;
+	if (pClass == s_pWeaponXClass)
+		return true;
+	if (s_pWeaponXClass || !pClass->m_pNetworkName || strcmp(pClass->m_pNetworkName, "CWeaponX") != 0)
+		return false;
+	s_pWeaponXClass = pClass;
+	return true;
+}
+
+// nHand 0 is the main hand, 1 the alt hand.
+static char* AkimboClient_ActiveWeapon(const void* pPlayer, const int nHand)
+{
+	void* const pEntity = EntityFromHandle(*reinterpret_cast<const uint32_t*>(
+		static_cast<const char*>(pPlayer) + kPlayerActiveWeaponsOffset + nHand * sizeof(uint32_t)));
+	return (pEntity && AkimboClient_IsWeaponX(pEntity)) ? static_cast<char*>(pEntity) : nullptr;
+}
 
 struct AkimboWireState
 {
@@ -260,6 +293,33 @@ static AkimboWireState* AkimboWireSlot(const void* pPlayer)
 	return &st;
 }
 
+static ConVar sdk_akimbo_partner_redraw("sdk_akimbo_partner_redraw", "1", FCVAR_RELEASE,
+	"Put a partner still in its draw into the akimbo idle when akimbo turns active.");
+
+// A partner the server raises starts its draw while the client still holds
+// state 0; that draw ends on the main hand's pose and holds it until the next
+// activity, so both guns sit in one hand until the player moves.
+static void AkimboClient_IdlePartner(void* pPlayer)
+{
+	if (!sdk_akimbo_partner_redraw.GetBool() || !v_C_WeaponX_SetIdealActivity || !v_C_WeaponX_GetAkimboPartner || !s_pEntityList)
+		return;
+	void* const main = AkimboClient_ActiveWeapon(pPlayer, 0);
+	if (!main || !*reinterpret_cast<void* const*>(reinterpret_cast<const char*>(main) + kWeaponInfoOffset))
+		return;
+	char* const partner = reinterpret_cast<char*>(v_C_WeaponX_GetAkimboPartner(main));
+	if (!partner || !*reinterpret_cast<void* const*>(partner + kWeaponInfoOffset))
+		return;
+	const int act = *reinterpret_cast<const int16_t*>(partner + kWeaponIdealActivityOffset);
+	if (act < kActVmDrawFirst || act > kActVmDrawLast)
+		return;
+	const int oldSeq = *reinterpret_cast<const int16_t*>(partner + kWeaponIdealSequenceOffset);
+	v_C_WeaponX_SetIdealActivity(partner, kActVmIdle);
+	static int s_budget = 8;
+	if (sdk_akimbo_activity_log.GetBool() && s_budget-- > 0)
+		Msg(eDLL_T::CLIENT, "[AKIMBO-CL] partner redraw weapon=%p act=%d seq %d -> %d\n", partner, act, oldSeq,
+			static_cast<int>(*reinterpret_cast<const int16_t*>(partner + kWeaponIdealSequenceOffset)));
+}
+
 static void __fastcall Hook_C_Player_AkimboSetState(void* pPlayer, char newState)
 {
 	const int oldState = pPlayer ? reinterpret_cast<const char*>(pPlayer)[kAkimboStateOffset] : -1;
@@ -268,9 +328,11 @@ static void __fastcall Hook_C_Player_AkimboSetState(void* pPlayer, char newState
 	{
 		if (AkimboWireState* const st = AkimboWireSlot(pPlayer))
 			st->state = reinterpret_cast<const char*>(pPlayer)[kAkimboStateOffset];
+		if (oldState != kAkimboStateActive && newState == kAkimboStateActive)
+			AkimboClient_IdlePartner(pPlayer);
 	}
 	static int s_budget = 32;
-	if (oldState != newState && s_budget-- > 0)
+	if (sdk_akimbo_activity_log.GetBool() && oldState != newState && s_budget-- > 0)
 		Msg(eDLL_T::CLIENT, "[AKIMBO-CL] client SetState %d -> %d player=%p\n", oldState, static_cast<int>(newState), pPlayer);
 }
 
@@ -285,16 +347,64 @@ static bool AkimboClient_WeaponReady(const void* pWeapon)
 		&& *reinterpret_cast<void* const*>(p + kEntityScriptInstanceOffset) != nullptr;
 }
 
+static ConVar sdk_akimbo_hands_log("sdk_akimbo_hands_log", "0", FCVAR_DEVELOPMENTONLY,
+	"Log both akimbo hands' flags, viewmodel binding and activity whenever they change. [AKIMBO-HANDS]");
+
+static constexpr uintptr_t kWeaponFlipOffset = 0x2BBD;
+
+// Both hands' state, logged on change: which flag or binding moves when the
+// guns separate.
+static void AkimboClient_WatchHands(const char* pPlayer)
+{
+	if (!sdk_akimbo_hands_log.GetBool() || !s_pEntityList || !v_C_WeaponX_GetAkimboPartner)
+		return;
+	char* const main = AkimboClient_ActiveWeapon(pPlayer, 0);
+	if (!main || !*reinterpret_cast<void* const*>(main + kWeaponInfoOffset))
+		return;
+	char* const alt = AkimboClient_ActiveWeapon(pPlayer, 1);
+	char* const partner = reinterpret_cast<char*>(v_C_WeaponX_GetAkimboPartner(main));
+	auto weapon = [](const char* w, int* out) {
+		if (!w)
+		{
+			out[0] = out[1] = out[2] = out[3] = out[4] = -1;
+			return;
+		}
+		out[0] = w[kWeaponIsAkimboOffset];
+		out[1] = w[kWeaponFlipOffset];
+		out[2] = *reinterpret_cast<const int16_t*>(w + kWeaponIdealActivityOffset);
+		out[3] = *reinterpret_cast<const int16_t*>(w + kWeaponIdealSequenceOffset);
+		out[4] = WeaponModVisual_ViewmodelShowsWeapon(const_cast<char*>(w)) ? 1 : 0;
+	};
+	int m[5], p[5];
+	weapon(main, m);
+	weapon(partner, p);
+	const int state = pPlayer[kAkimboStateOffset];
+	static int s_last[13] = {};
+	const int now[13] = { state, m[0], m[1], m[2], m[3], m[4], p[0], p[1], p[2], p[3], p[4], partner == alt, partner != nullptr };
+	if (memcmp(now, s_last, sizeof(now)) == 0)
+		return;
+	memcpy(s_last, now, sizeof(now));
+	static int s_budget = 120;
+	if (s_budget-- <= 0)
+		return;
+	Msg(eDLL_T::CLIENT,
+		"[AKIMBO-HANDS] state=%d main=%p akimbo=%d flip=%d act=%d seq=%d vm=%d | partner=%p akimbo=%d flip=%d act=%d seq=%d vm=%d | alt=%p altIsPartner=%d\n",
+		state, main, m[0], m[1], m[2], m[3], m[4], partner, p[0], p[1], p[2], p[3], p[4], alt, partner == alt ? 1 : 0);
+}
+
 // The wire writes m_akimboState straight into the player, so the client's
 // own SetState (mod trio, optic disable, weapon callback) early-outs on a
 // value it already holds. Rewind the byte and play the transition through it.
 static void __fastcall Hook_C_Player_PostDataUpdate(void* pNetworkable, int updateType, float oldTime, float newTime)
 {
 	v_C_Player_PostDataUpdate(pNetworkable, updateType, oldTime, newTime);
-	if (!sdk_akimbo_wire_state.GetBool() || !pNetworkable)
+	if (!pNetworkable)
+		return;
+	if (!sdk_akimbo_wire_state.GetBool())
 		return;
 
 	char* const pPlayer = reinterpret_cast<char*>(pNetworkable) - kNetworkableToEntity;
+	AkimboClient_WatchHands(pPlayer);
 	AkimboWireState* const st = AkimboWireSlot(pPlayer);
 	if (!st)
 		return;
@@ -324,7 +434,7 @@ static void __fastcall Hook_C_Player_PostDataUpdate(void* pNetworkable, int upda
 
 	// The weapons of this packet may not have run their own PostDataUpdate
 	// yet; a later player update retries until both hands carry weapon data.
-	void* const main = EntityFromHandle(*reinterpret_cast<const uint32_t*>(pPlayer + kPlayerActiveWeaponsOffset));
+	void* const main = AkimboClient_ActiveWeapon(pPlayer, 0);
 	if (!AkimboClient_WeaponReady(main))
 		return;
 	void* const other = v_C_WeaponX_GetAkimboPartner(main);
@@ -342,7 +452,7 @@ static void __fastcall Hook_C_Player_PostDataUpdate(void* pNetworkable, int upda
 	st->armed = false;
 
 	static int s_budget = 32;
-	if (s_budget-- > 0)
+	if (sdk_akimbo_activity_log.GetBool() && s_budget-- > 0)
 		Msg(eDLL_T::CLIENT, "[AKIMBO-CL] wire SetState %d -> %d player=%p main=%p other=%p\n",
 			static_cast<int>(oldState), static_cast<int>(wireState), pPlayer, main, other);
 }
@@ -373,8 +483,8 @@ static void* (__fastcall* v_C_Player_TargetingWeapon)(void* pPlayer) = nullptr;
 static bool AkimboClient_IsDualWielding(const void* pPlayer)
 {
 	const char* const p = reinterpret_cast<const char*>(pPlayer);
-	const char* const main = reinterpret_cast<const char*>(EntityFromHandle(*reinterpret_cast<const uint32_t*>(p + kPlayerActiveWeaponsOffset)));
-	const char* const alt = reinterpret_cast<const char*>(EntityFromHandle(*reinterpret_cast<const uint32_t*>(p + kPlayerActiveWeaponsOffset + 4)));
+	const char* const main = AkimboClient_ActiveWeapon(p, 0);
+	const char* const alt = AkimboClient_ActiveWeapon(p, 1);
 	return main && alt && main[kWeaponIsAkimboOffset] && alt[kWeaponIsAkimboOffset];
 }
 
@@ -389,7 +499,7 @@ static __int64 __fastcall Hook_C_Player_StartZoom(void* pPlayer)
 		return result;
 	const char* const w = v_C_Player_TargetingWeapon ? reinterpret_cast<const char*>(v_C_Player_TargetingWeapon(pPlayer)) : nullptr;
 	static int s_budget = 24;
-	if (s_budget-- > 0)
+	if (sdk_akimbo_activity_log.GetBool() && s_budget-- > 0)
 		Msg(eDLL_T::CLIENT, "[AKIMBO-CL] startzoom refused weapon=%p state=%d ready=%.3f needsRechamber=%d reloading=%d\n",
 			w, w ? *reinterpret_cast<const int*>(w + kWeaponStateOffset) : -1, w ? *reinterpret_cast<const float*>(w + kWeaponNextReadyOffset) : 0.f,
 			w ? w[kWeaponSemiNeedsRechamberOffset] : -1, w ? w[kWeaponReloadingOffset] : -1);
@@ -401,7 +511,7 @@ static __int64 __fastcall Hook_C_Player_StopZoom(void* pPlayer, unsigned __int8 
 	if (pPlayer && AkimboClient_IsDualWielding(pPlayer) && reinterpret_cast<const char*>(pPlayer)[kPlayerZoomingOffset])
 	{
 		static int s_budget = 24;
-		if (s_budget-- > 0)
+		if (sdk_akimbo_activity_log.GetBool() && s_budget-- > 0)
 			Msg(eDLL_T::CLIENT, "[AKIMBO-CL] stopzoom arg=%u caller=0x%llX\n", a2,
 				static_cast<unsigned long long>(0x140000000ull + (reinterpret_cast<uintptr_t>(_ReturnAddress()) - g_GameDll.GetModuleBase())));
 	}
@@ -424,7 +534,7 @@ static char __fastcall Hook_C_Player_CanZoom(void* pPlayer)
 			| ((*reinterpret_cast<const float*>(p + 0x1BE4) != 0.0f) ? 0x400u : 0u);
 		static unsigned int s_lastKey = ~0u;
 		static int s_budget = 80;
-		if (key != s_lastKey && s_budget > 0)
+		if (sdk_akimbo_activity_log.GetBool() && key != s_lastKey && s_budget > 0)
 		{
 			s_lastKey = key;
 			--s_budget;
@@ -435,8 +545,8 @@ static char __fastcall Hook_C_Player_CanZoom(void* pPlayer)
 	if (result)
 		return result;
 
-	const char* const main = reinterpret_cast<const char*>(EntityFromHandle(*reinterpret_cast<const uint32_t*>(p + kPlayerActiveWeaponsOffset)));
-	const char* const alt = reinterpret_cast<const char*>(EntityFromHandle(*reinterpret_cast<const uint32_t*>(p + kPlayerActiveWeaponsOffset + 4)));
+	const char* const main = AkimboClient_ActiveWeapon(p, 0);
+	const char* const alt = AkimboClient_ActiveWeapon(p, 1);
 	if (!main || !alt || !main[kWeaponIsAkimboOffset] || !alt[kWeaponIsAkimboOffset])
 		return result;
 
@@ -447,7 +557,7 @@ static char __fastcall Hook_C_Player_CanZoom(void* pPlayer)
 		^ static_cast<uint8_t>(p[kPlayerSelectedWeaponsOffset]) ^ (static_cast<uint64_t>(main[kWeaponReloadingOffset]) << 8) ^ (static_cast<uint64_t>(main[kWeaponZoomEffectsOffset]) << 9);
 	static uint64_t s_lastKey = ~0ull;
 	static int s_budget = 24;
-	if (key == s_lastKey || s_budget <= 0)
+	if (!sdk_akimbo_activity_log.GetBool() || key == s_lastKey || s_budget <= 0)
 		return result;
 	s_lastKey = key;
 	--s_budget;
@@ -510,6 +620,7 @@ void VWeaponAkimboActivity::GetAdr(void) const
 	LogFunAdr("C_Player::PostDataUpdate", v_C_Player_PostDataUpdate);
 	LogFunAdr("C_WeaponX::GetAkimboPartner", v_C_WeaponX_GetAkimboPartner);
 	LogFunAdr("C_WeaponX::SetIdealActivityWithModifiers", v_C_WeaponX_SetIdealActivityWithModifiers);
+	LogFunAdr("C_WeaponX::SetIdealActivity", v_C_WeaponX_SetIdealActivity);
 	LogFunAdr("C_WeaponX::FireGate", v_C_WeaponX_FireGate);
 	LogFunAdr("C_Player::CanZoom", v_C_Player_CanZoom);
 	LogFunAdr("C_Player::StartZoom", v_C_Player_StartZoom);
@@ -549,6 +660,12 @@ void VWeaponAkimboActivity::GetFun(void) const
 	Module_FindPattern(g_GameDll,
 		"48 89 5C 24 10 48 89 6C 24 18 56 41 56 41 57 48 81 EC 80 00 00 00 8B 81 80 16 00 00 45 8B F1 0F BF EA")
 		.GetPtr(v_C_WeaponX_SetIdealActivityWithModifiers);
+	// SetIdealActivity: gathers the weapon's own activity modifiers, then the with-modifiers body.
+	Module_FindPattern(g_GameDll,
+		"48 89 5C 24 08 48 89 7C 24 10 55 48 8D 6C 24 A9 48 81 EC B0 00 00 00 48 83 B9 00 10 00 00 00 0F B7 FA 48 8B D9")
+		.GetPtr(v_C_WeaponX_SetIdealActivity);
+	if (!v_C_WeaponX_SetIdealActivity)
+		Warning(eDLL_T::CLIENT, "[AKIMBO-CL] SetIdealActivity pattern unresolved -- partner draw is not re-picked\n");
 
 	Module_FindPattern(g_GameDll,
 		"48 89 5C 24 10 48 89 6C 24 18 57 48 83 EC 20 8B 81 60 15 00 00 4C 8D 05 ?? ?? ?? ?? 48 8B D9 0F B6 EA 8B C8 83 F8 FF 75")

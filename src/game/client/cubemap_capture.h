@@ -15,5 +15,9 @@ void CubemapCapture_SetSamples(const char* pszLoadName, const void* pSamples, in
 // places the camera and returns true.
 bool CubemapCapture_OverrideView(float* pOrigin, float* pAngles, float* pFov);
 
+// The camera pose of the face being captured; false when no capture runs. The
+// final view build writes it last, so no third-person or scripted camera replaces it.
+bool CubemapCapture_CurrentView(float* pOrigin, float* pAngles);
+
 
 #endif // CLIENT_CUBEMAP_CAPTURE_H

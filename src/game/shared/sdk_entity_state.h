@@ -45,7 +45,7 @@ struct SDKEntityHandle
 	bool operator!=(const SDKEntityHandle& o) const { return m_Index != o.m_Index; }
 };
 
-// S3 memory EHANDLE is (serial<<16)|index. S21 RecvProxy_IntToEHandle does
+// dedi memory EHANDLE is (serial<<16)|index. S21 RecvProxy_IntToEHandle does
 // Init(value&0x3FFF, value>>14) with invalid 0xFFFFFF. Native SendPropEHandle
 // already packs; only our value-proxied ints need this.
 inline int32_t SDKEntityState_PackS21RecvEHandle(int32_t s3Handle)

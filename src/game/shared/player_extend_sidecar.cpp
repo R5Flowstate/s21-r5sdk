@@ -35,6 +35,7 @@ static void PlayerExtend_ApplyIdleSentinels(PlayerExtendBundle* pBundle)
 	pBundle->player.m_skywardObstacleAvoidanceEndPos[1] = FLT_MAX;
 	pBundle->player.m_skywardObstacleAvoidanceEndPos[2] = FLT_MAX;
 	pBundle->player.m_glideUpwardsBoostEndTime = -1.0f;
+	pBundle->player.m_timeShouldTryGivePlayerDoubleJump = FLT_MAX;
 	pBundle->player.m_hPortalEnvironment = -1;
 }
 

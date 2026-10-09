@@ -1,6 +1,6 @@
 //=============================================================================
 //
-// Purpose: S21 dual-wield partner is N+7, not S3's N+5.
+// Purpose: S21 dual-wield partner is N+7, not dedi's N+5.
 //
 //=============================================================================
 #include "core/stdafx.h"
@@ -11,7 +11,7 @@
 
 #include <Windows.h>
 
-// Post-deploy pairing: S3 `lea eax, [rcx+5]` -> +7. rdi = WeaponInventory.
+// Post-deploy pairing: dedi `lea eax, [rcx+5]` -> +7. rdi = WeaponInventory.
 static constexpr char DUALWIELD_PARTNER_PATTERN[] =
 	"80 F9 04 73 ?? 8D 41 05 83 F8 09 73 ?? 48 63 C1 8B 54 87 1C";
 
@@ -29,7 +29,7 @@ static uint8_t   g_dualWieldLeaImmSaved   = 0;
 static uint8_t   g_dualWieldLoadDspSaved  = 0;
 static bool      g_dualWieldPatched       = false;
 
-// Weapon_Give auto-activate: S3 `sub bpl, 5` / slot-5 immediates -> +7 / slot-7.
+// Weapon_Give auto-activate: dedi `sub bpl, 5` / slot-5 immediates -> +7 / slot-7.
 static constexpr char DUALWIELD_GIVE_ACTIVATE_PATTERN[] =
 	"40 80 ED 05 4C 8D 25 ?? ?? ?? ?? 40 80 FD 03 0F 87 ?? ?? ?? ?? 41 8D 45 FB 33 D2 83 F8 09 73 ?? 43 8B 4C AE F4";
 

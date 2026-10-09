@@ -78,6 +78,9 @@ static ConVar hud_setting_healthbar_style("hud_setting_healthbar_style", "0", FC
 	"Enemy health bar style: 0=Recon, 1=Flowstate, 2=Disabled.");
 static ConVar hud_setting_chat("hud_setting_chat", "0", FCVAR_RELEASE | FCVAR_ARCHIVE,
 	"Chat display: 0=Full, 1=opt-out server msgs, 2=disconnect.");
+static ConVar hud_setting_input_overlay("hud_setting_input_overlay", "0", FCVAR_RELEASE | FCVAR_ARCHIVE,
+	"Input overlay: 0=Off, 1=Auto, 2=Keyboard and mouse, 3=Xbox controller, 4=PlayStation controller.",
+	true, 0.f, true, 4.f);
 static ConVar lab_menu_last_tab("lab_menu_last_tab", "0", FCVAR_RELEASE | FCVAR_ARCHIVE,
 	"Inventory menu reopens on the Lab tab (set by the UI when the Lab was the tab last shown).",
 	true, 0.f, false, 0.f);
@@ -86,7 +89,7 @@ static ConVar AoCLanguageNeeded("AoCLanguageNeeded", "0", FCVAR_RELEASE, "Age of
 static ConVar NewAoCDownloadComplete("NewAoCDownloadComplete", "0", FCVAR_RELEASE, "New age of consent download complete.");
 
 // Server browser filters (serverbrowser.res SwitchButton ConVar bindings + UI script).
-// S3 R5VLibrary used these; without stubs GetConVarInt throws and kills UI init.
+// dedi R5VLibrary used these; without stubs GetConVarInt throws and kills UI init.
 static ConVar serverbrowser_mapFilter("serverbrowser_mapFilter", "0", FCVAR_RELEASE,
 	"Server browser map filter dialog-list index (0 = Any).");
 static ConVar serverbrowser_gameModeFilter("serverbrowser_gameModeFilter", "0", FCVAR_RELEASE,

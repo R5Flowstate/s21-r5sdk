@@ -12,7 +12,7 @@
 #endif
 
 // The S21 SQVM keeps its shared state at +0x50 and has no _scriptvm slot, so the
-// S3 v->GetScriptVM() walk lands on a null pointer and every accessor built on it
+// dedi v->GetScriptVM() walk lands on a null pointer and every accessor built on it
 // faults. Take the context from the S21 VM-type byte and the instance the Init
 // hook recorded for it.
 static CSquirrelVM* ModSystem_ResolveScriptVM(HSQUIRRELVM v, SQCONTEXT* const pContext)

@@ -30,6 +30,20 @@ CUtlVector<CUtlString> g_vecOverlayMaps;    // r5f_map_names.txt stems, file ord
 static KeyValues* s_pClientPlaylistFile = nullptr;
 #endif // CLIENT_DLL
 
+// Both engines copy playlist and gamemode names into 32-byte buffers; a longer
+// name is truncated and +launchplaylist falls back to the default playlist.
+static constexpr size_t PLAYLIST_NAME_MAX = 31;
+
+static bool Playlists_IsModEntryNameTooLong(const char* const pszMod, const char* const pszSection, const char* const pszName)
+{
+	if (strlen(pszName) <= PLAYLIST_NAME_MAX)
+		return false;
+
+	Warning(eDLL_T::ENGINE, "Mod '%s': %s entry '%s' is longer than %zu characters - skipping\n",
+		pszMod, pszSection, pszName, PLAYLIST_NAME_MAX);
+	return true;
+}
+
 KeyValues* Playlists_GetRootKV(void)
 {
 	if (g_pPlaylistKeyValues && *g_pPlaylistKeyValues)
@@ -463,6 +477,13 @@ void MergeModPlaylistsIntoFile()
 				{
 					KeyValues* pNext = pPlaylist->GetNextTrueSubKey();
 					const char* playlistName = pPlaylist->GetName();
+					if (Playlists_IsModEntryNameTooLong(pMod->id.String(), "Playlists", playlistName))
+					{
+						pModPlaylists->RemoveSubKey(pPlaylist);
+						pPlaylist->DeleteThis();
+						pPlaylist = pNext;
+						continue;
+					}
 					// Check both direct for_mod and vars/for_mod
 					const char* forMod = pPlaylist->GetString("for_mod", "");
 					if (!forMod || !forMod[0])
@@ -555,6 +576,13 @@ void MergeModPlaylistsIntoFile()
 				{
 					KeyValues* pNext = pGamemode->GetNextTrueSubKey();
 					const char* gamemodeName = pGamemode->GetName();
+					if (Playlists_IsModEntryNameTooLong(pMod->id.String(), "Gamemodes", gamemodeName))
+					{
+						pModGamemodes->RemoveSubKey(pGamemode);
+						pGamemode->DeleteThis();
+						pGamemode = pNext;
+						continue;
+					}
 					// Check both direct for_mod and vars/for_mod
 					const char* forMod = pGamemode->GetString("for_mod", "");
 					if (!forMod || !forMod[0])
@@ -1081,7 +1109,7 @@ static bool Playlists_SpliceModPatches(const char* pBase, const size_t nBase, st
 			for (const PlaylistTextNode_t& entry : pModSection->children)
 			{
 				const char* const pszName = entry.name.c_str();
-				if (!entry.bBlock)
+				if (!entry.bBlock || Playlists_IsModEntryNameTooLong(pszMod, pszSection, pszName))
 					continue;
 
 				const char* const pszForMod = PlaylistText_GetForMod(entry);
@@ -1367,6 +1395,15 @@ bool Playlists_ValidateSetting(const char* pszDecl, const char* pszValue, char* 
 		if (!V_strcmp(pszValue, "0") || !V_strcmp(pszValue, "1"))
 			return true;
 		V_snprintf(pszReason, nReasonSize, "expected 0 or 1");
+		return false;
+	}
+
+	// The server script resolves the class against the loot table.
+	if (!V_stricmp(pszType, "weapon"))
+	{
+		if (!V_strcmp(pszValue, "none") || !V_strncmp(pszValue, "mp_weapon_", sizeof("mp_weapon_") - 1))
+			return true;
+		V_snprintf(pszReason, nReasonSize, "expected none or an mp_weapon_ class");
 		return false;
 	}
 

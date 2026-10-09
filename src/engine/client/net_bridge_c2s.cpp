@@ -110,7 +110,7 @@ static void S21Bridge_WriteC2SSignonState(bf_write& send, int sigState, int sigS
 
 static void S21Bridge_WriteC2SSignonState(bf_write& send, int sigState, int sigSpawn)
 {
-	send.WriteUBitLong(5, NETMSG_TYPE_BITS); // net_SignonState (S3 type 5)
+	send.WriteUBitLong(5, NETMSG_TYPE_BITS); // net_SignonState (dedi type 5)
 	send.WriteByte(sigState);
 	send.WriteLong(sigSpawn);
 	send.WriteString("");  // map name (server already knows)
@@ -122,7 +122,7 @@ static void S21Bridge_WriteC2SSignonState(bf_write& send, int sigState, int sigS
 
 void S21Bridge_QueueSignon(int state, int spawn)
 {
-	// S3 reconnects on any echo above CONNECTED whose spawn count differs from its own.
+	// dedi reconnects on any echo above CONNECTED whose spawn count differs from its own.
 	// Unknown spawn above CONNECTED is dropped; CONNECTED is exempt.
 	if (state > 2 && spawn < 0)
 	{
@@ -225,7 +225,7 @@ static ConVar bridge_c2s_stringcmd_resend_ms("bridge_c2s_stringcmd_resend_ms", "
 static ConVar bridge_c2s_setconvar("bridge_c2s_setconvar", "1", FCVAR_RELEASE,
 	"Relay runtime NET_SetConVar S21 t=5 -> S3 t=4. 1=ON (userinfo keys must exist in the connect-time blob). 0=connect-time snapshot only.");
 static constexpr int kUserInfoMirrorMax = 96;
-static constexpr int kUserInfoMirrorValueMax = 260; // S3 NET_SetConVar value buffer
+static constexpr int kUserInfoMirrorValueMax = 260; // dedi NET_SetConVar value buffer
 struct UserInfoMirror_s
 {
 	const char* pszName;
@@ -312,23 +312,23 @@ void S21Bridge_C2SUnrelSlices_Reset(void)
 	s_moveRecovered = 0;
 }
 
-// Returns the S3 type to relay this S21 C2S message as, or -1 to skip (gated off or
+// Returns the dedi type to relay this S21 C2S message as, or -1 to skip (gated off or
 // not a relayable type). clc_Move(57)/clc_ClientTick(65) deliberately return -1 here
 static inline int S21Bridge_C2S_MsgRelayS3Type(int s21Type) {
 	switch (s21Type) {
 	case 3:  return bridge_c2s_stringcmd.GetBool() ? 3  : -1; // net_StringCmd (client commands: noclip, etc.)
 	case 4:  return bridge_c2s_scriptremote.GetBool() ? 68 : -1;
 	case 5:  return bridge_c2s_setconvar.GetBool() ? 4  : -1; // net_SetConVar (runtime convar/userinfo update)
-	case 63: return bridge_c2s_misc.GetBool()      ? 57 : -1; // clc_ClaimClientSidePickup (loot) -- S21 63 -VERIFIED (GetType; RFB reads 10-bit field). -5 shift from 68. -> S3 57.
-	case 66: return bridge_c2s_chat.GetBool()      ? 61 : -1; // clc_ClientSayText (text chat) -- S21 66 -VERIFIED (NOT 71); verbatim -> S3 61
+	case 63: return bridge_c2s_misc.GetBool()      ? 57 : -1; // clc_ClaimClientSidePickup (loot) -- S21 63 -VERIFIED (GetType; RFB reads 10-bit field). -5 shift from 68. -> dedi 57.
+	case 66: return bridge_c2s_chat.GetBool()      ? 61 : -1; // clc_ClientSayText (text chat) -- S21 66 -VERIFIED (NOT 71); verbatim -> dedi 61
 	case 71: return -1;                                       // DISPROVEN: S21 71 is a BINARY msg, NOT chat. Never relay (would corrupt the dedi packet).
-	case 74: return bridge_c2s_misc.GetBool()      ? 65 : -1; // clc_GamepadMsg -- S21 74 -VERIFIED (GetType; RFB reads 8-bit field). No shift (74 == S21 74). -> S3 65.
+	case 74: return bridge_c2s_misc.GetBool()      ? 65 : -1; // clc_GamepadMsg -- S21 74 -VERIFIED (GetType; RFB reads 8-bit field). No shift (74 == S21 74). -> dedi 65.
 	default: return -1;
 	}
 }
 
 //=============================================================================
-// Per-cmd clc_Move S21->S3: append two zero bits S3 still reads or ProcessMove kicks.
+// Per-cmd clc_Move S21->dedi: append two zero bits dedi still reads or ProcessMove kicks.
 //=============================================================================
 
 // Helper: copy nBits from input bf_read to output bf_write, returns false on
@@ -351,7 +351,7 @@ static inline int S21BR_CmdCopyOneBit(bf_read& r, bf_write& w, bool* ok)
 }
 
 // =============================================================================
-// Parse-emit transcoder: S21 NormalizedFloat vs S3 1+0/32 BitFloat. Bit-copy shears.
+// Parse-emit transcoder: S21 NormalizedFloat vs dedi 1+0/32 BitFloat. Bit-copy shears.
 // =============================================================================
 
 
@@ -540,7 +540,7 @@ static void S21Bridge_LogObjectPlacementCmd(const uint32_t commandNumber, const 
 }
 
 // The dedi's converted collision can disagree with this client's, so the
-// hologram's entrance/exit rides each S3 cmd, flagged by the cmd's +0x18C bit.
+// hologram's entrance/exit rides each dedi cmd, flagged by the cmd's +0x18C bit.
 // Captured on first transcode so backup cmds resend the same pose.
 static ConVar sv_bridge_opl_pose_wire("sv_bridge_opl_pose_wire", "0", FCVAR_RELEASE | FCVAR_REPLICATED,
 	"Set by the server: it reads the object-placement pose trailer on usercmds.");
@@ -620,7 +620,7 @@ static bool S21Bridge_ParseS21Cmd(bf_read& r, S21BridgeCmd::State& cur,
 	cur.viewSpringCorr[1]      = ParseDeltaFloat(r, prev.viewSpringCorr[1]);
 	S21BR_DIAG("after_viewSpring(#6)");
 	// S21 cmd+0x20 viewSpringCorrRoll (writer field after spring yaw; has none).
-	// Emit maps onto S3 pitchangles.z -- see State comment.
+	// Emit maps onto dedi pitchangles.z -- see State comment.
 	cur.viewSpringCorrRoll     = ParseDeltaFloat(r, prev.viewSpringCorrRoll);
 	if (cur.viewSpringCorrRoll != prev.viewSpringCorrRoll)
 	{
@@ -651,7 +651,7 @@ static bool S21Bridge_ParseS21Cmd(bf_read& r, S21BridgeCmd::State& cur,
 	cur.weaponToggleAkimbo     = (uint8_t)r.ReadOneBit();
 	cur.weaponCustomActivity   = ParseDeltaS(r, 11, prev.weaponCustomActivity);
 	// [C2S-ACT-NS] weaponCustomActivity is an ACTIVITY ENUM INDEX passed
-	// verbatim to the S3 dedi. The S21 and S3 activity namespaces are 18
+	// verbatim to the dedi. The S21 and dedi activity namespaces are 18
 	if (cur.weaponCustomActivity != prev.weaponCustomActivity)
 	{
 		static long s_actNsLog = 0;
@@ -780,8 +780,8 @@ static bool S21Bridge_ParseS21Cmd(bf_read& r, S21BridgeCmd::State& cur,
 	return !r.IsOverflowed();
 }
 
-// C2S transcoder: emit the REAL tick as S3 CUserCmd::tick_count instead of the
-// prev+1 default. S3 v_ReadUserCmd decodes tick_count (+0x04) with a prev+1
+// C2S transcoder: emit the REAL tick as dedi CUserCmd::tick_count instead of the
+// prev+1 default. dedi v_ReadUserCmd decodes tick_count (+0x04) with a prev+1
 static ConVar bridge_c2s_fire_focus("bridge_c2s_fire_focus", "1", FCVAR_RELEASE,
 	"[C2S-FIRE-FOCUS] Correct S3 usercmd tail-block mapping: camera override "
 	"-> C/D/E (+0x18A/+0x190/+0x19C), thirdPersonAttackFocus -> F (+0x1A8; "
@@ -807,13 +807,13 @@ static ConVar bridge_c2s_cmdtime_max("bridge_c2s_cmdtime_max", "86400", FCVAR_RE
 	"[SEC] Absolute max for synthesized CUserCmd::command_time (seconds). Non-finite or "
 	"above this clamps to 0 (fail safe). Default 86400.");
 
-// [C2S-CMDTIME] S3 CUserCmd::command_time (+0x08) is not an S21 wire field. Prior
+// [C2S-CMDTIME] dedi CUserCmd::command_time (+0x08) is not an S21 wire field. Prior
 // emit always wrote gate=0 so the dedi saw 0 forever (or only the post-read
 static ConVar bridge_c2s_cmdtime_emit("bridge_c2s_cmdtime_emit", "1", FCVAR_RELEASE,
 	"[C2S-CMDTIME] Emit S3 command_time from baseSnapshotTickCount + snapshot_interp_acc "
 	"( UserCmd_ComputeCommandTime). 1 = on (default). 0 = legacy gate-0 (dedi tick synth).");
 
-// C2S ping field remap. S3's CUserCmd ping struct is [commandType+0, pingType+4,
+// C2S ping field remap. dedi's CUserCmd ping struct is [commandType+0, pingType+4,
 // entityHandle+8, userTicketId+12, pingOrigin+16] and the reader takes 4 raw longs
 static ConVar bridge_ping_remap("bridge_ping_remap", "1", FCVAR_RELEASE,
 	"C2S transcoder: remap S21 ping fields into the correct S3 ping slots (pingType <- "
@@ -828,8 +828,8 @@ static ConVar bridge_c2s_energize_flag("bridge_c2s_energize_flag", "1", FCVAR_RE
 	"1 = on (default). 0 = legacy passthrough.");
 
 
-// Emit one cmd in S3's wire format from typed `cur` + delta source `prev`.
-// Walker order mirrors S3 v_ReadUserCmd field-by-field.
+// Emit one cmd in dedi's wire format from typed `cur` + delta source `prev`.
+// Walker order mirrors dedi v_ReadUserCmd field-by-field.
 static bool S21Bridge_EmitS3Cmd(bf_write& w, const S21BridgeCmd::State& cur,
                                 const S21BridgeCmd::State& prev)
 {
@@ -837,7 +837,7 @@ static bool S21Bridge_EmitS3Cmd(bf_write& w, const S21BridgeCmd::State& cur,
 
 	// 1. command_number (+0x00) -- 1+0/32 (default=prev+1)
 	EmitDeltaU32_Inc(w, cur.commandNumber, prev.commandNumber);
-	// 2. tick_count (+0x04) -- S3 reads this with a prev+1 DEFAULT (not "no-change").
+	// 2. tick_count (+0x04) -- dedi reads this with a prev+1 DEFAULT (not "no-change").
 	// Emit the real tick (baseSnapshotTickCount) as a 32-bit literal so lag-comp works.
 	// [SEC] Clamp jump vs prev so a corrupt wire tick cannot expand the unlag window.
 	if (bridge_c2s_tickcount_real.GetBool())
@@ -870,7 +870,7 @@ static bool S21Bridge_EmitS3Cmd(bf_write& w, const S21BridgeCmd::State& cur,
 	}
 	else
 		w.WriteOneBit(0);
-	// 3. command_time (+0x08) -- S3 only; computed in TransformOneUsercmd
+	// 3. command_time (+0x08) -- dedi only; computed in TransformOneUsercmd
 	// (UserCmd_ComputeCommandTime). Gate-0 when disabled / still zero.
 	// [SEC] Drop non-finite / absurd command_time (fail safe -> gate 0).
 	if (bridge_c2s_cmdtime_emit.GetBool() && cur.commandTime > 0.0f)
@@ -896,7 +896,7 @@ static bool S21Bridge_EmitS3Cmd(bf_write& w, const S21BridgeCmd::State& cur,
 	EmitDeltaFloat(w,
 		S21Bridge_SecClampFinite(cur.commandViewAngles[2], kC2sEmitMax),
 		S21Bridge_SecClampFinite(prev.commandViewAngles[2], kC2sEmitMax));
-	// 7-9. pitchangles xyz (+0x18/+0x1C/+0x20) -- S3 dump target for spring.
+	// 7-9. pitchangles xyz (+0x18/+0x1C/+0x20) -- dedi dump target for spring.
 	// S21: spring pitch/yaw + optional roll residual at cmd+0x20.
 	EmitDeltaFloat(w, cur.viewSpringCorr[0], prev.viewSpringCorr[0]);
 	EmitDeltaFloat(w, cur.viewSpringCorr[1], prev.viewSpringCorr[1]);
@@ -937,7 +937,7 @@ static bool S21Bridge_EmitS3Cmd(bf_write& w, const S21BridgeCmd::State& cur,
 		w.WriteOneBit(0);
 	}
 	// 16. weaponindex (+0x36) -- 1+0/3s. S21 weaponSelectType is also 3 bits
-	// signed (range -4..3); width matches S3's 3-bit slot. Map weaponSelectType here.
+	// signed (range -4..3); width matches dedi's 3-bit slot. Map weaponSelectType here.
 	if (emitSelect)
 	{
 		w.WriteOneBit(1);
@@ -1002,10 +1002,10 @@ static bool S21Bridge_EmitS3Cmd(bf_write& w, const S21BridgeCmd::State& cur,
 	for (int j = 0; j < 4; ++j) {
 		w.WriteOneBit(cur.pings[j].present ? 1 : 0);
 		if (cur.pings[j].present) {
-			// S3 reader takes 4 raw longs into [commandType+0, pingType+4,
+			// dedi reader takes 4 raw longs into [commandType+0, pingType+4,
 			// entityHandle+8, userTicketId+12] + BitVec3Coord(pingOrigin+16). S21
 			if (bridge_ping_remap.GetBool()) {
-				// commandType (+0) is the DISPATCH SELECTOR: S3 indexes the 4-entry
+				// commandType (+0) is the DISPATCH SELECTOR: dedi indexes the 4-entry
 				// CodeCallback_PingCommand* table @ (EnemySpotted/QueueTrace/
 				uint32_t typeBits = cur.pings[j].typeBits;
 				if (typeBits > 4)
@@ -1069,7 +1069,7 @@ static bool S21Bridge_EmitS3Cmd(bf_write& w, const S21BridgeCmd::State& cur,
 		}
 		// H (+0x18B) -- 1-bit always = skydiveUnfollow
 		w.WriteOneBit(cur.skydiveUnfollow ? 1 : 0);
-		// I (+0x18C) -- 1-bit always, S3-only bool with no S21 source. Set only
+		// I (+0x18C) -- 1-bit always, dedi-only bool with no S21 source. Set only
 		// to flag the object-placement pose trailer that follows this cmd.
 		w.WriteOneBit(s_bOplTrailerFollows ? 1 : 0);
 	}
@@ -1100,7 +1100,7 @@ static bool S21Bridge_EmitS3Cmd(bf_write& w, const S21BridgeCmd::State& cur,
 	}
 	// J (+0x1C8) -- ternary (baseSnapshotTickCount)
 	EmitTernaryU32(w, cur.baseSnapshotTickCount, prev.baseSnapshotTickCount);
-	// K (+0x1CC) -- ternary, S3 only: SYNTHESIZE no-change
+	// K (+0x1CC) -- ternary, dedi only: SYNTHESIZE no-change
 	w.WriteOneBit(0);
 	// L (+0x1D0) -- predictedServerEventAck (1+0/32)
 	EmitDeltaU(w, cur.predictedServerEventAck, 32, prev.predictedServerEventAck);
@@ -1123,7 +1123,7 @@ static ConVar bridge_c2s_ft_restamp("bridge_c2s_ft_restamp", "1", FCVAR_RELEASE,
 	"marked-map slow-mo: the dedi min-clamps zero-frametime cmds to 2.857ms "
 	"= ~39%% sim speed). 1 = on (default), 0 = legacy pass-through.");
 
-// Parse one S21 cmd from r into a typed cmd, then emit it in S3 wire format to w.
+// Parse one S21 cmd from r into a typed cmd, then emit it in dedi wire format to w.
 static bool S21Bridge_TransformOneUsercmd(bf_read& r, bf_write& w)
 {
 	S21BridgeCmd::State cur;
@@ -1295,7 +1295,7 @@ static bool S21Bridge_WriteFilteredSetConVar(bf_write& dst, bf_read& r, const in
 		return false;
 
 	// The client batches every changed userinfo convar in one message. An entry
-	// the S3 cvar_t cannot hold (260-byte name/value) is skipped on its own so
+	// the dedi cvar_t cannot hold (260-byte name/value) is skipped on its own so
 	// the rest of the batch still lands.
 	static char s_szName[4096];
 	static char s_szValue[4096];
@@ -1428,7 +1428,7 @@ static void S21Bridge_RelayUnrelMsg(const uint8_t* uData, int uBytes,
 			bf_write w("clc_Move_xform", scratch, sizeof(scratch));
 
 			// Reset prev-cmd state at the start of each clc_Move batch. Both the S21
-			// writer and the S3 ReadUserCmd loop use a CUserCmd::Reset() null cmd
+			// writer and the dedi ReadUserCmd loop use a CUserCmd::Reset() null cmd
 			// as the baseline for the first cmd (backup or new).
 			S21BridgeCmd::ResetToNullCmd(s_bridgeC2sPrevCmd);
 			s_bridgeC2sPrevS3ImpulseWire = 0; // [S21-EXTRA-FLAGS] same per-batch null baseline
@@ -1603,7 +1603,7 @@ unlock_out:
 }
 
 //-----------------------------------------------------------------------------
-// Build a complete S3-format C2S netchannel packet.
+// Build a complete dedi-format C2S netchannel packet.
 //-----------------------------------------------------------------------------
 int S21Bridge_BuildS3Packet(uint8_t* outBuf, int outBufSize,
 	uint32_t seq, uint32_t ack)
@@ -1708,7 +1708,7 @@ int S21Bridge_BuildS3Packet(uint8_t* outBuf, int outBufSize,
 	}
 	else
 	{
-	// Drain pending net_SignonState as UNRELIABLE; S3 sends no netchan during signon.
+	// Drain pending net_SignonState as UNRELIABLE; dedi sends no netchan during signon.
 	{
 		int drained = 0;
 		while (drained < 8 && S21Bridge_HasPendingSignon())
@@ -1778,8 +1778,8 @@ int S21Bridge_BuildS3Packet(uint8_t* outBuf, int outBufSize,
 		}
 	}
 
-	// === USERINFO (NET_SetConVar, S3 type 4) ===
-	// After CONNECTED(2), the S3 server expects client ConVars (UserInfo).
+	// === USERINFO (NET_SetConVar, dedi type 4) ===
+	// After CONNECTED(2), the dedi expects client ConVars (UserInfo).
 	if (s_pendingUserInfo)
 	{
 		const ULONGLONG userInfoNow = GetTickCount64();
@@ -1795,7 +1795,7 @@ int S21Bridge_BuildS3Packet(uint8_t* outBuf, int outBufSize,
 		{
 			s_userInfoNextMs = userInfoNow + kBridgeUserInfoIntervalMs;
 
-		// Essential ConVars from a real S3 client connection
+		// Essential ConVars from a real dedi client connection
 		static const char* s_userInfoKV[][2] = {
 			{"cl_updaterate_mp", "20"},
 			{"cl_predict", "1"},
@@ -1845,13 +1845,13 @@ int S21Bridge_BuildS3Packet(uint8_t* outBuf, int outBufSize,
 			{"player_setting_holdtosprint", "0"},
 			{"toggle_on_jump_to_deactivate", "1"},
 			// Mantle-boost activation input (0=Off,1=Jump,2=Crouch,3=Movement/custom).
-			// FCVAR_USERINFO on the client ConVar; pre-registered here so the S3 dedi's
+			// FCVAR_USERINFO on the client ConVar; pre-registered here so the dedi's
 			{"mantle_boost_input_setting", "2"},
 			{"sdk_mods", "-"},
 		};
 		const int numVars = sizeof(s_userInfoKV) / sizeof(s_userInfoKV[0]);
 
-		send.WriteUBitLong(4, NETMSG_TYPE_BITS); // NET_SetConVar (S3 type 4)
+		send.WriteUBitLong(4, NETMSG_TYPE_BITS); // NET_SetConVar (dedi type 4)
 		send.WriteByte(numVars);
 		for (int i = 0; i < numVars; ++i)
 		{
@@ -2263,7 +2263,7 @@ static void S21Bridge_PumpStringCmdResends(void)
 //-----------------------------------------------------------------------------
 // Userinfo the dedi holds, as last sent. The engine's own change message can be
 // lost (a script sets the value before the relay is armed, or while it is
-// signing on), and the S3 server then keeps the connect-time value forever.
+// signing on), and the dedi then keeps the connect-time value forever.
 // In game, any live value that drifted from this copy is sent again.
 //-----------------------------------------------------------------------------
 static void S21Bridge_UserInfoMirrorNote(const char* pszName, const char* pszValue)
@@ -2319,7 +2319,7 @@ static void S21Bridge_PumpUserInfoMirror(void)
 		return;
 	}
 
-	s_c2sPend.WriteUBitLong(4, NETMSG_TYPE_BITS); // NET_SetConVar (S3 type 4)
+	s_c2sPend.WriteUBitLong(4, NETMSG_TYPE_BITS); // NET_SetConVar (dedi type 4)
 	s_c2sPend.WriteByte(nChanged);
 	for (int k = 0; k < nChanged; ++k)
 	{
@@ -2360,7 +2360,7 @@ static void S21Bridge_PumpSetConVarResends(void)
 }
 
 //-----------------------------------------------------------------------------
-// CNetChan::SendDatagram: when the bridge is active, build S3 netchannel headers.
+// CNetChan::SendDatagram: when the bridge is active, build dedi netchannel headers.
 //-----------------------------------------------------------------------------
 int S21Bridge_Hook_SendDatagram(CNetChan* pChan, bf_write* pMsg)
 {
@@ -2513,7 +2513,7 @@ int S21Bridge_Hook_SendDatagram(CNetChan* pChan, bf_write* pMsg)
 							s_unrelTickB1 - tickBit, kS21_clc_ClientTick, kS3_clc_ClientTick, S21Bridge_C2S_AnyOn() ? 1 : 0);
 
 					// Parse clc_ClientTick body: [7 type][i32 m_nTick][i32 m_nRawTick].
-					// S21 i32 encoding = WriteUBitLong(31)+WriteBit(sign); S3
+					// S21 i32 encoding = WriteUBitLong(31)+WriteBit(sign); dedi
 					int32_t parsedTick = -2;
 					int32_t parsedRawAck = -2;
 					{

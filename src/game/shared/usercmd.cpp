@@ -61,7 +61,7 @@ void ClampUserCmd(CUserCmd* ucmd)
 		&& ucmd->cycleslot != WEAPON_INVENTORY_SLOT_ANY)
 	{
 		// Dual-wield cycle slots stay blocked unless explicitly enabled.
-		// Bound is the S21 gadget slot (5=ordnance, 6=survival), not S3 anti-titan. Dual wield starts at 7.
+		// Bound is the S21 gadget slot (5=ordnance, 6=survival), not dedi anti-titan. Dual wield starts at 7.
 		if (!dualWieldEnabled && ucmd->cycleslot > WEAPON_INVENTORY_SLOT_S21_GADGET)
 			ucmd->cycleslot = WEAPON_INVENTORY_SLOT_S21_GADGET;
 
@@ -207,7 +207,7 @@ void ClampUserCmd(CUserCmd* ucmd)
 		&& ucmd->cycleslot != WEAPON_INVENTORY_SLOT_ANY)
 	{
 		// Dual-wield cycle slots stay blocked unless explicitly enabled.
-		// Bound is the S21 gadget slot (5=ordnance, 6=survival), not S3 anti-titan. Dual wield starts at 7.
+		// Bound is the S21 gadget slot (5=ordnance, 6=survival), not dedi anti-titan. Dual wield starts at 7.
 		if (!dualWieldEnabled && ucmd->cycleslot > WEAPON_INVENTORY_SLOT_S21_GADGET)
 			ucmd->cycleslot = WEAPON_INVENTORY_SLOT_S21_GADGET;
 

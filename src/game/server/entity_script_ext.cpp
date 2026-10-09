@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: S21 server entity/player script natives the S3 dedicated server
+// Purpose: S21 server entity/player script natives the dedicated server
 // lacks. See entity_script_ext.h.
 //
 //=============================================================================//
@@ -23,13 +23,26 @@
 #include <cmath>
 #include <cstring>
 #include <initializer_list>
+#include <utility>
 
 extern CGlobalVars* gpGlobals;
 
-// S21 SPF value; the S3 enum leaves bit 4 free and stores the flags unmasked.
+// S21 SPF value; the dedi enum leaves bit 4 free and stores the flags unmasked.
 static constexpr int SPF_OBJECT_PLACEMENT_SPECIAL_IGNORE = 4;
 
 static constexpr ptrdiff_t ESE_PLAYER_OFF_LOCALGRAVITY = 0x5B8; // half-gravity scale; 0 reads as 1
+static constexpr ptrdiff_t ESE_PLAYER_OFF_SETTINGS     = 0x5DF0; // player settings asset handle
+static constexpr ptrdiff_t ESE_PLAYER_OFF_CLASSMODS    = 0x5EF8; // m_classModsActive
+static constexpr uint64_t  ESE_CLASSMOD_COUNT          = 64;     // m_classModsActive bits
+
+// Server inventory. Active weapons are handles and follow a swap; these per-hand
+// bytes hold backpack slot numbers and must be remapped with it.
+static constexpr ptrdiff_t ESE_PLAYER_OFF_WEAPONS          = 0x1690; // m_inventory.weapons[9], EHANDLE
+static constexpr ptrdiff_t ESE_PLAYER_OFF_SELECTED_WEAPONS = 0x16D8; // m_selectedWeapons[2]
+static constexpr ptrdiff_t ESE_PLAYER_OFF_LATEST_NONOFFHAND = 0x16EC; // m_latestNonOffhandWeapons[2]
+static constexpr ptrdiff_t ESE_PLAYER_OFF_LAST_CYCLE_SLOT  = 0x16F4; // m_lastCycleSlot
+static constexpr ptrdiff_t ESE_PLAYER_OFF_INV_CHANGED_CALL = 0x1719; // m_wantInventoryChangedScriptCall
+static constexpr int ESE_PRIMARY_SLOT_COUNT = 5; // WEAPON_INVENTORY_SLOT_PRIMARY_0..4; 5+ are not main weapons
 
 static constexpr int   ESE_DISSOLVE_DEFAULT_MAGNITUDE = 500;
 static constexpr float ESE_DEG_TO_RAD = 0.017453292f;
@@ -44,6 +57,8 @@ static void (*v_CBaseEntity__Dissolve)(void* pEntity, float flStartTime, int nTy
 	const Vector3D* pOrigin, int nMagnitude, bool bKill) = nullptr;
 static void (*v_CBaseEntity__CalcAbsoluteVelocity)(void* pEntity) = nullptr;
 static void (*v_Script_RegisterAnimatingClassFuncs)() = nullptr;
+static bool (*v_PlayerSettings_FindModIndex)(uint64_t hSettings, const char* pszMod, uint64_t* pIndex) = nullptr;
+static void (*v_CPlayer__SetSettingsWithMods)(void* pPlayer, uint64_t hSettings, uint64_t nMods) = nullptr;
 static ScriptClassDescriptor_t* s_pAnimatingDesc = nullptr;
 
 class CEntityScriptExtAccess : public CBaseEntity
@@ -236,6 +251,117 @@ static SQRESULT Script_GetLocalGravityStrength(HSQUIRRELVM v)
 }
 
 //-----------------------------------------------------------------------------
+// Swaps two main-weapon backpack slots in place. The weapons keep their state
+// and the one in hand stays raised.
+//-----------------------------------------------------------------------------
+static void ESE_RemapSlotByte(int8_t* const pSlot, const int8_t a, const int8_t b)
+{
+	if (*pSlot == a)
+		*pSlot = b;
+	else if (*pSlot == b)
+		*pSlot = a;
+}
+
+static SQRESULT Script_SwapPrimaryWeaponsInSlots(HSQUIRRELVM v)
+{
+	void* const pPlayer = ESE_ScriptThis(v);
+	if (!pPlayer)
+		return SQ_ERROR;
+
+	SQInteger nSlotA = -1;
+	SQInteger nSlotB = -1;
+	sq_getinteger(v, 2, &nSlotA);
+	sq_getinteger(v, 3, &nSlotB);
+	if (nSlotA < 0 || nSlotA >= ESE_PRIMARY_SLOT_COUNT || nSlotB < 0 || nSlotB >= ESE_PRIMARY_SLOT_COUNT)
+	{
+		Warning(eDLL_T::SERVER, "[WEAP-SWAP] SwapPrimaryWeaponsInSlots rejected slots %lld, %lld\n",
+			static_cast<long long>(nSlotA), static_cast<long long>(nSlotB));
+		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+	}
+	if (nSlotA == nSlotB)
+		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+
+	uint8_t* const p = static_cast<uint8_t*>(pPlayer);
+	uint32_t* const pWeapons = reinterpret_cast<uint32_t*>(p + ESE_PLAYER_OFF_WEAPONS);
+	std::swap(pWeapons[nSlotA], pWeapons[nSlotB]);
+
+	const int8_t a = static_cast<int8_t>(nSlotA);
+	const int8_t b = static_cast<int8_t>(nSlotB);
+	for (int hand = 0; hand < 2; ++hand)
+	{
+		ESE_RemapSlotByte(reinterpret_cast<int8_t*>(p + ESE_PLAYER_OFF_SELECTED_WEAPONS + hand), a, b);
+		ESE_RemapSlotByte(reinterpret_cast<int8_t*>(p + ESE_PLAYER_OFF_LATEST_NONOFFHAND + hand), a, b);
+	}
+	ESE_RemapSlotByte(reinterpret_cast<int8_t*>(p + ESE_PLAYER_OFF_LAST_CYCLE_SLOT), a, b);
+	*(p + ESE_PLAYER_OFF_INV_CHANGED_CALL) = 1;
+	MarkEntityEdictDirty(pPlayer);
+
+	static bool s_bLogged = false;
+	if (!s_bLogged)
+	{
+		s_bLogged = true;
+		Msg(eDLL_T::SERVER, "[WEAP-SWAP] first swap player=%p slots %d <-> %d\n", pPlayer, a, b);
+	}
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+//-----------------------------------------------------------------------------
+// AddPlayerClassMod / RemovePlayerClassMod: one class mod on the current
+// settings. The client predicts the same call, so both sides change
+// m_classModsActive on the same command. An unknown mod is refused with a
+// warning rather than a script error.
+//-----------------------------------------------------------------------------
+static SQRESULT ESE_ChangeClassMod(HSQUIRRELVM v, const bool bAdd)
+{
+	void* const pPlayer = ESE_ScriptThis(v);
+	if (!pPlayer)
+		return SQ_ERROR;
+
+	const SQChar* pszMod = nullptr;
+	if (SQ_FAILED(sq_getstring(v, 2, &pszMod)) || !pszMod || !pszMod[0])
+		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+
+	if (!v_PlayerSettings_FindModIndex || !v_CPlayer__SetSettingsWithMods)
+	{
+		static bool s_bWarned = false;
+		if (!s_bWarned)
+		{
+			s_bWarned = true;
+			Warning(eDLL_T::SERVER, "[CLASS-MOD] %s called but the settings natives are unresolved -- mod '%s' ignored\n",
+				bAdd ? "AddPlayerClassMod" : "RemovePlayerClassMod", pszMod);
+		}
+		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+	}
+
+	uint8_t* const p = static_cast<uint8_t*>(pPlayer);
+	const uint64_t hSettings = *reinterpret_cast<const uint64_t*>(p + ESE_PLAYER_OFF_SETTINGS);
+	uint64_t nIndex = ESE_CLASSMOD_COUNT;
+	if (!hSettings || !v_PlayerSettings_FindModIndex(hSettings, pszMod, &nIndex) || nIndex >= ESE_CLASSMOD_COUNT)
+	{
+		Warning(eDLL_T::SERVER, "[CLASS-MOD] undefined mod '%s' for player %p\n", pszMod, pPlayer);
+		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+	}
+
+	const uint64_t nMods = *reinterpret_cast<const uint64_t*>(p + ESE_PLAYER_OFF_CLASSMODS);
+	const uint64_t nBit = 1ull << nIndex;
+	const uint64_t nNew = bAdd ? (nMods | nBit) : (nMods & ~nBit);
+	if (nNew != nMods)
+		v_CPlayer__SetSettingsWithMods(pPlayer, hSettings, nNew);
+
+	SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+}
+
+static SQRESULT Script_AddPlayerClassMod(HSQUIRRELVM v)
+{
+	return ESE_ChangeClassMod(v, true);
+}
+
+static SQRESULT Script_RemovePlayerClassMod(HSQUIRRELVM v)
+{
+	return ESE_ChangeClassMod(v, false);
+}
+
+//-----------------------------------------------------------------------------
 // Bleedout bookkeeping. These run engine-side match bookkeeping on the S21
 // server that has no counterpart here; the calls are accepted and validated.
 //-----------------------------------------------------------------------------
@@ -365,6 +491,15 @@ void EntityScriptExt_RegisterPlayerFunctions(ScriptClassDescriptor_t* playerStru
 		false, Script_OverrideTargetingCapacity);
 	playerStruct->AddFunction("ClearTargetingCapacityOverride", "Script_ClearTargetingCapacityOverride",
 		"Clears OverrideTargetingCapacity", "void", "", false, Script_ClearTargetingCapacityOverride);
+	playerStruct->AddFunction("SwapPrimaryWeaponsInSlots", "Script_SwapPrimaryWeaponsInSlots",
+		"Swaps the main weapons in two backpack slots; the weapon in hand stays raised", "void",
+		"int slotA, int slotB", false, Script_SwapPrimaryWeaponsInSlots);
+	playerStruct->AddFunction("AddPlayerClassMod", "Script_AddPlayerClassMod",
+		"Adds one class mod to the player's current settings", "void", "string mod",
+		false, Script_AddPlayerClassMod);
+	playerStruct->AddFunction("RemovePlayerClassMod", "Script_RemovePlayerClassMod",
+		"Removes one class mod from the player's current settings", "void", "string mod",
+		false, Script_RemovePlayerClassMod);
 }
 
 void EntityScriptExt_RegisterServerFunctions(CSquirrelVM* s)
@@ -394,6 +529,8 @@ void VEntityScriptExt::GetAdr(void) const
 	LogFunAdr("CBaseEntity::CalcAbsoluteVelocity", v_CBaseEntity__CalcAbsoluteVelocity);
 	LogFunAdr("Script_RegisterAnimatingClassFuncs", v_Script_RegisterAnimatingClassFuncs);
 	LogVarAdr("g_serverScriptAnimatingStruct", s_pAnimatingDesc);
+	LogFunAdr("PlayerSettings_FindModIndex", v_PlayerSettings_FindModIndex);
+	LogFunAdr("EntityScriptExt_SetSettingsWithMods", v_CPlayer__SetSettingsWithMods);
 }
 
 void VEntityScriptExt::GetFun(void) const
@@ -420,6 +557,19 @@ void VEntityScriptExt::GetFun(void) const
 	if (registrar)
 		registrar.FindPattern("48 89 15", CMemory::Direction::DOWN, 0x80)
 			.ResolveRelativeAddressSelf(0x3, 0x7).GetPtr(s_pAnimatingDesc);
+
+	// Settings handle + mod name -> index into the settings' mod list.
+	Module_FindPattern(g_GameDll,
+		"48 89 74 24 10 57 44 8B D1 48 8B FA 41 81 E2 FF FF 03 00 48 8D 15")
+		.GetPtr(v_PlayerSettings_FindModIndex);
+	// Stores the settings handle and m_classModsActive, then reapplies the class settings.
+	Module_FindPattern(g_GameDll,
+		"48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 49 8B F8 48 8B EA 48 8B D9 48 39 91 F0 5D 00 00")
+		.GetPtr(v_CPlayer__SetSettingsWithMods);
+	if (!v_PlayerSettings_FindModIndex || !v_CPlayer__SetSettingsWithMods)
+		Warning(eDLL_T::SERVER, "[CLASS-MOD] settings natives unresolved (find=%p set=%p) -- "
+			"AddPlayerClassMod/RemovePlayerClassMod do nothing\n",
+			reinterpret_cast<void*>(v_PlayerSettings_FindModIndex), reinterpret_cast<void*>(v_CPlayer__SetSettingsWithMods));
 
 	if (!v_Script_RegisterAnimatingClassFuncs || !s_pAnimatingDesc)
 		Warning(eDLL_T::SERVER, "[DISSOLVE] CBaseAnimating registrar unresolved -- Dissolve keeps its three required arguments\n");

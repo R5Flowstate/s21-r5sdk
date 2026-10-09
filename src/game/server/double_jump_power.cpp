@@ -28,7 +28,7 @@ static constexpr ptrdiff_t DJP_OFF_JUMPPOWER   = 0x5ACC; // m_Local.m_flSuitJump
 static constexpr ptrdiff_t DJP_OFF_REGENSCALE  = 0x5AF4; // m_Local.m_powerRegenRateScale
 static constexpr ptrdiff_t DJP_OFF_WALLNORMAL  = 0x662C; // wall normal while on a wall, else +Z
 
-// S3 ConVar: m_pParent at +0x48, value float/int at parent +0x68/+0x6C.
+// dedi ConVar: m_pParent at +0x48, value float/int at parent +0x68/+0x6C.
 static constexpr ptrdiff_t DJP_CVAR_OFF_PARENT = 0x48;
 static constexpr ptrdiff_t DJP_CVAR_OFF_FLOAT  = 0x68;
 static constexpr ptrdiff_t DJP_CVAR_OFF_INT    = 0x6C;

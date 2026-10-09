@@ -28,6 +28,9 @@
 #include "move_sim_trace.h"
 #include "wallclimb.h"
 #include "wall_launch.h"
+#include "slope_launch.h"
+#include "autobunnyhop.h"
+#include "source_push.h"
 #include "armored_leap.h"
 #include "slide_gate_launch.h"
 #include <cstring>
@@ -91,7 +94,7 @@ static constexpr int JETDRIVE_DOUBLEJUMP_BUTTON_MASK = IN_JUMP;
 static constexpr ptrdiff_t JD_CTX_OFF_PLAYER   = 8;
 static constexpr ptrdiff_t JD_CTX_OFF_MOVEDATA = 16;
 static constexpr ptrdiff_t JD_MV_OFF_BUTTONS_PRESSED = 44; // CMoveData+0x2C
-static constexpr ptrdiff_t JD_MV_OFF_VELOCITY = 304;       // S3 m_vecVelocity
+static constexpr ptrdiff_t JD_MV_OFF_VELOCITY = 304;       // dedi m_vecVelocity
 static constexpr ptrdiff_t JD_PLAYER_OFF_FLOORHEIGHT = 23968;
 static constexpr unsigned int PLAYERANIMEVENT_DOUBLEJUMP = 7;
 
@@ -1002,6 +1005,8 @@ void JetDrive_RegisterScriptFunctions(ScriptClassDescriptor_t* playerStruct)
 static __int64 __fastcall Hook_CGameMovement_FullWalkMove_JetDrive(void* ctx)
 {
 	MoveSimTrace_BeforeFullWalkMove(ctx);
+	AutoBunnyHop_BeforeFullWalkMove(ctx);
+	SourcePush_BeforeFullWalkMove(ctx);
 	SlipDiag_BeforeFullWalkMove(ctx);
 	PlayerLaunch_BeginFullWalkMove(ctx);
 	WallClimb_BeforeFullWalkMove(ctx);
@@ -1026,6 +1031,8 @@ static __int64 __fastcall Hook_CGameMovement_FullWalkMove_JetDrive(void* ctx)
 		JetDrive_AccelFromMoveCtx(ctx, TriggerPass_FrameTime());
 	}
 	s_pJetDriveSlotCtx = nullptr;
+	SourcePush_AfterFullWalkMove(ctx);
+	SlopeLaunch_AfterFullWalkMove(ctx);
 	SlipDiag_AfterFullWalkMove(ctx);
 	MoveSimTrace_AfterFullWalkMove(ctx);
 	WallClimb_AfterFullWalkMove(ctx);

@@ -71,7 +71,7 @@ static ConVar bridge_classvar_log("bridge_classvar_log", "0", FCVAR_DEVELOPMENTO
 	"Log every Player_SetClassVar key/value applied on the dedi.");
 
 //-----------------------------------------------------------------------------
-// Purpose: resolve the class-var surface out of the S3 dedi
+// Purpose: resolve the class-var surface out of the dedi
 //-----------------------------------------------------------------------------
 static void ServerScript_ResolveClassVar(void)
 {

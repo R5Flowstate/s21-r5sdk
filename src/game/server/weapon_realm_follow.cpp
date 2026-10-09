@@ -2,7 +2,7 @@
 //
 // Purpose: carried-weapon realm follow.
 //
-// The S3 server stamps realms onto move-children (SetRealmsBitMask recurses
+// The dedi server stamps realms onto move-children (SetRealmsBitMask recurses
 // the move chain) and onto engine-spawned children (grenades, missiles,
 // ropes, particle systems adopt the spawner mask at creation), but nothing
 // ever stamps a carried weapon: CWeaponX::Equip has no realm adoption, and
@@ -43,7 +43,7 @@ static constexpr ptrdiff_t WRF_ENT_OFF_REFHANDLE     = 0x8;   // u32 m_RefEHandl
 static constexpr ptrdiff_t WRF_ENT_OFF_EDICTINDEX    = 88;    // u16 edict index word
 // Server-half CWeaponX owner handle.
 static constexpr ptrdiff_t WRF_WEAPON_OFF_OWNER      = 0x11F0; // u32 m_weaponOwner EHandle
-// Server-half CPlayer inventory (S3 dedi), EHandle per slot: m_inventory at
+// Server-half CPlayer inventory (dedi), EHandle per slot: m_inventory at
 // 0x1688 plus the inventory-local weapons/offhandWeapons/activeWeapons
 // offsets 0x8/0x2C/0x44. The offhand run ends where activeWeapons begins,
 // so it holds six slots, not eight.

@@ -5,8 +5,7 @@ Human overview: `README.md`. This file is how to write code in this tree.
 Match the surrounding file. Do not modernize. Do not invent a second registration
 table, a second dirty-mark helper, or a second PCH.
 
-Machine-local deploy roots, IDA, and session memory stay out of this file.
-Operator overlay (this machine): `CLAUDE.local.md`.
+Machine-local deploy roots stay out of this file.
 
 ---
 
@@ -204,7 +203,7 @@ An uncaught server-VM error schedules `HS_GAME_SHUTDOWN` (~80 ms;
 `Shutdown host game`). The player reads a random kick. Every
 player-reachable `ExecuteFunction` (C2S ScriptRemote first) must check
 `SCRIPT_ERROR`, log + drop, and restore `HS_RUN` if shutdown was
-scheduled. Contain at the dispatch (`scriptremotefunctions_server.cpp`).
+scheduled. Contain at the dispatch (`game/server/scriptremotefunctions.cpp`).
 `Remote_RegisterServerFunction(..., "int", INT_MIN, INT_MAX)` plus
 `default: Assert(false)` is a one-packet match kill -- register the real
 range; default is `Warning` + return.
@@ -266,7 +265,7 @@ msbuild src/loader/loader.vcxproj -t:Build -p:Configuration=Release -p:Platform=
 Loader is that vcxproj, not `-t:loader` through the slnx (MSB4057).
 Never pipe MSBuild through `tail` / `head` -- the pipe hides the exit code.
 
-`GAMEDLL_S21` gates nothing in source. `/EHa` is client-only;
+`/EHa` is client-only;
 `__try/__except` works under both `/EHa` and `/EHsc`.
 
 Dead `_client.inl` files under `game/shared/` are merge artifacts -- not
@@ -280,7 +279,7 @@ little, widen it -- do not copy it.
 ## WIP
 
 Every new feature lands behind `SDK_WIP` until it is finished. No
-branches: this tree is `main`-only, the gate is the preprocessor.
+feature branches: the gate is the preprocessor.
 CMake `OPTION_WIP` defines it (default OFF when `OPTION_CERTAIN=ON`,
 ON otherwise, so dev builds keep the feature and CERT builds drop it).
 
@@ -348,9 +347,8 @@ Symbolize loose RVAs without a dump by loading the DLL as an image:
 
     cdb -z client.dll -y . -c "ln client+0x2AFB75; q"
 
-Engine frames (`r5apex+0x...`) go to IDA: rebase to 0x140000000 and
-decompile. Zero SDK frames does not clear the SDK -- the bridge often
-supplied the bad input.
+Engine frames (`r5apex+0x...`) are engine code. Zero SDK frames does not
+clear the SDK -- the bridge often supplied the bad input.
 
 ### Heap corruption
 

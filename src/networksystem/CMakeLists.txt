@@ -32,7 +32,6 @@ end_sources()
 if( ${LIB_NAME} STREQUAL "networksystem_cl" )
 target_compile_definitions( ${PROJECT_NAME} PRIVATE
     "CLIENT_DLL"
-    "GAMEDLL_S21"
 )
 endif()
 endmacro()

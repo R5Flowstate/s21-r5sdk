@@ -265,7 +265,7 @@ void WeaponScriptVars_SetScriptFloat0(void* pWeapon, float value)
 static SQRESULT Script_GetWeaponLockedSet(HSQUIRRELVM v);
 static SQRESULT Script_SetWeaponLockedSet(HSQUIRRELVM v);
 
-// S3 never registered Holster/FastHolster. Both bind to HolsterInternal; FastHolster's scale arg is ignored.
+// dedi never registered Holster/FastHolster. Both bind to HolsterInternal; FastHolster's scale arg is ignored.
 static SQRESULT Script_WeaponHolster(HSQUIRRELVM v)
 {
 	void* pWeapon = nullptr;
@@ -292,7 +292,7 @@ static SQRESULT Script_WeaponFastHolster(HSQUIRRELVM v)
 		SCRIPT_CHECK_AND_RETURN(v, SQ_ERROR);
 
 	SQFloat fastHolsterScale = -1.0f;
-	sq_getfloat(v, 2, &fastHolsterScale); // optional; S3 native has no such param, ignored
+	sq_getfloat(v, 2, &fastHolsterScale); // optional; dedi native has no such param, ignored
 
 	if (!v_WeaponX_HolsterInternal)
 	{
@@ -1482,9 +1482,9 @@ static void OffhandOverride_PushEntityOrNull(HSQUIRRELVM v, void* pEntity)
 	sq_pushnull(v);
 }
 
-// CPlayer::offhandWeapons[0] -- EHandle array base (S3 server).
+// CPlayer::offhandWeapons[0] -- EHandle array base (dedi server).
 static constexpr uintptr_t s_offhandWeaponsBase = 5812;
-// CPlayer::m_selectedOffhands[0] -- active inventory slot -> offhand index (S3 server).
+// CPlayer::m_selectedOffhands[0] -- active inventory slot -> offhand index (dedi server).
 static constexpr uintptr_t s_selectedOffhandsBase = 5910;
 
 // Resolve without touching the VM stack. 0..5 read the engine EHandle array; 6/7 use the SDK shadow.
@@ -1530,7 +1530,7 @@ static SQRESULT Script_GetOffhandWeapon_Override(HSQUIRRELVM v)
 	const bool isServerVM = (v && v->GetContext() == SQCONTEXT::SERVER);
 
 	// S21 client C_BCC already has eight offhand slots at +0x1798. The SDK
-	// extension (S3 +0x16B4 shadow) is dedi-only. Client slot 6/7 must use
+	// extension (dedi +0x16B4 shadow) is dedi-only. Client slot 6/7 must use
 	// the S21 client native or ActivateEmoteProjector sees null and never selects.
 	if (slot < kOffhandSlotExtFirst || !isServerVM)
 	{
@@ -1997,7 +1997,7 @@ void WeaponScriptVars_RegisterOffhandOverrides(ScriptClassDescriptor_t* combatCh
 		false,
 		Script_TakeOffhandWeapon_Override);
 
-	// S3 registers this nowhere; S21 puts it on the combat character.
+	// dedi registers this nowhere; S21 puts it on the combat character.
 	combatCharStruct->AddFunction(
 		"GetSelectedOffhand",
 		"Script_GetSelectedOffhand",
@@ -2257,7 +2257,7 @@ void WeaponScriptVars_RegisterInfiniteAmmoSetter(ScriptClassDescriptor_t* weapon
 }
 
 // Per-entity disabled-type bitmask + refcount. Bit 0 is WPT_PRIMARY (no "cannot disable bit 0" guard).
-// WPT_VIEWHANDS is sticky in weapon_enforce -- S3 has no sub-viewhands fallback.
+// WPT_VIEWHANDS is sticky in weapon_enforce -- dedi has no sub-viewhands fallback.
 static constexpr int WEAPON_TYPE_DISABLE_BITS = 10; // bits 0..9 inclusive
 
 struct WeaponTypeDisableState
@@ -2330,7 +2330,7 @@ void WeaponScriptVars_DisableWeaponTypes(void* pEntity, const uint32_t flags)
 	if (!pEntity)
 		return;
 
-	// Do not port the bit-0 guard: S3 bit 0 is WPT_PRIMARY.
+	// Do not port the bit-0 guard: dedi bit 0 is WPT_PRIMARY.
 	WeaponTypeDisableState& state = s_weaponTypeDisabledMapServer[pEntity];
 
 	uint32_t bit = 1;
@@ -2354,7 +2354,7 @@ void WeaponScriptVars_DisableWeaponTypes(void* pEntity, const uint32_t flags)
 	WeaponScriptVars_WriteNativeDisabledFlags(pEntity,
 		state.disabledFlags | state.holdFlags);
 
-	// Clear any active weapon whose type is now disabled. The S3 server has
+	// Clear any active weapon whose type is now disabled. The dedi server has
 	// no engine-native gating, so this server-side rail stays; the engine's
 	// next-tick re-selection picks a valid fallback.
 	WeaponEnforce_ForceSwapIfNowDisabled(pEntity);
@@ -2410,7 +2410,7 @@ void WeaponScriptVars_EnableWeaponTypes(void* pEntity, const uint32_t flags)
 	}
 }
 
-// S3 bit i (PRIMARY, MELEE, TACTICAL, ULTIMATE, CONSUMABLE, INCAP_SHIELD, GRENADE,
+// dedi bit i (PRIMARY, MELEE, TACTICAL, ULTIMATE, CONSUMABLE, INCAP_SHIELD, GRENADE,
 // OTHER, VIEWHANDS, SURVIVAL) -> S21 bit (the S21 name table puts VIEWHANDS first
 // and SURVIVAL before OTHER).
 static constexpr uint8_t s_weaponTypeS3ToS21Bit[WEAPON_TYPE_DISABLE_BITS] = { 1, 2, 3, 4, 5, 6, 7, 9, 0, 8 };
@@ -3025,7 +3025,7 @@ void WeaponScriptVars_RegisterWeaponTypeDisableFuncs(ScriptClassDescriptor_t* en
 // WPT_* bits 0..7 match the engine table. Patch extends bits 8-9 (WPT_VIEWHANDS / WPT_SURVIVAL).
 void WeaponScriptVars_RegisterWPTConstants(CSquirrelVM* s)
 {
-	// Engine-native bits (resolved in S3 r5apex.exe).
+	// Engine-native bits (resolved in dedi r5apex.exe).
 	s->RegisterConstant("WPT_PRIMARY",      0x001);
 	s->RegisterConstant("WPT_MELEE",        0x002);
 	s->RegisterConstant("WPT_TACTICAL",     0x004);
@@ -3035,13 +3035,13 @@ void WeaponScriptVars_RegisterWPTConstants(CSquirrelVM* s)
 	s->RegisterConstant("WPT_GRENADE",      0x040);
 	s->RegisterConstant("WPT_OTHER",        0x080);
 
-	// + script-only flags -- not recognised by S3's
+	// + script-only flags -- not recognised by dedi's
 	// GetFlagsFromString_Internal; kept out of the low byte so the
 	// composite masks below stay inside 8-bit native range.
 	s->RegisterConstant("WPT_VIEWHANDS",    0x100);
 	s->RegisterConstant("WPT_SURVIVAL",     0x200);
 
-	// uses WPT_INCAP in composite names ("..._OR_INCAP"); S3 only has
+	// uses WPT_INCAP in composite names ("..._OR_INCAP"); dedi only has
 	// WPT_INCAP_SHIELD. Alias so scripts written for either spelling work.
 	s->RegisterConstant("WPT_INCAP",        0x020);
 
@@ -3058,7 +3058,7 @@ struct EWeaponVarCompat_t
 	const char* sourceName;
 };
 
-// S21-only keys redirected onto free S3 native slots at parse time.
+// S21-only keys redirected onto free dedi native slots at parse time.
 // custom_* index 0 is content-authored; only 1..7 are free to reserve.
 struct WeaponVarSlotReservation_t
 {
@@ -3444,7 +3444,7 @@ void WeaponScriptVars_RegisterS21EWeaponVarAliases(CSquirrelVM* s)
 		reserved, reservedRedundant, reservedFailed);
 }
 
-// melee_anim_1p (S21 string) -> melee_anim_1p_number (S3 int) at parse time.
+// melee_anim_1p (S21 string) -> melee_anim_1p_number (dedi int) at parse time.
 static int ResolveMeleeAnim1pNumber(const char* anim)
 {
 	if (!anim || !anim[0])
@@ -3495,14 +3495,14 @@ static void FixupMeleeAnim1p(KeyValues* kv)
 	kv->SetInt("melee_anim_1p_number", n);
 }
 
-// Bridge activitymodifier3p onto S3 activitymodifier only. Folding 1p collides in mod assembly.
+// Bridge activitymodifier3p onto dedi activitymodifier only. Folding 1p collides in mod assembly.
 static void FixupActivityModifier(KeyValues* kv)
 {
 	if (!kv)
 		return;
 
 	if (kv->FindKey("activitymodifier", false))
-		return; // explicit S3-native value wins, never overwritten
+		return; // explicit dedi-native value wins, never overwritten
 
 	const char* mod = kv->GetString("activitymodifier3p", "");
 	if (!mod[0])
@@ -3776,7 +3776,7 @@ static bool PatchWeaponTypeFlagsLEA(uint8_t* pLea, const void* target,
 }
 
 // Scan .text for every match (Module_FindPattern returns only the first).
-static int FindAllPatternMatches(
+int WeaponScriptVars_FindAllPatternMatches(
 	const char* pattern, size_t patternLen,
 	uint8_t** outMatches, int maxHits)
 {
@@ -3788,7 +3788,7 @@ static int FindAllPatternMatches(
 	if (!textSection.IsSectionValid())
 	{
 		Warning(eDLL_T::SERVER,
-			"FindAllPatternMatches: .text section not loaded\n");
+			"WeaponScriptVars_FindAllPatternMatches: .text section not loaded\n");
 		return 0;
 	}
 
@@ -3837,9 +3837,9 @@ void WeaponScriptVars_PatchWeaponTypeFlagsTable()
 	static constexpr int kMaxSites = 4;
 	uint8_t* startAnchors[kMaxSites] = {};
 	uint8_t* endAnchors[kMaxSites]   = {};
-	const int startCount = FindAllPatternMatches(
+	const int startCount = WeaponScriptVars_FindAllPatternMatches(
 		kStartPattern, kStartPatternLen, startAnchors, kMaxSites);
-	const int endCount = FindAllPatternMatches(
+	const int endCount = WeaponScriptVars_FindAllPatternMatches(
 		kEndPattern,   kEndPatternLen,   endAnchors,   kMaxSites);
 
 	if (startCount == 0 || endCount == 0)

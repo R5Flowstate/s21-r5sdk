@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: honor weapon.SetInfiniteAmmoState(INFINITEAMMO_CLIPS) on S3 natives.
+// Purpose: honor weapon.SetInfiniteAmmoState(INFINITEAMMO_CLIPS) on dedi natives.
 // Detour the live CWeaponX cluster; the unused twin is a silent no-op.
 //
 //=============================================================================//

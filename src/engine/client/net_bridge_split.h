@@ -26,7 +26,7 @@ struct SplitPacket {
 };
 
 
-// FIFO of synthetic net_SignonState messages to send to S3 server.
+// FIFO of synthetic net_SignonState messages to send to dedi server.
 // Written by the SetSignonState hooks, drained by BuildS3Packet.
 struct PendingSignon_s { int state; int spawn; };
 
@@ -39,7 +39,7 @@ struct StringCmdResend_s
 	double   nextDueMs;
 };
 
-// Blind one-shot resend of runtime NET_SetConVar (S3 t=4) bits; ring under s_c2sTxLock.
+// Blind one-shot resend of runtime NET_SetConVar (dedi t=4) bits; ring under s_c2sTxLock.
 struct SetConVarResend_s
 {
 	uint8_t data[1024];
@@ -48,7 +48,7 @@ struct SetConVarResend_s
 	bool    active;
 };
 
-// S3 subchannel reliable-fragment reassembly. Reset() keeps the buffer;
+// dedi subchannel reliable-fragment reassembly. Reset() keeps the buffer;
 // Free() releases it. Shared by ProcessMessages and ResetReliableRecv.
 struct BridgeReliable_s
 {
@@ -73,7 +73,7 @@ struct LerpDepthSlot_s
 };
 
 
-// S21-only CUserCmd bits never land in S3 memory. Carry them in impulse (+0x34)
+// S21-only CUserCmd bits never land in dedi memory. Carry them in impulse (+0x34)
 // high bits: 0x80 startEnergize, 0x40 toggleAkimbo. Low 7 bits stay real impulse.
 enum ES21ExtraCmdFlags : uint8_t
 {
@@ -140,7 +140,7 @@ struct BridgeS2CDeferred_t
 #define S21BR_PLO_VALUE_SIZE 64     // wire valueLen must be < this
 
 //=============================================================================
-// S3 vs S21 netchan: same [32 seq][32 ack][8 flags]; S3 choked=bit4, S21=bit1.
+// dedi vs S21 netchan: same [32 seq][32 ack][8 flags]; dedi choked=bit4, S21=bit1.
 // +4 outSeq +8 inSeq +12 outSeqAck +8584 handler +8592 msgs +8616 count
 // +8496 subData +8504 subLen +8512 compressed +8520 expected +8536 total +8540 recv
 //=============================================================================
@@ -154,13 +154,13 @@ struct BridgeS2CDeferred_t
 #define S21_NC_NetMessages(p)       (*(void***)((char*)(p) + 8592))
 #define S21_NC_NetMessageCount(p)   (*(int*)((char*)(p) + 8616))
 
-// S21 netpacket_t layout (0x90 bytes, differs from S3's 0x88)
+// S21 netpacket_t layout (0x90 bytes, differs from dedi's 0x88)
 #define S21_PKT_Message(p)          ((bf_read*)((char*)(p) + 0x0038))
 #define S21_PKT_Size(p)             (*(int*)((char*)(p) + 0x0078))
 
-// S3 subchannel constants
+// dedi subchannel constants
 #define S3_MAX_FRAGMENT_PER_PACKET  560
-// S3 writes 0xFDBAC34D, S21 expects 0xFDB97A8D. Accept both.
+// dedi writes 0xFDBAC34D, S21 expects 0xFDB97A8D. Accept both.
 #define S3_SUBCHAN_MAGIC_S3         0xFDBAC34Du
 #define S3_SUBCHAN_MAGIC_S21        0xFDB97A8Du
 
@@ -173,7 +173,7 @@ struct BridgeS2CDeferred_t
 #define S21_PKT_Wiresize(p)         (*(int*)((char*)(p) + 0x007C))
 
 //=============================================================================
-// S21 bf_read is 64 bytes (S3 is 32). ProcessMessages expects this layout.
+// S21 bf_read is 64 bytes (dedi is 32). ProcessMessages expects this layout.
 // +0x00 m_pDebugName +0x08 m_bOverflow +0x10 m_nDataBits +0x18 m_nDataBytes
 // +0x20 m_nInBufWord +0x24 m_nBitsAvail +0x28 m_pDataIn +0x30 m_pBufferEnd +0x38 m_pData
 //=============================================================================

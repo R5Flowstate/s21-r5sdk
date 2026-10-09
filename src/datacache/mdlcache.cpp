@@ -311,7 +311,7 @@ studiohwdata_t* CMDLCache::GetHardwareData(CMDLCache* const cache, const MDLHand
     studiophysicsref_t* const physicsRef = modelCache->GetPhysicsCache();
 
     AcquireSRWLockExclusive(g_pMDLLock);
-    CMDLCache__CheckData(physicsRef, 1i64); // !!! DECLARED INLINE IN < S3 !!!
+    CMDLCache__CheckData(physicsRef, 1i64); // !!! DECLARED INLINE IN < dedi !!!
     ReleaseSRWLockExclusive(g_pMDLLock);
 
     if ((studioData->flags & STUDIODATA_FLAGS_STUDIOMESH_LOADED))
@@ -782,7 +782,7 @@ studiohwdata_t* CMDLCache::GetHardwareData(CMDLCache* const cache, const MDLHand
     studiophysicsref_t* const physicsRef = modelCache->GetPhysicsCache();
 
     AcquireSRWLockExclusive(g_pMDLLock);
-    CMDLCache__CheckData(physicsRef, 1i64); // !!! DECLARED INLINE IN < S3 !!!
+    CMDLCache__CheckData(physicsRef, 1i64); // !!! DECLARED INLINE IN < dedi !!!
     ReleaseSRWLockExclusive(g_pMDLLock);
 
     if ((studioData->flags & STUDIODATA_FLAGS_STUDIOMESH_LOADED))

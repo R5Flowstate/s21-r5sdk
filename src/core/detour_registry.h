@@ -19,7 +19,6 @@ enum class DetourState : uint8_t
 {
 	NotAttempted     = 0,
 	SkippedByConfig  = 1,  // Disabled in sdk_detours.cfg
-	SkippedByFlag    = 2,
 	ScanFailed       = 3,
 	ScanSucceeded    = 4,
 	ValidationFailed = 5,

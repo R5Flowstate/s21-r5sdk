@@ -29,7 +29,7 @@ static constexpr ptrdiff_t ENT_OFF_POSEPARAM  = 0xD08;
 static constexpr ptrdiff_t ENT_OFF_ABSVELOCITY = 0x3DC;
 // CMultiPlayerAnimState::m_player (server half).
 static constexpr ptrdiff_t ANIMSTATE_OFF_PLAYER = 0x1C0;
-// Class-core rrig slots -- identical on S21 and converted S3 light/medium/heavy.
+// Class-core rrig slots -- identical on S21 and converted dedi light/medium/heavy.
 static constexpr int kPoseIdxMoveYaw         = 2;
 static constexpr int kPoseIdxMoveYawBackward = 3;
 

@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: server half of the movement-ability input routing at the S3 Jump
+// Purpose: server half of the movement-ability input routing at the dedi Jump
 // (game/shared/jump_input_gate.h). Client twin: game/client/movement_ability_input.cpp.
 // The offhand, jetpack and glide halves read IN_DODGE in their own files.
 //

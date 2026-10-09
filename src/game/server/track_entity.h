@@ -1,8 +1,8 @@
 //=============================================================================//
 //
-// Purpose: S21 third-person track-entity camera fields S3 CPlayer does not
+// Purpose: S21 third-person track-entity camera fields dedi CPlayer does not
 // have (blend-out, right offset, OverTime lerps). Sidecar + DT_ThirdPersonView
-// value proxies; the nested S3 ThirdPersonViewData is not grown.
+// value proxies; the nested dedi ThirdPersonViewData is not grown.
 //
 //=============================================================================//
 #ifndef TRACK_ENTITY_H

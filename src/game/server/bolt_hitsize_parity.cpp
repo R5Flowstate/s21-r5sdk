@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: Bolt hit-size grow schedule parity. The S3 bolt only grows when all
+// Purpose: Bolt hit-size grow schedule parity. The dedi bolt only grows when all
 // three grow times are non-zero and never floors or orders the stage ticks;
 // the S21 client grows when any time is positive, floors stage 1 to the next
 // tick and clamps each later stage up to the previous one. Recompute the

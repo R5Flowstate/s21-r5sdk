@@ -428,7 +428,7 @@ static bool ServerCommand_IsDenied(const char* const pszLine)
 	return false;
 }
 
-// S3 inlines the whole native into its Squirrel entry: the command string is the
+// dedi inlines the whole native into its Squirrel entry: the command string is the
 // SQString at [[vm+0x58]+0x18], text at +0x40 (the same reads the entry itself makes).
 static const char* ServerCommand_ArgFromVM(void* const pVM)
 {
@@ -512,7 +512,7 @@ static void ResolveScriptNative(const char* const pszName, T& pOut)
 	// S21: lea rdx,"<Name>" ... 0x40 bytes of binding setup ... lea rdx,<impl>.
 	const QWORD nImpl = ResolveLeaRdx(nRef + 0x40);
 #else
-	// S3: lea rdx,<impl> immediately precedes lea rax,"Script_<Name>".
+	// dedi: lea rdx,<impl> immediately precedes lea rax,"Script_<Name>".
 	const QWORD nImpl = ResolveLeaRdx(nRef - 7);
 #endif // CLIENT_DLL
 
@@ -520,7 +520,7 @@ static void ResolveScriptNative(const char* const pszName, T& pOut)
 }
 
 #if !defined(CLIENT_DLL)
-// ServerCommand has no separate implementation on S3: the lea rdx before its name is a
+// ServerCommand has no separate implementation on dedi: the lea rdx before its name is a
 // console callback nothing calls. The Squirrel entry is the first lea rax after the name,
 // accepted only if it makes the inlined call (lea rdx,[rdi+40h]; call [rax+0C0h]).
 static void ResolveServerCommandEntry(void*& pOut)

@@ -87,12 +87,14 @@ static bool DT_PeekFixedBits(uintptr_t bitbuf, int nBits, int* pOut)
 static uintptr_t s_mbDecoder      = 0;
 static uintptr_t s_mbSendProp     = 0;
 static uintptr_t s_duckRemSendProp = 0;
+static uintptr_t s_forceStanceSendProp = 0;
 
 static void Bridge_LatchWirePeekProps(__int64 decoder)
 {
 	s_mbDecoder       = static_cast<uintptr_t>(decoder);
 	s_mbSendProp      = 0;
 	s_duckRemSendProp = 0;
+	s_forceStanceSendProp = 0;
 
 	uint8_t** spA = nullptr;
 	int       nPre = 0;
@@ -111,7 +113,7 @@ static void Bridge_LatchWirePeekProps(__int64 decoder)
 
 	for (int i = 0; i < nPre; ++i)
 	{
-		if (s_mbSendProp && s_duckRemSendProp)
+		if (s_mbSendProp && s_duckRemSendProp && s_forceStanceSendProp)
 			break;
 		__try
 		{
@@ -124,6 +126,8 @@ static void Bridge_LatchWirePeekProps(__int64 decoder)
 				s_mbSendProp = reinterpret_cast<uintptr_t>(sp);
 			else if (!s_duckRemSendProp && strcmp(pn, "m_nDuckTransitionTimeMsecs") == 0)
 				s_duckRemSendProp = reinterpret_cast<uintptr_t>(sp);
+			else if (!s_forceStanceSendProp && strcmp(pn, "m_forceStance") == 0)
+				s_forceStanceSendProp = reinterpret_cast<uintptr_t>(sp);
 		}
 		__except (EXCEPTION_EXECUTE_HANDLER)
 		{
@@ -136,11 +140,49 @@ static void Bridge_LatchWirePeekProps(__int64 decoder)
 	static int s_nLatches = 0;
 	if (++s_nLatches <= 8)
 		Warning(eDLL_T::ENGINE,
-			"[WIRE-PEEK] m_mantleBoostState %s, m_nDuckTransitionTimeMsecs %s in the "
+			"[WIRE-PEEK] m_mantleBoostState %s, m_nDuckTransitionTimeMsecs %s, m_forceStance %s in the "
 			"DT_Player decoder %p (flatN=%d) (#%d)\n",
 			s_mbSendProp ? "resolved" : "NOT FOUND",
 			s_duckRemSendProp ? "resolved" : "NOT FOUND",
+			s_forceStanceSendProp ? "resolved" : "NOT FOUND",
 			reinterpret_cast<void*>(decoder), nPre, s_nLatches);
+}
+
+//-----------------------------------------------------------------------------
+// The server build has no m_forceSlide: its ForceSlide is m_forceStance 3.
+// S21 keeps the forced slide in its own bool beside the stance, so derive it
+// from each decoded stance.
+//-----------------------------------------------------------------------------
+static ConVar bridge_force_slide_log("bridge_force_slide_log", "0", FCVAR_DEVELOPMENTONLY | FCVAR_CLIENTDLL,
+	"[FORCE-SLIDE] log the first m_forceSlide changes derived from the stance.");
+static constexpr ptrdiff_t S21_PLAYER_OFF_FORCE_STANCE = 0x1DF8;   // int m_Local.m_forceStance
+static constexpr ptrdiff_t S21_PLAYER_OFF_FORCE_SLIDE  = 0x1DFC;   // bool m_Local.m_forceSlide
+static constexpr int       S3_FORCE_STANCE_SLIDE       = 3;
+
+static void Bridge_OnForceStanceDecoded(const int nEntIndex)
+{
+	if (nEntIndex <= 0 || nEntIndex > MAX_PLAYERS)
+		return;
+
+	const uintptr_t pList = NetObs_EntityHandleTableAddr();
+	if (!pList)
+		return;
+
+	const uintptr_t pEnt = *reinterpret_cast<const uintptr_t*>(pList + 32ull * static_cast<uint32_t>(nEntIndex));
+	if (!pEnt)
+		return;
+
+	const int nStance = *reinterpret_cast<const int*>(pEnt + S21_PLAYER_OFF_FORCE_STANCE);
+	uint8_t* const pForceSlide = reinterpret_cast<uint8_t*>(pEnt + S21_PLAYER_OFF_FORCE_SLIDE);
+	const uint8_t nWant = (nStance == S3_FORCE_STANCE_SLIDE) ? 1 : 0;
+	if (*pForceSlide == nWant)
+		return;
+	*pForceSlide = nWant;
+
+	static int s_nLogged = 0;
+	if (bridge_force_slide_log.GetBool() && ++s_nLogged <= 16)
+		Msg(eDLL_T::ENGINE, "[FORCE-SLIDE] ent=%d stance=%d -> m_forceSlide=%d (#%d)\n",
+			nEntIndex, nStance, nWant, s_nLogged);
 }
 
 // Opt-in per-prop decode diagnostics (PROP-ORDER / PROP-AUDIT bitCost). Default off
@@ -231,7 +273,7 @@ typedef char    (__fastcall *PFN_SVC_DatatableChecksum_Process)(void* a1, void* 
 
 static PFN_SVC_DatatableChecksum_Process s_origDatatableChkProc   = nullptr;
 
-// Default ON: S3 <-> S21 table CRCs differ by construction on this bridge.
+// Default ON: dedi <-> S21 table CRCs differ by construction on this bridge.
 static ConVar bridge_dt_checksum_swallow("bridge_dt_checksum_swallow", "1",
 	FCVAR_RELEASE | FCVAR_CLIENTDLL,
 	"1 = swallow SVC_DatatableChecksum mismatch with a loud rate-limited Warning "
@@ -363,14 +405,14 @@ static PFN_BitbufSeek s_bitbufSeek = nullptr;
 
 // -- entity property decode/merge (RecvTable_DecodeZeros equivalent).
 // First arg = RecvTable*. *(RecvTable + 0x4C0) = m_data.decoder (CRecvDecoder*).
-// S3-only entity classes have no decoder -> NULL -> crash at [rsi+18h].
+// dedi-only entity classes have no decoder -> NULL -> crash at [rsi+18h].
 typedef __int64 (__fastcall *PFN_RecvTableDecode)(__int64, __int64, __int64, __int64);
 
 static PFN_RecvTableDecode s_origRecvTableDecode = nullptr;
 
 // CreateDecoders -- matches SendProps to RecvProps by name.
-// S3->S21 renames cause props to go unmatched. Fix: rename S21 RecvProp names
-// to S3 equivalents before the original runs, so the name matcher finds them.
+// dedi->S21 renames cause props to go unmatched. Fix: rename S21 RecvProp names
+// to dedi equivalents before the original runs, so the name matcher finds them.
 typedef __int64 (__fastcall *PFN_CreateDecoders)(__int64, __int64, __int64, __int64);
 
 static PFN_CreateDecoders s_origCreateDecoders = nullptr;
@@ -1027,7 +1069,7 @@ static void Bridge_MaybeDumpRecvFlat(const char* tableName, __int64 decoder)
 
 	// cfg is comma-separated names, "1" = DT_Player only, or "*" = every
 	// table that decodes -- the whole-wire audit, diffed against the dedi's
-	// [FLATN-DUMP] by tools/wire_flat_diff.py.
+	// [FLATN-DUMP].
 	bool want = false;
 	if (strcmp(cfg, "*") == 0)
 		want = true;
@@ -2018,6 +2060,9 @@ static __int64 __fastcall Hook_PropDecodeDispatch(__int64 a1, __int64 a2, int a3
 		SNAPB_ADD_ORIG(SNAPB_DISPATCH, _sbO);
 	}
 
+	if (s_forceStanceSendProp && static_cast<uintptr_t>(a1) == s_forceStanceSendProp)
+		Bridge_OnForceStanceDecoded(s_curDecEntIdx);
+
 	if (diag && auditBefore >= 0 && a4)
 	{
 		long long auditAfter = -1;
@@ -2054,7 +2099,7 @@ typedef char (__fastcall *PFN_CL_CopyNewEntity)(__int64 a1, int* a2, int a3, cha
 static PFN_CL_CopyNewEntity s_origCL_CopyNewEntity = nullptr;
 
 // SEH wrapper over the native CL_CopyNewEntity. Stub ClientClass entries
-// for the 18 S3-only classes mean every classID has a non-NULL
+// for the 18 dedi-only classes mean every classID has a non-NULL
 static char __fastcall Hook_CL_CopyNewEntity_Body(__int64 a1, int* a2, int a3, char* a4)
 {
 	SNAPB_T0(_sbT);
@@ -2225,7 +2270,7 @@ static bool Bridge_DtChecksumSwallowEnabled(void)
 }
 
 // SVC_DatatableChecksum::Process detour. Name field is inline at msg+40.
-// Default swallow: S3 <-> S21 table CRCs differ by construction.
+// Default swallow: dedi <-> S21 table CRCs differ by construction.
 // bridge_dt_checksum_swallow 0 calls native Process (hard disconnect on mismatch).
 static char __fastcall Hook_SVC_DatatableChecksum_Process(void* a1, void* a2)
 {
@@ -2281,7 +2326,7 @@ static void InstallDecodeHooks_S21()
 {
 	int nHooked = 0;
 	// --- CreateDecoders prop rename pre-hook ---
-	// S3->S21 renames (m_parentAttachmentIndex -> m_parentAttachment, etc.)
+	// dedi->S21 renames (m_parentAttachmentIndex -> m_parentAttachment, etc.)
 	{
 		const uintptr_t cdAddr = NetObs_Sym(NetObsSym_t::ClientDataDecode);
 		s_origCreateDecoders = (PFN_CreateDecoders)cdAddr;
@@ -2310,7 +2355,7 @@ static void InstallDecodeHooks_S21()
 
 	// --- CL_CopyNewEntity NULL ClientClass guard ---
 	// Crashes at +0x1A5 when m_pServerClasses[iClass].m_pClientClass is NULL
-	// (S3 entity class with no S21 equivalent). Guard before calling original.
+	// (dedi entity class with no S21 equivalent). Guard before calling original.
 	{
 		const uintptr_t copyNewAddr = NetObs_Sym(NetObsSym_t::CopyNewEntity);
 		s_origCL_CopyNewEntity = (PFN_CL_CopyNewEntity)copyNewAddr;
@@ -2393,7 +2438,7 @@ static void InstallDecodeHooks_S21()
 
 
 	// SVC_DatatableChecksum::Process integrity gate. Default swallows mismatch
-	// (S3/S21 CRC differ by construction). Fail-closed: +bridge_dt_checksum_swallow 0.
+	// (dedi/S21 CRC differ by construction). Fail-closed: +bridge_dt_checksum_swallow 0.
 	{
 		uintptr_t base = NetObs_GetExeModuleBase();
 		if (base)

@@ -49,7 +49,7 @@
 
 // ===========================================================================
 // sv_dump_seqtable: unique animating models' sequence tables.
-// ServerClass at entity+0x50; CStudioHdr* at +0xFD8; seq label at seqdesc+4 (S3 int).
+// ServerClass at entity+0x50; CStudioHdr* at +0xFD8; seq label at seqdesc+4 (dedi int).
 // ===========================================================================
 static constexpr int SVSEQ_MAX_EDICTS    = 16384; // MAX_EDICTS; entity-ptr array at m_pEdicts+0x7808
 static constexpr int SVSEQ_MAX_SEQCOUNT  = 8192;
@@ -1015,4 +1015,4 @@ static void CC_SvDumpSeqTable(const CCommand& args)
 
 static ConCommand sv_dump_seqtable("sv_dump_seqtable", CC_SvDumpSeqTable,
 	"Dump sequence tables (index->name) for all animating entities' unique models to the server log. Optional arg: edict index.",
-	FCVAR_RELEASE);
+	FCVAR_DEVELOPMENTONLY);

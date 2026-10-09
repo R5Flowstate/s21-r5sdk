@@ -21,7 +21,7 @@
 #include "engine/client/client.h"
 
 //-----------------------------------------------------------------------------
-// S3 weapon type flags offset.
+// dedi weapon type flags offset.
 //
 //
 // Both are the script-native backing for "GetWeaponTypeFlags" registered on
@@ -34,8 +34,8 @@ static constexpr uintptr_t kWeaponTypeFlagsOffsetServer = 0x19B0;
 
 //-----------------------------------------------------------------------------
 // WPT_VIEWHANDS = bit 8 (SDK-added flag, see weapon_script_vars.cpp:1487).
-// reserves bit 0 as a non-disable-able "default" sentinel -- S3 has no
-// such sentinel (bit 0 is WPT_PRIMARY). Viewhands is S3's actual last-resort
+// reserves bit 0 as a non-disable-able "default" sentinel -- dedi has no
+// such sentinel (bit 0 is WPT_PRIMARY). Viewhands is dedi's actual last-resort
 // weapon state, so we treat it as sticky: the enforcement sweep never clears
 // an active slot whose weapon carries WPT_VIEWHANDS, even if the disabled
 // mask includes bit 8. This prevents a script-authored mask that accidentally
@@ -161,7 +161,7 @@ void WeaponEnforce_ForceSwapIfNowDisabled(void* pPlayer)
 		// Sticky viewhands: never clear the last-resort hands weapon, even if
 		// the script-provided disabled mask happens to include WPT_VIEWHANDS.
 		// Without this, a mask like (WPT_ALL | WPT_VIEWHANDS) would strand the
-		// player with zero selectable weapons -- S3 has no sub-viewhands
+		// player with zero selectable weapons -- dedi has no sub-viewhands
 		// fallback. The refcount/bitmask stays authoritative at the script
 		// layer; this is purely a swap-safety rail.
 		if ((weaponFlags & kWeaponTypeBitViewhands) != 0)

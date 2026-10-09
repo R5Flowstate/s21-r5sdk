@@ -1,6 +1,6 @@
 //=============================================================================
 //
-// Purpose: S21 dual-wield partner is N+7, not S3's N+5. Rewrite both pairing sites.
+// Purpose: S21 dual-wield partner is N+7, not dedi's N+5. Rewrite both pairing sites.
 //
 //=============================================================================
 #ifndef WEAPON_DUALWIELD_SLOT_PATCH_H

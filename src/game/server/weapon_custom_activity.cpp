@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: S21 WCAF_* custom-activity semantics on the S3 weapon. Scripts see
+// Purpose: S21 WCAF_* custom-activity semantics on the dedi weapon. Scripts see
 // the S21 enum, the engine keeps its own bits, the wire carries the S21 value.
 //
 //=============================================================================//
@@ -35,7 +35,7 @@ static constexpr int kS21_PlayRaiseOnComplete       = 0x080;
 static constexpr int kS21_PlayMeleeRaiseOnComplete  = 0x100;
 static constexpr int kS21_All                       = 0x1FF;
 
-// S3 WeaponCustomActivityFlags (the engine's own bits).
+// dedi WeaponCustomActivityFlags (the engine's own bits).
 static constexpr int kS3_Interruptible       = 0x01;
 static constexpr int kS3_PlayRaiseOnComplete = 0x02;
 static constexpr int kS3_DisableWeapon       = 0x04;
@@ -169,7 +169,7 @@ static char Hook_StartCustomActivityScript(void* pWeapon, const char* pszActivit
 
 	const int s3 = WCAF_S21ToS3(flags);
 	int s3Start = s3;
-	// S3 has one sprint bit that both admits the start and keeps the activity
+	// dedi has one sprint bit that both admits the start and keeps the activity
 	// through sprint. START_WHILE_SPRINTING only admits the start.
 	if ((flags & kS21_AllowStartWhileSprinting) && !(flags & kS21_AllowWhileSprinting))
 		s3Start |= kS3_AllowWhileSprinting;
@@ -200,7 +200,7 @@ static char Hook_CustomActivityInterrupt(void* pWeapon, void* pPlayer)
 	if (!pPlayer || !WeaponCustomAct_AllowsJumpLand(pWeapon))
 		return v_WeaponX_CustomActivityInterrupt(pWeapon, pPlayer);
 
-	// S3 always interrupts on IN_JUMP; ALLOW_JUMP_LAND takes it out of the mask.
+	// dedi always interrupts on IN_JUMP; ALLOW_JUMP_LAND takes it out of the mask.
 	int& buttons = WeaponField<int>(pPlayer, PLAYER_OFF_BUTTONS);
 	const int heldJump = buttons & kInJump;
 	buttons &= ~kInJump;
@@ -226,7 +226,7 @@ static __int64 Hook_StopCustomActivity(void* pWeapon)
 
 static __int64 Hook_WeaponFrame(void* pWeapon, void* pPlayer)
 {
-	// S21 checks PLAYMELEERAISEONCOMPLETE before the S3 raise/idle branch.
+	// S21 checks PLAYMELEERAISEONCOMPLETE before the dedi raise/idle branch.
 	if (pWeapon && WeaponField<int>(pWeapon, WEAPON_OFF_WEAPSTATE) == kWeapStateCustomActivity)
 	{
 		const WcafState_t* const pState = WeaponCustomAct_Live(pWeapon,

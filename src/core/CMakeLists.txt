@@ -223,12 +223,12 @@ target_link_libraries( ${PROJECT_NAME} PRIVATE
 )
 target_compile_definitions( ${PROJECT_NAME} PRIVATE
     "CLIENT_DLL"
-    "GAMEDLL_S21"
 )
 # Client product + every client-only lib it links. core is add_subdirectory'd
 # last, so these targets already exist. Plain (server) twins keep /EHsc.
 apply_client_seh_options( ${PROJECT_NAME} )
 apply_client_seh_options( client_static )
+apply_client_seh_options( vpc_cl )
 apply_client_seh_options( engine_cl )
 apply_client_seh_options( game_shared_static_cl )
 apply_client_seh_options( tier0_cl )
@@ -291,6 +291,7 @@ if( SDK_PYTHON_EXECUTABLE AND EXISTS "${CONVAR_CHECK_SCRIPT}" )
 			"${CONVAR_CHECK_SCRIPT}"
 			--product ${PROJECT_NAME}
 			--root "${ENGINE_SOURCE_DIR}/.."
+			--build-dir "${CMAKE_BINARY_DIR}"
 		COMMENT "check_convar_names (${PROJECT_NAME})"
 		VERBATIM
 	)

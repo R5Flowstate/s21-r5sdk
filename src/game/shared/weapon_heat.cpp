@@ -28,7 +28,9 @@
 #include <fstream>
 #include "public/tier1/sdk_parse.h"
 #include "game/server/player_overheat.h"
+#include "game/server/energize.h"
 #include "game/server/offhand_jump_toggle.h"
+#include "game/shared/edict_dirty.h"
 
 extern CGlobalVars* gpGlobals;
 
@@ -60,6 +62,16 @@ static ConVar bridge_charge_overheat_cooldown("bridge_charge_overheat_cooldown",
 	FCVAR_RELEASE,
 	"Use charge_overheat_cooldown_time/delay when a charge weapon overheats "
 	"(0=off, 1=on).");
+
+static void WeaponHeat_FireLeadChanged_f(IConVar* pConVar, const char* pOldString, float flOldValue, ChangeUserData_t pUserData);
+
+// S21 ends a fired charge at the current time; this engine ends it one shot interval
+// ahead, and the next ChargeBegin rebases on that, so heat builds faster per shot.
+static ConVar bridge_charge_fire_lead("bridge_charge_fire_lead", "0",
+	FCVAR_RELEASE,
+	"Keep the engine's one-shot-interval lead on a fired charge's end time "
+	"(0=S21 rule, no lead; 1=stock).",
+	&WeaponHeat_FireLeadChanged_f);
 
 // Charge-system offsets. GetWeaponChargeFraction inner must match these.
 static constexpr int WEAPON_CLASSNAME_OFFSET             = 0x15B0;
@@ -96,13 +108,13 @@ static constexpr int WEAPON_CHARGE_COOLDOWN_TIME_OFFSET  = WEAPON_MODVARS_OFFSET
 static constexpr int WEAPON_CHARGE_COOLDOWN_DELAY_OFFSET = WEAPON_MODVARS_OFFSET + 0x4D8;
 static constexpr int WEAPON_CHARGE_LEVELS_OFFSET         = WEAPON_MODVARS_OFFSET + 0x4E0;
 static constexpr int WEAPON_CHARGE_LEVEL_BASE_OFFSET     = WEAPON_MODVARS_OFFSET + 0x4E4;
-// charge_overheats_when_full -- S3 KV bool at modvars+0x4EE.
+// charge_overheats_when_full -- dedi KV bool at modvars+0x4EE.
 static constexpr int WEAPON_CHARGE_OVERHEATS_WHEN_FULL_OFFSET = WEAPON_MODVARS_OFFSET + 0x4EE;
 // charge_remain_full_when_fired -- GetChargeFraction's no-decay early-out.
 static constexpr int WEAPON_CHARGE_REMAIN_FULL_OFFSET    = WEAPON_MODVARS_OFFSET + 0x4EC;
 // charge_require_input -- KV bool at modvars+0x4E8 (entity +0x1CC8).
 static constexpr int WEAPON_CHARGE_REQUIRE_INPUT_OFFSET  = WEAPON_MODVARS_OFFSET + 0x4E8;
-// S3 charge_cooldown_time_late1/2/3. S21 renamed these to charge_overheat_*.
+// dedi charge_cooldown_time_late1/2/3. S21 renamed these to charge_overheat_*.
 static constexpr int MODVAR_CHARGE_COOLDOWN_TIME_LATE1   = 0x4CC;
 static constexpr int MODVAR_CHARGE_COOLDOWN_TIME_LATE2   = 0x4D0;
 static constexpr int MODVAR_CHARGE_COOLDOWN_TIME_LATE3   = 0x4D4;
@@ -146,7 +158,7 @@ struct WeaponHeatConfig
 	// only has charge_attack_requires_full_charge (bool, default 0).
 	float chargeAttackMinChargeRequired = 0.0f;
 
-	// charge_overheat_cooldown_time / _delay. S3 has the overheat predicate
+	// charge_overheat_cooldown_time / _delay. dedi has the overheat predicate
 	// and the late-ramp slots; it has no schema entries for these two.
 	bool hasOverheatCooldown = false;
 	float overheatCooldownTime = 0.0f;
@@ -335,6 +347,7 @@ static WeaponHeatConfig LoadHeatConfigFromFile(const std::string& weaponClassNam
 	std::string line;
 	std::string heatModVar0Name;
 
+	int depth = 0;
 	while (std::getline(file, line))
 	{
 		size_t commentPos = line.find("//");
@@ -343,6 +356,22 @@ static WeaponHeatConfig LoadHeatConfigFromFile(const std::string& weaponClassNam
 
 		Sdk_TrimWhitespace(line);
 		if (line.empty())
+			continue;
+
+		// Only WeaponData's own keys: a Mods block repeats them as "*0.75" style
+		// multipliers, which parse to 0 and would overwrite the base value.
+		const int lineDepth = depth;
+		bool inQuote = false;
+		for (const char c : line)
+		{
+			if (c == '"')
+				inQuote = !inQuote;
+			else if (!inQuote && c == '{')
+				depth++;
+			else if (!inQuote && c == '}')
+				depth--;
+		}
+		if (lineDepth != 1)
 			continue;
 
 		size_t pos = 0;
@@ -491,7 +520,7 @@ static const WeaponHeatConfig& GetHeatConfig(const char* weaponClassName)
 	return result.first->second;
 }
 
-// Seed m_burstFireCount from the KV. The S3 server never does this for itself.
+// Seed m_burstFireCount from the KV. The dedi server never does this for itself.
 void WeaponHeat_SeedBurstFireCount(void* pWeapon)
 {
 	if (!pWeapon)
@@ -985,6 +1014,8 @@ static char(__fastcall* v_CWeaponX_PrimaryAttack)(__int64 weapon) = nullptr;
 static char(__fastcall* v_CWeaponX_HandleChargeAttack)(__int64 weapon, char isHoldingAttack,
 	char isPrimaryAttack) = nullptr;
 static char(__fastcall* v_CWeaponX_ChargeEndNoAttack)(__int64 weapon) = nullptr;
+static char(__fastcall* v_CWeaponX_ChargeEnd_Internal)(__int64 weapon, char a2, char a3) = nullptr;
+static char(__fastcall* v_CWeaponX_BeginChargeCooldown)(__int64 weapon) = nullptr;
 
 // Unconditional first-call announce so a silent stub cannot hide.
 static void WeaponHeat_AnnounceHookOnce(bool& flag, const char* name)
@@ -1045,6 +1076,7 @@ static char __fastcall Hook_CWeaponX_PrimaryAttack(__int64 weapon)
 		void* const pWeapon = reinterpret_cast<void*>(weapon);
 		WeaponHeat_OnFired(pWeapon);
 		PlayerOverheat_OnWeaponFired(pWeapon);
+		EnergizeBridge_OnWeaponFired(pWeapon);
 	}
 
 	return result;
@@ -1188,6 +1220,120 @@ static char __fastcall Hook_CWeaponX_HandleChargeAttack(__int64 weapon, char isH
 	return v_CWeaponX_HandleChargeAttack(weapon, isHoldingAttack, isPrimaryAttack);
 }
 
+// The server build times the overheat lockout off charge_cooldown_time/_delay; S21
+// weapon files put it in charge_overheat_cooldown_* and keep the pair for post-shot.
+static bool WeaponHeat_OverheatCooldownTimes(void* pWeapon, float* pTime, float* pDelay)
+{
+	if (!pWeapon || !bridge_charge_overheat_cooldown.GetBool())
+		return false;
+
+	const uintptr_t base = reinterpret_cast<uintptr_t>(pWeapon);
+	if (!*reinterpret_cast<const unsigned char*>(base + WEAPON_CHARGE_OVERHEATS_WHEN_FULL_OFFSET))
+		return false;
+
+	const WeaponHeatConfig& config = GetHeatConfig(GetWeaponClassName(pWeapon));
+	if (!config.hasOverheatCooldown)
+		return false;
+
+	ResolveOverheatCooldownTimes(pWeapon, config, pTime, pDelay);
+	return *pTime > 0.0f;
+}
+
+// Charge end skips its fire lead when charge_weapon_fires_while_charging (+0x1CD0) is
+// clear; forcing that branch skips chargeEnd += 1/fire_rate + fire_duration.
+static CMemory s_fireLeadGate;
+static constexpr ptrdiff_t FIRE_LEAD_GATE_JE = 0x7;
+
+static void WeaponHeat_PatchFireLead(const bool bS21)
+{
+	if (!s_fireLeadGate)
+		return;
+
+	s_fireLeadGate.Offset(FIRE_LEAD_GATE_JE).Patch({ static_cast<uint8_t>(bS21 ? 0xEB : 0x74) });
+}
+
+static void WeaponHeat_FireLeadChanged_f(IConVar* pConVar, const char* pOldString, float flOldValue, ChangeUserData_t pUserData)
+{
+	(void)pConVar; (void)pOldString; (void)flOldValue; (void)pUserData;
+	WeaponHeat_PatchFireLead(!bridge_charge_fire_lead.GetBool());
+}
+
+// m_nextPrimaryAttack and the latch the engine raises alongside it.
+static constexpr int WEAPON_NEXT_PRIMARY_ATTACK_OFFSET     = 0x11F8;
+static constexpr int WEAPON_NEXT_PRIMARY_ATTACK_MAX_OFFSET = 0x11FC;
+
+// The overheat branch writes chargeEnd + delay + time into m_nextPrimaryAttack.
+// Only a value matching that stock sum is replaced, so a later lockout survives.
+static char __fastcall Hook_CWeaponX_ChargeEnd_Internal(__int64 weapon, char a2, char a3)
+{
+	static bool s_seen = false;
+	WeaponHeat_AnnounceHookOnce(s_seen, "ChargeEnd_Internal");
+
+	const char result = v_CWeaponX_ChargeEnd_Internal(weapon, a2, a3);
+
+	void* const pWeapon = reinterpret_cast<void*>(weapon);
+	float ohTime = 0.0f;
+	float ohDelay = 0.0f;
+	if (!WeaponHeat_IsChargeOverheated(pWeapon)
+		|| !WeaponHeat_OverheatCooldownTimes(pWeapon, &ohTime, &ohDelay))
+		return result;
+
+	const uintptr_t base = static_cast<uintptr_t>(weapon);
+	const float chargeEnd = *reinterpret_cast<const float*>(base + WEAPON_CHARGE_END_TIME_OFFSET);
+	const float stock = (*reinterpret_cast<const float*>(base + WEAPON_CHARGE_COOLDOWN_DELAY_OFFSET) + chargeEnd)
+		+ *reinterpret_cast<const float*>(base + WEAPON_CHARGE_COOLDOWN_TIME_OFFSET);
+	float* const pNext = reinterpret_cast<float*>(base + WEAPON_NEXT_PRIMARY_ATTACK_OFFSET);
+	if (fabsf(*pNext - stock) > 1e-4f)
+		return result;
+
+	const float lockout = chargeEnd + ohDelay + ohTime;
+	float* const pNextMax = reinterpret_cast<float*>(base + WEAPON_NEXT_PRIMARY_ATTACK_MAX_OFFSET);
+	*pNext = lockout;
+	if (*pNextMax < lockout)
+		*pNextMax = lockout;
+	MarkEntityEdictDirty(pWeapon);
+
+	static bool s_announced = false;
+	if (!s_announced)
+	{
+		s_announced = true;
+		Msg(eDLL_T::SERVER, "[CHARGE-OH] '%s' overheat lockout %.3f -> %.3f s\n",
+			GetWeaponClassName(pWeapon), stock - chargeEnd, lockout - chargeEnd);
+	}
+	return result;
+}
+
+// Entering overheat cooldown sizes it from charge_cooldown_time; serve the overheat
+// pair for the call, keeping a slot something else rewrote meanwhile.
+static char __fastcall Hook_CWeaponX_BeginChargeCooldown(__int64 weapon)
+{
+	static bool s_seen = false;
+	WeaponHeat_AnnounceHookOnce(s_seen, "BeginChargeCooldown");
+
+	void* const pWeapon = reinterpret_cast<void*>(weapon);
+	float ohTime = 0.0f;
+	float ohDelay = 0.0f;
+	if (!WeaponHeat_IsChargeOverheated(pWeapon)
+		|| !WeaponHeat_OverheatCooldownTimes(pWeapon, &ohTime, &ohDelay))
+		return v_CWeaponX_BeginChargeCooldown(weapon);
+
+	const uintptr_t base = static_cast<uintptr_t>(weapon);
+	float* const pTime = reinterpret_cast<float*>(base + WEAPON_CHARGE_COOLDOWN_TIME_OFFSET);
+	float* const pDelay = reinterpret_cast<float*>(base + WEAPON_CHARGE_COOLDOWN_DELAY_OFFSET);
+	const float savedTime = *pTime;
+	const float savedDelay = *pDelay;
+	*pTime = ohTime;
+	*pDelay = ohDelay;
+
+	const char result = v_CWeaponX_BeginChargeCooldown(weapon);
+
+	if (*pTime == ohTime)
+		*pTime = savedTime;
+	if (*pDelay == ohDelay)
+		*pDelay = savedDelay;
+	return result;
+}
+
 static float __fastcall Hook_CWeaponX_GetChargeFraction(void* pWeapon)
 {
 	static bool s_seen = false;
@@ -1207,12 +1353,14 @@ void WeaponHeat_LevelShutdown()
 void VWeaponHeat::GetAdr(void) const
 {
 	LogFunAdr("PlayWeaponEffectNoCull_Native", v_PlayWeaponEffectNoCull_Native);
-	LogFunAdr("CWeaponX::GetChargeFraction", v_CWeaponX_GetChargeFraction);
-	LogFunAdr("CWeaponX::PlayerWeapon_PostFrame", v_CWeaponX_PlayerWeapon_PostFrame);
-	LogFunAdr("CWeaponX::PlayerWeapon_BusyFrame", v_CWeaponX_PlayerWeapon_BusyFrame);
-	LogFunAdr("CWeaponX::PrimaryAttack", v_CWeaponX_PrimaryAttack);
-	LogFunAdr("CWeaponX::HandleChargeAttack_Internal", v_CWeaponX_HandleChargeAttack);
-	LogFunAdr("CWeaponX::ChargeEndNoAttack", v_CWeaponX_ChargeEndNoAttack);
+	LogFunAdr("WeaponHeat_GetChargeFraction", v_CWeaponX_GetChargeFraction);
+	LogFunAdr("WeaponHeat_PostFrame", v_CWeaponX_PlayerWeapon_PostFrame);
+	LogFunAdr("WeaponHeat_BusyFrame", v_CWeaponX_PlayerWeapon_BusyFrame);
+	LogFunAdr("WeaponHeat_PrimaryAttack", v_CWeaponX_PrimaryAttack);
+	LogFunAdr("WeaponHeat_HandleChargeAttack", v_CWeaponX_HandleChargeAttack);
+	LogFunAdr("WeaponHeat_ChargeEndNoAttack", v_CWeaponX_ChargeEndNoAttack);
+	LogFunAdr("WeaponHeat_ChargeEnd", v_CWeaponX_ChargeEnd_Internal);
+	LogFunAdr("WeaponHeat_BeginChargeCooldown", v_CWeaponX_BeginChargeCooldown);
 }
 
 void VWeaponHeat::GetFun(void) const
@@ -1242,6 +1390,29 @@ void VWeaponHeat::GetFun(void) const
 		"48 83 EC 28 8B 81 34 12 00 00 83 E8 05 83 F8 01 76 16 E8 ?? ?? ?? ?? "
 		"84 C0 75 0D 38 81 51 15 00 00 75 05 48 83 C4 28 C3 45 33 C0 33 D2")
 		.GetPtr(v_CWeaponX_ChargeEndNoAttack);
+
+	// CWeaponX::ChargeEnd_Internal. Prologue through the isCharging (+0x1551)
+	// test and the two bool args being widened into esi/ebx.
+	Module_FindPattern(g_GameDll,
+		"48 8B C4 48 89 58 08 48 89 68 10 48 89 70 18 57 41 56 41 57 48 81 EC 80 00 00 00 "
+		"80 B9 51 15 00 00 00 41 0F B6 F0 0F 29 70 D8 0F B6 DA")
+		.GetPtr(v_CWeaponX_ChargeEnd_Internal);
+
+	// CWeaponX::BeginChargeCooldown (enters the overheat / post-shot cooldown
+	// state). m_weaponOwner validation, then the charge_overheats_when_full
+	// (+0x1CCE) test; wildcards are branch displacements and the entity-list lea.
+	Module_FindPattern(g_GameDll,
+		"4C 8B DC 53 48 81 EC 80 00 00 00 8B 91 F0 11 00 00 48 8B D9 8B C2 83 FA FF "
+		"0F 84 ?? ?? ?? ?? 0F B7 C2 C1 EA 10 48 8D 0C 40 48 03 C9 48 8D 05 ?? ?? ?? ?? "
+		"39 54 C8 08 0F 85 ?? ?? ?? ?? 48 83 3C C8 00 0F 84 ?? ?? ?? ?? 80 BB CE 1C 00 00 00")
+		.GetPtr(v_CWeaponX_BeginChargeCooldown);
+
+	s_fireLeadGate = Module_FindPattern(g_GameDll,
+		"44 38 B7 D0 1C 00 00 74 ?? 84 DB 74 ?? 48 8B CF E8");
+	if (!s_fireLeadGate)
+		Warning(eDLL_T::SERVER,
+			"[CHARGE-LEAD] ChargeEnd_Internal fire-lead gate unresolved -- "
+			"fired charges keep the stock one-shot lead\n");
 
 	// CWeaponX::PlayerWeapon_PostFrame (engine helper). Prologue through the
 	// m_weaponOwner load at weapon+0x11F0 and its -1 test; the wildcard is the
@@ -1283,6 +1454,12 @@ void VWeaponHeat::GetFun(void) const
 	if (!v_CWeaponX_GetChargeFraction)
 		Warning(eDLL_T::SERVER,
 			"[BowCharge] CWeaponX::GetChargeFraction pattern unresolved\n");
+	if (!v_CWeaponX_ChargeEnd_Internal || !v_CWeaponX_BeginChargeCooldown)
+		Warning(eDLL_T::SERVER,
+			"[CHARGE-OH] ChargeEnd_Internal=%p BeginChargeCooldown=%p unresolved -- "
+			"overheat lockout falls back to charge_cooldown_time\n",
+			reinterpret_cast<void*>(v_CWeaponX_ChargeEnd_Internal),
+			reinterpret_cast<void*>(v_CWeaponX_BeginChargeCooldown));
 	if (!v_CWeaponX_ChargeEndNoAttack)
 		Warning(eDLL_T::SERVER,
 			"[ChargeMin] CWeaponX::ChargeEndNoAttack pattern unresolved -- "
@@ -1308,6 +1485,11 @@ void VWeaponHeat::Detour(const bool bAttach) const
 		chargeRes = DetourSetup(&v_CWeaponX_HandleChargeAttack, &Hook_CWeaponX_HandleChargeAttack, bAttach);
 	if (v_CWeaponX_GetChargeFraction)
 		fracRes = DetourSetup(&v_CWeaponX_GetChargeFraction, &Hook_CWeaponX_GetChargeFraction, bAttach);
+	if (v_CWeaponX_ChargeEnd_Internal)
+		DetourSetup(&v_CWeaponX_ChargeEnd_Internal, &Hook_CWeaponX_ChargeEnd_Internal, bAttach);
+	if (v_CWeaponX_BeginChargeCooldown)
+		DetourSetup(&v_CWeaponX_BeginChargeCooldown, &Hook_CWeaponX_BeginChargeCooldown, bAttach);
+	WeaponHeat_PatchFireLead(bAttach && !bridge_charge_fire_lead.GetBool());
 
 	if (bAttach)
 		Msg(eDLL_T::SERVER,

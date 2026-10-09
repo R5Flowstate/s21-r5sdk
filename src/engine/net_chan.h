@@ -284,7 +284,7 @@ class VNetChan : public IDetour
 		// S21-native FlowUpdate -- the sole writer of m_DataFlow avg
 		// stats. prologue + `lea r8, [rcx+0x21F8]` (m_DataFlow base) is the unique sig.
 		Module_FindPattern(g_GameDll, "89 54 24 10 4C 8B DC 57 48 81 EC 80 00 00 00 48 8B 05 ?? ?? ?? ?? 4C 8D 81 F8 21 00 00").GetPtr(CNetChan__FlowUpdate);
-		// S21-specific patterns (S3 patterns match WRONG functions in S21!)
+		// S21-specific patterns (dedi patterns match WRONG functions in S21!)
 		Module_FindPattern(g_GameDll, "48 89 54 24 10 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 78 EB FF FF").GetPtr(CNetChan__SendDatagram);
 		Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 48 89 6C 24 ?? 57 48 81 EC ?? ?? ?? ?? 48 8B FA").GetPtr(CNetChan__ProcessMessages);
 		// CNetChan::SendNetMsg (S21 ): prologue + the `cmp [rcx+0x32D8],0`

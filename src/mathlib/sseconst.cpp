@@ -15,7 +15,6 @@
 
 #include "mathlib/ssemath.h"
 #include "mathlib/ssequaternion.h"
-//#include "mathlib/compressed_vector.h"
 
 // NOTE: This has to be the last file included!
 #include "tier0/memdbgon.h"

@@ -22,7 +22,7 @@
 #include <windows.h>
 
 //-----------------------------------------------------------------------------
-// Runtime gate. Disable + restart to revert to stock S3 (8-slot cap).
+// Runtime gate. Disable + restart to revert to stock dedi (8-slot cap).
 //-----------------------------------------------------------------------------
 static ConVar sdk_legendary_cap("sdk_legendary_cap", "1", FCVAR_REPLICATED,
 	"Lift legendary-skin slot cap from S3's 8 to S21's 32 (server-side). "
@@ -215,7 +215,7 @@ static bool ApplyModelPrecacheGrow(uintptr_t moduleBase, uintptr_t moduleSize)
 	HeapCanary::RegisterTail("legendary-modelprecache", g_pNewModelArray, kNewArrayBytes);
 
 	// Copy the existing 4096-entry table into the new buffer before redirecting readers.
-	const uintptr_t oldTable = moduleBase + 0x234E13D8;  // unk_1634E13D8
+	const uintptr_t oldTable = moduleBase + 0x234E13D8;
 	const size_t    oldBytes = 0x10000;                   // 4096 * 16
 	void* const pOldTable = reinterpret_cast<void*>(oldTable);
 	if (Mem_InModule(g_GameDll, pOldTable, oldBytes))
@@ -368,7 +368,7 @@ static int ApplyModelArrayPatches(uintptr_t moduleBase)
 	if (!g_pNewModelArray)
 		return 0;
 
-	const uintptr_t oldTable = moduleBase + 0x234E13D8;  // unk_1634E13D8
+	const uintptr_t oldTable = moduleBase + 0x234E13D8;
 	const intptr_t delta = (intptr_t)g_pNewModelArray - (intptr_t)oldTable;
 	if (delta < INT32_MIN || delta > INT32_MAX)
 	{
@@ -491,7 +491,7 @@ static int ApplyDisp32Table(uintptr_t moduleBase, const Disp32Patch (&table)[N],
 	return fail;
 }
 
-// -disable_wleg_legendary keeps the S3 cap so a bisect can isolate the slot-grow from the precache grow.
+// -disable_wleg_legendary keeps the dedi cap so a bisect can isolate the slot-grow from the precache grow.
 typedef __int64 (__fastcall* SetWeaponLegendaryModel_t)(
 	unsigned char* weaponName, int slot,
 	char* worldModel, unsigned char* viewModel);

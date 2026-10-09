@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: server half of the movement-ability input routing at the S3 Jump.
+// Purpose: server half of the movement-ability input routing at the dedi Jump.
 //
 //=============================================================================//
 #ifndef SERVER_MOVEMENT_ABILITY_INPUT_H

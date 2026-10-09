@@ -7,7 +7,7 @@
 #ifndef GAME_SHARED_CHATBUILDER_H
 #define GAME_SHARED_CHATBUILDER_H
 
-// S3 netmessage type. S21 has no equivalent slot, so the bridge decodes the
+// dedi netmessage type. S21 has no equivalent slot, so the bridge decodes the
 // body client-side the same way svc_DebugOverlay (69) is handled.
 static constexpr int kChatBuilderS2CType = 70;
 

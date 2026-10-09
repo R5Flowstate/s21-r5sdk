@@ -13,13 +13,6 @@
 // decide whether the cylinder joins the predicted-trigger partition.
 static constexpr ptrdiff_t TRG_OFF_CLIENT_SIDE_PREDICTED = 0xCA8;
 
-static ConVar bridge_trigger_clientpredict_author(
-	"bridge_trigger_clientpredict_author", "1", FCVAR_RELEASE,
-	"Author CBaseTrigger::m_bClientSidePredicted on trigger_cylinder_heavy so the S21 "
-	"client can predict the touch. 0 = ship behaviour (never authored).");
-
-static volatile LONG s_bAnnounced = 0;
-
 //-----------------------------------------------------------------------------
 // Purpose: CTriggerCylinderHeavy ctor -- author m_bClientSidePredicted after
 // the original body has initialised the entity.
@@ -28,15 +21,8 @@ static void* Hook_CTriggerCylinderHeavy_Ctor(void* pThis)
 {
 	void* const pRet = CTriggerCylinderHeavy__Ctor(pThis);
 
-	if (bridge_trigger_clientpredict_author.GetBool() && pRet)
-	{
-		*reinterpret_cast<uint8_t*>(
-			static_cast<uint8_t*>(pRet) + TRG_OFF_CLIENT_SIDE_PREDICTED) = 1;
-
-		if (InterlockedCompareExchange(&s_bAnnounced, 1, 0) == 0)
-			DevMsg(eDLL_T::SERVER,
-				"[TRIG-PRED] authored m_bClientSidePredicted on CTriggerCylinderHeavy\n");
-	}
+	if (pRet)
+		*reinterpret_cast<uint8_t*>(static_cast<uint8_t*>(pRet) + TRG_OFF_CLIENT_SIDE_PREDICTED) = 1;
 
 	return pRet;
 }

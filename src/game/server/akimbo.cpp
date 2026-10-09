@@ -65,7 +65,6 @@ static constexpr uintptr_t kPlayerButtonsOffset = 0x60DC; // m_nButtons, m_afBut
 static constexpr uintptr_t kActiveWeaponsOffset = 0x16CC; // activeWeapons[3]
 static constexpr uintptr_t kSelectedWeaponsOffset = 0x16D8; // m_selectedWeapons[2] int8
 static constexpr uintptr_t kLatestPrimaryWeaponsOffset = 0x16DC; // m_latestPrimaryWeapons[2]
-static constexpr int kEntityHandleOffset = 8; // m_RefEHandle
 
 static constexpr int8_t kSelectedSlotInvalid = -1;
 static constexpr int8_t kSelectedSlotEmpty = -3;
@@ -123,6 +122,7 @@ static SDKEntityMap<AkimboWeaponState> s_akimboWeaponServer(ESide::Server, "akim
 struct AkimboPlayerState
 {
 	float nextRaiseRetry = 0.0f;
+	uint32_t stateMain = 0xFFFFFFFFu; // handle of the main the current state was applied to
 };
 
 static SDKEntityMap<AkimboPlayerState> s_akimboPlayerServer(ESide::Server, "akimbo.ply");
@@ -157,14 +157,6 @@ static std::unordered_map<uint64_t, AkimboWeaponConfig> s_configCache;
 static inline const char* GetWeaponClassNameRaw(void* pWeapon)
 {
 	return pWeapon ? (const char*)((uintptr_t)pWeapon + WEAPON_CLASSNAME_OFFSET) : "";
-}
-
-static inline uint32_t EntityHandle(const void* pEnt)
-{
-	if (!pEnt)
-		return 0xFFFFFFFFu;
-	return *reinterpret_cast<const uint32_t*>(
-		reinterpret_cast<const uint8_t*>(pEnt) + kEntityHandleOffset);
 }
 
 static inline WeaponInventory* GetInventory(void* pPlayer)
@@ -402,7 +394,7 @@ static int Inv_GetIndex(void* pPlayer, void* pWeapon)
 	if (!pInv)
 		return -1;
 
-	const uint32_t weaponEh = EntityHandle(pWeapon);
+	const uint32_t weaponEh = SDKEntityState_GetHandle(pWeapon).Raw();
 	for (int i = 0; i < 9; ++i)
 	{
 		if (static_cast<uint32_t>(pInv->weapons[i].ToInt()) == weaponEh)
@@ -730,13 +722,19 @@ static void SetState(void* pPlayer, int newState)
 	if (!pPlayer)
 		return;
 
+	void* const main = GetActive(pPlayer, 0);
+	const uint32_t mainHandle = main ? SDKEntityState_GetHandle(main).Raw() : 0xFFFFFFFFu;
+	AkimboPlayerState& plState = s_akimboPlayerServer[pPlayer];
+
+	// A swap between two akimbo pairs keeps the state number, but the new
+	// pair still needs its state mods and optic mask.
 	const int oldState = GetAkimboState(pPlayer);
-	if (oldState == newState)
+	if (oldState == newState && (newState == AKIMBO_STATE_NONE || plState.stateMain == mainHandle))
 		return;
+	plState.stateMain = mainHandle;
 
 	SetBccI32(pPlayer, offsetof(BCCExtendWire, m_akimboState), newState);
 
-	void* const main = GetActive(pPlayer, 0);
 	const HSCRIPT hMain = main
 		? reinterpret_cast<CBaseEntity*>(main)->GetScriptInstance()
 		: nullptr;
@@ -1116,8 +1114,25 @@ unsigned int AkimboBridge_AppendActivityModifiers(void* pWeapon, uint16_t* pMods
 	if (!AkimboBridge_IsAkimboWeapon(pWeapon))
 		return count;
 	void* const owner = GetOwner(pWeapon);
-	if (!owner || GetAkimboState(owner) < AKIMBO_STATE_OFFHAND)
+	if (!owner)
 		return count;
+
+	// The partner deploys inside the hand-1 switch, before UpdateState has
+	// moved the stored state off NONE; judge the pair from the hands too.
+	if (GetAkimboState(owner) < AKIMBO_STATE_OFFHAND)
+	{
+		void* const main = GetActive(owner, 0);
+		if (!main || !AkimboBridge_IsAkimboWeapon(main) || AkimboBridge_IsDisabled(main))
+			return count;
+		void* const other = AkimboBridge_GetOtherWeapon(main);
+		if (!other || (pWeapon != main && pWeapon != other) || GetActive(owner, 1) != other)
+			return count;
+
+		if (bridge_akimbo_diag.GetBool())
+		{
+			Msg(eDLL_T::SERVER, "[Akimbo] dualwield before state weapon=%p main=%p other=%p\n", pWeapon, main, other);
+		}
+	}
 
 	static CUtlSymbol s_dualwield;
 	if (!s_dualwield.IsValid())
@@ -1396,7 +1411,7 @@ void AkimboBridge_OnSetActiveWeapon(void* pPlayer, unsigned int hand, void* pWea
 			void* const other = AkimboBridge_GetOtherWeapon(pWeapon);
 			uint32_t* const pLatest = reinterpret_cast<uint32_t*>(
 				reinterpret_cast<uint8_t*>(pPlayer) + kLatestPrimaryWeaponsOffset + 4);
-			const uint32_t eh = other ? EntityHandle(other) : 0xFFFFFFFFu;
+			const uint32_t eh = other ? SDKEntityState_GetHandle(other).Raw() : 0xFFFFFFFFu;
 			if (*pLatest != eh)
 			{
 				*pLatest = eh;

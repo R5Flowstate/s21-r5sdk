@@ -100,7 +100,7 @@ void SpdLog_Init(const bool bAnsiColor)
 	}
 
 	// Role subdir so client.dll and server.dll never mix GUID sessions under
-	// one platform/logs tree (unified s21-full install).
+	// one platform/logs tree.
 	constexpr const char* kLogRole = "client";
 	g_LogSessionDirectory = fmt::format("platform/logs/{:s}/{:s}", kLogRole, g_LogSessionUUID);
 	CreateDirectoryA("platform", nullptr);
@@ -300,7 +300,7 @@ void SpdLog_Init(const bool bAnsiColor)
 	}
 
 	// Role subdir so client.dll and server.dll never mix GUID sessions under
-	// one platform/logs tree (unified s21-full install).
+	// one platform/logs tree.
 	constexpr const char* kLogRole = "server";
 	g_LogSessionDirectory = fmt::format("platform/logs/{:s}/{:s}", kLogRole, g_LogSessionUUID);
 	CreateDirectoryA("platform", nullptr);

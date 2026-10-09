@@ -1258,7 +1258,7 @@ static void CC_DatatableDiagDump(const CCommand& args)
 
 static ConCommand datatable_diag_dump("datatable_diag_dump", CC_DatatableDiagDump,
 	"Dump disk-datatable override GUIDs, script miss GUIDs, and hit/miss counters",
-	FCVAR_RELEASE);
+	FCVAR_DEVELOPMENTONLY);
 
 //=============================================================================
 // Detour class

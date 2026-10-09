@@ -65,12 +65,12 @@ class VGame : public IDetour
 	}
 	virtual void GetFun(void) const
 	{
-		// S21: AttachToWindow -- S3 pattern matches S21 directly
+		// S21: AttachToWindow -- dedi pattern matches S21 directly
 		Module_FindPattern(g_GameDll, "48 83 EC 28 48 8B 0D ?? ?? ?? ?? 48 85 C9 0F 84 ?? ?? ?? ?? BA ?? ?? ?? ??").GetPtr(CGame__AttachToWindow);
-		// S21: PlayStartupVideos -- S3 pattern has 3 matches, use first (ambiguous but non-critical)
+		// S21: PlayStartupVideos -- dedi pattern has 3 matches, use first (ambiguous but non-critical)
 		Module_FindPattern(g_GameDll, "48 8B C4 55 48 8D A8 ?? ?? ?? ?? 48 81 EC ?? ?? ?? ?? 80 3D ?? ?? ?? ?? ??").GetPtr(CGame__PlayStartupVideos);
 		// S21: WindowProc -- found via AttachToWindow's SetWindowLongPtrW target 
-		// S3 pattern ends with "33 F6" (xor esi,esi) but S21 uses "45 33 FF" (xor r15d,r15d)
+		// dedi pattern ends with "33 F6" (xor esi,esi) but S21 uses "45 33 FF" (xor r15d,r15d)
 		Module_FindPattern(g_GameDll, "48 89 5C 24 ?? 48 89 74 24 ?? 48 89 7C 24 ?? 55 41 56 41 57 48 8D 6C 24 B9 48 81 EC C0 00 00 00 45 33 FF 49 8B F1 44 39").GetPtr(CGame__WindowProc);
 	}
 	virtual void GetVar(void) const

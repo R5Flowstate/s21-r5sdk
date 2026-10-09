@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: Graft S21-new networked props onto S3 SendTables. Hooks
+// Purpose: Graft S21-new networked props onto dedi SendTables. Hooks
 // SendTable_Init before SetupFlatPropertyArray. Server-only.
 //
 //=============================================================================//
@@ -13,7 +13,7 @@
 #include <cstddef>
 
 //-----------------------------------------------------------------------------
-// One S21-new prop grafted onto an S3 SendTable. valBytes = per-element size;
+// One S21-new prop grafted onto a dedi SendTable. valBytes = per-element size;
 // nElements = 0 for a scalar. insertAfter memmove's the prop after that name.
 //-----------------------------------------------------------------------------
 struct DTExtendProp
@@ -107,7 +107,7 @@ void DTExtend_DumpSeqTableForStudioHdr(uintptr_t studioHdrPtr, const char* reaso
 #ifndef CLIENT_DLL
 class ConVar;
 
-// SendTable / SendProp S3 layout. Shared by sibling TUs.
+// SendTable / SendProp dedi layout. Shared by sibling TUs.
 constexpr uint32_t ST_PROPS         = 0x00;
 constexpr uint32_t ST_NPROPS        = 0x08;
 constexpr uint32_t ST_NETTABLENAME  = 0x4B8;

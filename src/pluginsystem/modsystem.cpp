@@ -21,7 +21,7 @@
 //-----------------------------------------------------------------------------
 // Mod discovery file access.
 //
-// The S21 client's filesystem vtable diverges from the S3 layout these headers
+// The S21 client's filesystem vtable diverges from the dedi layout these headers
 // describe past the basic Open/Read/Size/Close block, so IsDirectory,
 // FindFirstEx, LoadKeyValues and WriteFile land on unrelated slots there. On
 // that product the mod tree is read from the install root directly; the dedi

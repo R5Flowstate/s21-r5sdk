@@ -1,7 +1,7 @@
 //=============================================================================//
 //
-// Purpose: static S3->S21 activity ID table, matched by name. AUTO-GENERATED
-// by tools/build_xlat_table.py -- do not hand-edit.
+// Purpose: static dedi->S21 activity ID table, matched by name. Generated --
+// do not hand-edit.
 //
 //=============================================================================//
 #ifndef ACTIVITY_S3_TO_S21_TABLE_H

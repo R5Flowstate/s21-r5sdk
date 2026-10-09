@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: Server-authoritative skyward launch. S3 dedi has none.
+// Purpose: Server-authoritative skyward launch. dedi has none.
 //
 //=============================================================================//
 #ifndef SKYWARD_BRIDGE_H

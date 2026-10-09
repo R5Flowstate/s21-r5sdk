@@ -1013,7 +1013,7 @@ static bool h_C_BaseEntity__PostNetworkDataReceived(void* pEntity, __int64 nLate
 		PredAuth_NoteAckCount(static_cast<int>(nLatestCmd), nAcked);
 
 	// [SHOT-IDX-FANOUT] before mask/census/native compare -- the wire only
-	// carries S3's pre-split m_shotCount; fan it into m_shotIndexForSpread so
+	// carries dedi's pre-split m_shotCount; fan it into m_shotIndexForSpread so
 	// the compare, the originalData refresh and any rebase see the fed value.
 	if (nAcked > 0 && pEntity)
 		PredAuth_ShotIndexFanout(pEntity);

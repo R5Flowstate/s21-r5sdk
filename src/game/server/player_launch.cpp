@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: S3 port of PlayerLaunch. See player_launch.h.
+// Purpose: dedi port of PlayerLaunch. See player_launch.h.
 //
 //=============================================================================//
 #include "core/stdafx.h"

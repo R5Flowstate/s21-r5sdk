@@ -1,6 +1,6 @@
 //=============================================================================
 //
-// Purpose: S21->S3 weaponCustomActivity at Weapon_ExecuteCustomActivityCmd.
+// Purpose: S21->dedi weaponCustomActivity at Weapon_ExecuteCustomActivityCmd.
 //
 //=============================================================================
 #include "core/stdafx.h"
@@ -77,8 +77,8 @@ bool WeaponCustomAct_ServerExecuteByName(void* pPlayer, const char* activityName
 		return false;
 	}
 
-	// Trampoline -> original, with S3-native id. Do NOT call through the
-	// detoured entry (that applies S21->S3 C2S translation).
+	// Trampoline -> original, with dedi-native id. Do NOT call through the
+	// detoured entry (that applies S21->dedi C2S translation).
 	v_Weapon_ExecuteCustomActivityCmd_Live(
 		reinterpret_cast<__int64>(pPlayer),
 		static_cast<unsigned int>(s3Id));

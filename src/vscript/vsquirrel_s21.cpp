@@ -307,7 +307,7 @@ static void Script_EnsureRegisterFunctionResolved_S21(void)
 	if (CSquirrelVM__RegisterFunction)
 		return;
 
-	// Same S21 pattern as VSquirrelS21Core::GetFun (S3 short pattern).
+	// Same S21 pattern as VSquirrelS21Core::GetFun (dedi short pattern).
 	Module_FindPattern(g_GameDll, "48 83 EC 38 45 0F B6 C8")
 		.GetPtr(CSquirrelVM__RegisterFunction);
 
@@ -1011,7 +1011,7 @@ void VSquirrelS21Core::GetFun(void) const
 		"48 83 EC 38 45 0F B6 C8")
 		.GetPtr(CSquirrelVM__RegisterFunction);
 
-	// Short S3 pattern hits two funcs; + mov r10,[rcx+30h] is unique (m_hVM +0x30).
+	// Short dedi pattern hits two funcs; + mov r10,[rcx+30h] is unique (m_hVM +0x30).
 	Module_FindPattern(g_GameDll,
 		"48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC 30 4C 8B 51 30")
 		.GetPtr(CSquirrelVM__RegisterConstant);

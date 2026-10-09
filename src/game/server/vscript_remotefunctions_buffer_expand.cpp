@@ -20,7 +20,7 @@
 #include <windows.h>
 
 //-----------------------------------------------------------------------------
-// Runtime gate. Disable + restart to revert to stock S3 behavior
+// Runtime gate. Disable + restart to revert to stock dedi behavior
 // (16 KB / 256-entry cap, fatal overflow when S21 scripts register >256
 // client functions).
 //-----------------------------------------------------------------------------
@@ -31,11 +31,11 @@ static ConVar sdk_remote_func_buffer_expand("sdk_remote_func_buffer_expand", "1"
 	"register >256 client functions. Disable + restart for stock S3 limits.");
 
 //-----------------------------------------------------------------------------
-// S3 layout constants (where things live in r5apex_ds.exe's static.bss).
+// dedi layout constants (where things live in r5apex_ds.exe's static.bss).
 // All RVAs are module_base =.
 //-----------------------------------------------------------------------------
 namespace s3 {
-	constexpr uint32_t kBufferBaseRVA = 0x027B28E0; // unk_1427B28E0
+	constexpr uint32_t kBufferBaseRVA = 0x027B28E0;
 	constexpr uint32_t kBufferSize    = 0x4000;     // 16 KB
 	constexpr uint32_t kEntryCap      = 0x100;      // 256 entries
 

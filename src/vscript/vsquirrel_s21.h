@@ -1,5 +1,5 @@
 //=============================================================================//
-// S21 Squirrel VM hooks. Stock VSquirrel* patterns are S3; this class is the S21 set.
+// S21 Squirrel VM hooks. Stock VSquirrel* patterns are dedi; this class is the S21 set.
 // VM-type byte: *(uint8_t*)(HSQUIRRELVM->_sharedstate + 0x4450).
 //=============================================================================//
 #ifndef VSQUIRREL_S21_H
@@ -37,7 +37,7 @@ inline eDLL_T SQVM_GetVMType_S21(HSQUIRRELVM v)
 	}
 }
 
-// CSquirrelVM::m_iContext offset on S21 is +0x60 (S3 was +0x3C).
+// CSquirrelVM::m_iContext offset on S21 is +0x60 (dedi was +0x3C).
 static constexpr size_t kS21_CSquirrelVM_Context = 0x60;
 
 inline SQCONTEXT CSquirrelVM_GetContext_S21(void* const s)
@@ -74,7 +74,7 @@ inline const char* SQVM_GetContextLabel_S21(eDLL_T ctx)
 	}
 }
 
-// S21 ScriptFunctionBinding_t is 0x58 (S3 was 0x68).
+// S21 ScriptFunctionBinding_t is 0x58 (dedi was 0x68).
 #pragma pack(push, 8)
 struct ScriptFunctionBinding_S21
 {
@@ -108,7 +108,7 @@ inline unsigned int g_nS21ScriptVMGeneration = 0;
 // Bumped on client VM (re)init only; one per level.
 inline unsigned int g_nS21ClientVMGeneration = 0;
 
-// S21 m_hVM is at +0x30 (not the S3 GetVM/+0x08 layout).
+// S21 m_hVM is at +0x30 (not the dedi GetVM/+0x08 layout).
 HSQUIRRELVM CSquirrelVM_GetHVM_S21(CSquirrelVM* const s);
 bool        CSquirrelVM_IsAlive_S21(CSquirrelVM* const s);
 

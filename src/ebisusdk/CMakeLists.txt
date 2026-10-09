@@ -36,8 +36,7 @@ macro( add_ebisu_lib LIB_NAME )
 
 	if( ${LIB_NAME} STREQUAL "EbisuSDK_cl" )
 		target_compile_definitions( ${PROJECT_NAME} PRIVATE
-			"CLIENT_DLL"
-			"GAMEDLL_S21"
+			"CLIENT_DLL"
 		)
 	endif()
 endmacro()

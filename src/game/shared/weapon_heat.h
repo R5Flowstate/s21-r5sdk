@@ -5,7 +5,7 @@
 //=============================================================================//
 #if defined(CLIENT_DLL)
 // Server-only. The S21 client owns heat natively; duplicates here shadowed its natives
-// and wrote S3 struct offsets that address nothing on the client.
+// and wrote dedi struct offsets that address nothing on the client.
 #else // !CLIENT_DLL
 #ifndef WEAPON_HEAT_H
 #define WEAPON_HEAT_H
@@ -31,7 +31,7 @@ int   WeaponHeat_WireGetFullyHeated(void* pWeapon);
 // safe from the snapshot pack worker (WeapState_XlatProxy).
 bool WeaponHeat_IsChargeOverheated(void* pWeapon);
 
-// Copies the weapon KV's burst_fire_count into m_burstFireCount, which the S3
+// Copies the weapon KV's burst_fire_count into m_burstFireCount, which the dedi
 // server never does for itself. Runs ahead of both heat passes because the
 // fully-heated latch is only correct once the count is right.
 void WeaponHeat_SeedBurstFireCount(void* pWeapon);

@@ -218,7 +218,7 @@ static SQBool Script_CheckServerIndexAndFailure(HSQUIRRELVM v, SQInteger iServer
         Warning(eDLL_T::CLIENT, "[SERVERBROWSER] %s (index %i, count %i)\n",
             reason, (int)iServer, (int)iCount);
 
-    // One-shot stack dump: S3 this=1, first arg=2.
+    // One-shot stack dump: dedi this=1, first arg=2.
     static bool bDumpedStack = false;
     if (!bDumpedStack)
     {

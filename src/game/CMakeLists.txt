@@ -44,7 +44,7 @@ add_sources( SOURCE_GROUP "Activity"
     # DEDI server activity xlat (S3 ordinals -> S21)
     "shared/activity_s3_to_s21.h"
     "shared/activity_s21_enum.h"
-    # CLIENT activity xlat (folded from s21-client)
+    # CLIENT activity xlat
     "shared/activity_s3_to_s21_client.cpp"
     "shared/activity_s3_to_s21_client.h"
     "shared/activity_s3_to_s21_table.h"
@@ -90,6 +90,8 @@ add_sources( SOURCE_GROUP "Weapon"
     "shared/heap_canary.h"
     "shared/weapon_legendary_ext.cpp"
     "shared/weapon_legendary_ext.h"
+    "shared/weapon_mod_names_ext.cpp"
+    "shared/weapon_mod_names_ext.h"
     "shared/weapon_customact_c2s_xlat.cpp"
     "shared/weapon_customact_c2s_xlat.h"
     "shared/weapon_heat.cpp"
@@ -270,6 +272,8 @@ add_sources( SOURCE_GROUP "Player"
     "server/drag_revive.h"
     "server/entity_script_ext.cpp"
     "server/entity_script_ext.h"
+    "server/base_push.cpp"
+    "server/base_push.h"
     "server/script_mover_traversal.cpp"
     "server/script_mover_traversal.h"
     "server/track_entity.cpp"
@@ -352,6 +356,12 @@ add_sources( SOURCE_GROUP "Player"
     "server/wallclimb.h"
     "server/wall_launch.cpp"
     "server/wall_launch.h"
+    "server/slope_launch.cpp"
+    "server/slope_launch.h"
+    "server/autobunnyhop.cpp"
+    "server/autobunnyhop.h"
+    "server/source_push.cpp"
+    "server/source_push.h"
     "server/double_jump_power.cpp"
     "server/double_jump_power.h"
     "server/weapon_stockpile_bonus.cpp"
@@ -639,7 +649,7 @@ add_sources( SOURCE_GROUP "RUI"
     "client/rui_walltime.h"
 )
 
-# CLIENT exclusives folded from s21-client (pred / bridge / diag)
+# CLIENT exclusives (pred / bridge / diag)
 add_sources( SOURCE_GROUP "Prediction"
     "client/pred_diag.cpp"
     "client/pred_diag.h"
@@ -647,12 +657,16 @@ add_sources( SOURCE_GROUP "Prediction"
     "client/pred_authority.h"
     "client/pred_authority_probes.cpp"
     "client/pred_authority_probes.h"
+    "client/pred_icon_diag.cpp"
+    "client/pred_icon_diag.h"
     "client/mantle_boost.cpp"
     "client/mantle_boost.h"
     "client/mantle_boost_anim.cpp"
     "client/mantle_boost_anim.h"
     "client/dodge_bind.cpp"
     "client/dodge_bind.h"
+    "client/autobunnyhop.cpp"
+    "client/autobunnyhop.h"
     "client/dodge_rules.cpp"
     "client/dodge_rules.h"
     "client/movement_ability_input.cpp"
@@ -677,6 +691,10 @@ add_sources( SOURCE_GROUP "Prediction"
     "client/wallclimb.h"
     "client/wall_launch.cpp"
     "client/wall_launch.h"
+    "client/slope_launch.cpp"
+    "client/slope_launch.h"
+    "client/source_push.cpp"
+    "client/source_push.h"
     "client/double_jump_power.cpp"
     "client/double_jump_power.h"
     "client/melee_lunge_probe.cpp"
@@ -697,8 +715,8 @@ add_sources( SOURCE_GROUP "Grapple Rope"
 )
 
 add_sources( SOURCE_GROUP "Jump Pad"
-    "client/jumppad_viewpunch_diag.cpp"
-    "client/jumppad_viewpunch_diag.h"
+    "client/jumppad_predict.cpp"
+    "client/jumppad_predict.h"
 )
 
 file( GLOB GAME_CLIENT_PUBLIC_HEADERS
@@ -726,12 +744,9 @@ elseif( ${PROJECT_NAME} STREQUAL "game_shared_static"
      OR ${PROJECT_NAME} STREQUAL "game_shared_static_cl" )
 # Dual game_shared: plain (server/dedicated bodies) + _cl (CLIENT_DLL bodies).
 # Dual-body shared TUs (#if CLIENT_DLL) compile client path only on *_cl.
-# Legacy single-lib rebuild: -DR5SDK_UNIFY_CLIENT_SHARED=ON forces CLIENT_DLL
-# on plain game_shared_static (client-only worktree builds).
-if( ${PROJECT_NAME} STREQUAL "game_shared_static_cl" OR R5SDK_UNIFY_CLIENT_SHARED )
+if( ${PROJECT_NAME} STREQUAL "game_shared_static_cl" )
 target_compile_definitions( ${PROJECT_NAME} PRIVATE
     "CLIENT_DLL"
-    "R5SDK_UNIFY_CLIENT_SHARED"
 )
 endif()
 

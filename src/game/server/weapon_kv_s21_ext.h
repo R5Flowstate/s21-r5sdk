@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: S21-only weapon KV keys the S3 schema cannot hold.
+// Purpose: S21-only weapon KV keys the dedi schema cannot hold.
 //
 //=============================================================================//
 #ifndef WEAPON_KV_S21_EXT_H

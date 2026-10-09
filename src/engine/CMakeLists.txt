@@ -248,7 +248,6 @@ add_sources( SOURCE_GROUP "Shared"
     "shared/demo_writer.cpp"
     "shared/demo_writer.h"
     "${ENGINE_SOURCE_DIR}/public/demo/r5dem.h"
-    "shared/ents_shared.h"
     "shared/s21_bridge_compat.h"
 )
 

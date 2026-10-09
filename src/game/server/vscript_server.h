@@ -162,16 +162,16 @@ inline void (*v_Script_RegisterServerCodeConstants)(CSquirrelVM* s);
 // Weapon-slot codeconst. Runs after GRX; post-orig detour installs S21 indices.
 inline void (*v_Script_RegisterServerWeaponSlotConstants)(CSquirrelVM* s);
 
-// S3 has ScriptTraceHull but no HighDetail. Force ray.m_detailLevel=HIGH (2) via TLS
+// dedi has ScriptTraceHull but no HighDetail. Force ray.m_detailLevel=HIGH (2) via TLS
 // + TraceRayFiltered vtable patch (covers entity and array ignore paths).
 inline SQInteger (*v_EngineScriptTraceHull)(HSQUIRRELVM v);
 
-// S3 ScriptTraceLine / HighDetail wrappers lack the 7th entitiesOnly script arg.
+// dedi ScriptTraceLine / HighDetail wrappers lack the 7th entitiesOnly script arg.
 // Re-registered after engine registration with bool entitiesOnly = false as arg 7.
 inline SQInteger (*v_EngineScriptTraceLine)(HSQUIRRELVM v);
 inline SQInteger (*v_EngineScriptTraceLineHighDetail)(HSQUIRRELVM v);
 
-// Script_Server_StartParticleEffectInWorld. S3 has the whole server particle
+// Script_Server_StartParticleEffectInWorld. dedi has the whole server particle
 // family EXCEPT the realm-scoped variant S21 scripts call, so
 // StartParticleEffectInWorldForRealms forwards here; realm entity in arg 4 unread.
 inline SQRESULT (*v_Script_Server_StartParticleEffectInWorld)(HSQUIRRELVM v);

@@ -2,7 +2,7 @@
 //
 // Purpose: client demo player
 //
-// The bridge already fakes the server for the engine: it rewrites the S3
+// The bridge already fakes the server for the engine: it rewrites the dedi
 // handshake, drives native CONNECTED and injects every datagram. Playback puts
 // the demo file at the head of that path. A synthetic S2C_CHALLENGE and
 // CONNACCEPT walk the handshake; SIGNON / RELIABLE chunks go through the same
@@ -3540,18 +3540,23 @@ static void __fastcall Hook_View_Build(void* pView)
 	if (v_View_Build)
 		v_View_Build(pView);
 
-	if (!pView || !s_bDemoGate || s_demo.state != DemoPlayState_t::PLAYING)
+	float pos[3], ang[3];
+#if defined(SDK_WIP)
+	const bool bCapture = pView && CubemapCapture_CurrentView(pos, ang);
+#else
+	const bool bCapture = false;
+#endif // SDK_WIP
+	if (!pView || (!bCapture && (!s_bDemoGate || s_demo.state != DemoPlayState_t::PLAYING)))
 		return;
 
-	float pos[3], ang[3];
-	const bool bPath = s_demo.bPathPlaying;
+	const bool bPath = !bCapture && s_demo.bPathPlaying;
 	if (bPath)
 	{
 		float flFov = 0.0f;
 		if (!DemoCam_EvalPath(DemoCam_PathSampleMs(), pos, ang, &flFov))
 			return;
 	}
-	else if (s_demo.bFreecam && s_demo.bCamFollow && s_demo.bCamInit)
+	else if (!bCapture && s_demo.bFreecam && s_demo.bCamFollow && s_demo.bCamInit)
 	{
 		// Last write: the free camera where it sits, not the player eyes.
 		for (int i = 0; i < 3; ++i)
@@ -3560,7 +3565,7 @@ static void __fastcall Hook_View_Build(void* pView)
 			ang[i] = s_demo.camAngles[i];
 		}
 	}
-	else
+	else if (!bCapture)
 		return;
 
 	__try
@@ -3587,6 +3592,9 @@ static void __fastcall Hook_View_Build(void* pView)
 			g_pBuiltCamOrigin[6 + i] = ang[i];
 		}
 	}
+	// The capture only places the rendered camera; the player keeps its own angles.
+	if (bCapture)
+		return;
 
 	if (bPath)
 	{

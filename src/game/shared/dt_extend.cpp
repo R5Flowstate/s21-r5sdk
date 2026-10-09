@@ -179,7 +179,7 @@ const DTExtendProp s_extendProps[] = {
 	EF("DT_LocalPlayerExclusive", "m_updraftLiftExitDuration"),
 	ET("DT_LocalPlayerExclusive", "m_updraftSlowTime"),
 	EI("DT_LocalPlayerExclusive", "m_skydiveFromUpdraft"),
-	// PlayerLaunch cluster. S21 RecvProps on DT_LocalPlayerExclusive; S3 has
+	// PlayerLaunch cluster. S21 RecvProps on DT_LocalPlayerExclusive; dedi has
 	// no members. Sidecar + value proxy, same as jetdrive -- base 20000 is
 	// mid-class. Idle is zeros.
 	EI("DT_LocalPlayerExclusive", "m_playerLaunchActivate"),
@@ -191,12 +191,14 @@ const DTExtendProp s_extendProps[] = {
 	EF("DT_LocalPlayerExclusive", "m_skywardDeploySpeed"),
 	EF("DT_LocalPlayerExclusive", "m_skywardOffsetSpeed"),
 	EV("DT_LocalPlayerExclusive", "m_skywardDeployStartPos"),
-	// Script-activated glide state the S3 player has no member for; the client cancels a glide whose activate reads 0.
+	// Script-activated glide state the dedi player has no member for; the client cancels a glide whose activate reads 0.
 	EI("DT_LocalPlayerExclusive", "m_activateGlide"),
 	ET("DT_LocalPlayerExclusive", "m_glideUpwardsBoostEndTime"),
 	EI("DT_LocalPlayerExclusive", "m_touchedGroundSinceLastGlide"),
+	// Jump-pad double-jump grant time; the client fires the grant callback once its clock passes it.
+	EF("DT_LocalPlayerExclusive", "m_timeShouldTryGivePlayerDoubleJump"),
 
-	// --- DT_Local (2) --- S3 CPlayerLocalData has neither; the S21 client times the jetpack post effect and the glide engage debounce from them.
+	// --- DT_Local (2) --- dedi CPlayerLocalData has neither; the S21 client times the jetpack post effect and the glide engage debounce from them.
 	ET("DT_Local", "m_jetpackDeactivateTime"),
 	ET("DT_Local", "m_prevJumpPressTime"),
 
@@ -207,8 +209,8 @@ const DTExtendProp s_extendProps[] = {
 	EF("DT_LootGrabber", "m_lootGrabDist"),
 
 	// --- DT_ThirdPersonView (20) ---
-	// S21 camera extras S3 ThirdPersonViewData does not carry. Value-proxied
-	// from the track-entity sidecar; do not grow the nested S3 struct.
+	// S21 camera extras dedi ThirdPersonViewData does not carry. Value-proxied
+	// from the track-entity sidecar; do not grow the nested dedi struct.
 	EF("DT_ThirdPersonView", "m_thirdPersonEntBlendOutDuration"),
 	EF("DT_ThirdPersonView", "m_thirdPersonEntFixedRight"),
 	EF("DT_ThirdPersonView", "m_thirdPersonEntVariableDistStart"),
@@ -427,8 +429,8 @@ const DTExtendProp s_extendProps[] = {
 	EV("DT_WeaponX", "m_scriptVectorTransitionEnd"),
 	EV("DT_WeaponX", "m_scriptVectorTransitionStart"),
 
-	// --- DT_WeaponX_PredictingClientOnly (1) --- S21 split S3's single shot counter into m_shotIndexForSpread (viewkick pattern row + weapon spread) and m_shotCount (loop-sound parity + fire-rate lerp).
-	// S3 has one counter and uses it for both, published as m_shotCount; this second prop fans that same counter out to the client's spread index.
+	// --- DT_WeaponX_PredictingClientOnly (1) --- S21 split dedi's single shot counter into m_shotIndexForSpread (viewkick pattern row + weapon spread) and m_shotCount (loop-sound parity + fire-rate lerp).
+	// dedi has one counter and uses it for both, published as m_shotCount; this second prop fans that same counter out to the client's spread index.
 	EI_AFTER("DT_WeaponX_PredictingClientOnly", "m_shotIndexForSpread", "m_burstFireIndex"),
 
 	// --- DT_WeaponX_LocalWeaponData (1) --- S21 client RecvTable expects m_infiniteAmmoState between m_ammoInStockpile and m_lifetimeShots (s21_dt_schema.h).
@@ -459,7 +461,7 @@ const int kNumExtendProps = sizeof(s_extendProps) / sizeof(s_extendProps[0]);
 #undef EV_AFTER
 #undef E64_AFTER
 
-// SPROP_* flag overrides on EXISTING S3 SendProps.
+// SPROP_* flag overrides on EXISTING dedi SendProps.
 // The dedi's native flags don't always match what the S21 client decoder expects (e.g.
 const DTFlagOverride s_flagOverrides[] = {
 	{ "DT_PlayerDecoy", "m_currentClass", 0x1,   false },
@@ -467,13 +469,13 @@ const DTFlagOverride s_flagOverrides[] = {
 	// Pairs with the predictableFlags widening below -- see kPredictableFlagsBits
 	// for why the sign is load-bearing on bit 7.
 	{ "DT_Local",       "predictableFlags", 0x1, true  },
-	// Keyed on the S3 name (flag overrides run before the rename pass).
+	// Keyed on the dedi name (flag overrides run before the rename pass).
 	// Low 16 match the client's own 0x1.
 	{ "DT_Local",       "m_nDuckTransitionTimeMsecs", 0x1, true  },
 };
 constexpr int kNumFlagOverrides = sizeof(s_flagOverrides) / sizeof(s_flagOverrides[0]);
 
-// SendProp m_nBits widenings on EXISTING S3 SendProps whose native width is too narrow for the ported S21 content.
+// SendProp m_nBits widenings on EXISTING dedi SendProps whose native width is too narrow for the ported S21 content.
 // Concretely: m_effectIndex ships 11 bits (max 2048) while S21's ParticleEffectNames grows past that (~3774 entries, maxEnt 4096), so wide indices truncate on send.
 struct DTBitWidthOverride
 {
@@ -491,10 +493,10 @@ static constexpr int kEffectIndexBits = 13;
 static constexpr int kSoundTableIdBits = 11;
 
 // Trigger types are BIT FLAGS on the S21 client -- jump pad 1, tesla trap 2, gravity lift 4, blackhole 8, mortar ring segment 16, gravity cannon 32.
-// S3 only ever had the first two, so both props that carry them ship 2 bits wide (max 3) and anything above a tesla trap is truncated away: a mortar-ring trigger arrives as 0, and an ignore mask of jumppad|gravitylift|blackhole (13) arrives as 1, so the client keeps predicting movement through lifts and blackholes. 6 bits carries the whole flag set and any mask over it.
+// dedi only ever had the first two, so both props that carry them ship 2 bits wide (max 3) and anything above a tesla trap is truncated away: a mortar-ring trigger arrives as 0, and an ignore mask of jumppad|gravitylift|blackhole (13) arrives as 1, so the client keeps predicting movement through lifts and blackholes. 6 bits carries the whole flag set and any mask over it.
 static constexpr int kTriggerTypeBits = 6;
 
-// DT_Local.predictableFlags is a BIT FIELD, and S3 only ever had the low six flags, so its prop ships 6 bits wide.
+// DT_Local.predictableFlags is a BIT FIELD, and dedi only ever had the low six flags, so its prop ships 6 bits wide.
 // S21 uses eight, so bits 6-7 are dropped on the dedi's send and the client's predicted byte can never match the acked one -- a rebase on every command that sets either bit, ~10% of all of them.
 static constexpr int kPredictableFlagsBits = 8;
 
@@ -515,7 +517,7 @@ static const DTBitWidthOverride s_bitWidthOverrides[] = {
 	{ "DT_BaseEntity",           "m_ignorePredictedTriggerFlags", kTriggerTypeBits, false },
 
 	// model-index widen 13->14.
-	// S3's native m_nModelIndex SendProps are 13-bit (max idx 8191).
+	// dedi's native m_nModelIndex SendProps are 13-bit (max idx 8191).
 	{ "DT_BaseEntity",            "m_nModelIndex",                    14, false },
 	{ "DT_BaseAnimating",         "m_animModelIndex",                 14, false },
 	{ "DT_BaseViewModel",         "m_nModelIndex",                    14, false },
@@ -742,7 +744,7 @@ static __int64 NonRewind_FactoryGetSize()
 
 //-----------------------------------------------------------------------------
 // SNDC native factory GetSize override + per-entity tail canary The 5 native CScriptNetData_SNDC_* factories are singleton vtable pointers in engine.data.
-// CEntityFactory::GetEntitySize (vtable slot[2]) is what the allocator reads -- NOT the ServerClass node's m_iAllocSize field Step 6's growth loop edits -- so an entity left at S3-native 3008 overflows the next mspace chunk footer once scripts write S21-count vars (heap corruption at mspace_free / tmalloc_large).
+// CEntityFactory::GetEntitySize (vtable slot[2]) is what the allocator reads -- NOT the ServerClass node's m_iAllocSize field Step 6's growth loop edits -- so an entity left at dedi-native 3008 overflows the next mspace chunk footer once scripts write S21-count vars (heap corruption at mspace_free / tmalloc_large).
 //-----------------------------------------------------------------------------
 __int64 SNDC_GLOBAL_GetSize()           { return s_sndcSpecs[0].requiredAllocSize; }
 __int64 SNDC_PLAYER_GLOBAL_GetSize()    { return s_sndcSpecs[1].requiredAllocSize; }
@@ -996,7 +998,7 @@ int DTExtend_OverrideSNDCFactoryGetSize()
 
 //-----------------------------------------------------------------------------
 // DTExtend_GrowWorldEntity -- give CWorld real backing memory for the deathfield arrays.
-// The native S3 CWorld is only ~0xC90 (3216) bytes (verified at runtime chunk head 0xca3); its data ends right after m_World* fields.
+// The native dedi CWorld is only ~0xC90 (3216) bytes (verified at runtime chunk head 0xca3); its data ends right after m_World* fields.
 //-----------------------------------------------------------------------------
 int DTExtend_GrowWorldEntity()
 {
@@ -1184,7 +1186,7 @@ void DTExtend_EnsureTriggerCylinderHeavyGrown(void)
 int DTExtend_BaseOffset(const char* tableName)
 {
 	// Base offsets: derived from S21 RecvTable highest matched prop + margin.
-	// These land in allocation slack past the S3 entity's known fields.
+	// These land in allocation slack past the dedi entity's known fields.
 	if (strcmp(tableName, "DT_BaseAnimating") == 0)         return 3800;
 	// Value-proxied only. 7200 is inside CBaseCombatCharacter::m_weaponAnimEvents
 	// (0x1800..0x5908), not slack. A NON-proxied append here aliases live anim events.
@@ -1201,7 +1203,7 @@ int DTExtend_BaseOffset(const char* tableName)
 	if (strcmp(tableName, "DT_LocalPlayerExclusive") == 0)  return 20000;
 	// Value-proxied only; relative to CPlayer::m_Local, not the player.
 	if (strcmp(tableName, "DT_Local") == 0)                 return 0x38;
-	// Real, measured slack -- not a margin guess: the S21Class registration allocates CLootRoller at 6064 while its S3 parent CPhysicsProp ends at 5200, so [5200, 6064) is 864 bytes no native code touches. m_tier lands at 5200 and m_hasVaultKey at 5204.
+	// Real, measured slack -- not a margin guess: the S21Class registration allocates CLootRoller at 6064 while its dedi parent CPhysicsProp ends at 5200, so [5200, 6064) is 864 bytes no native code touches. m_tier lands at 5200 and m_hasVaultKey at 5204.
 	if (strcmp(tableName, "DT_LootRoller") == 0)            return 5200;
 	// Same measurement for the two prop_dynamic-backed S21 classes: the parent CDynamicProp allocates 4912 (Create immediate 0x1330) and the S21Class registration grows it to 6112, so [4912, 6112) is untouched by native code.
 	// The 4 / 2 appended props fit in the first 16 bytes of that window.
@@ -1229,7 +1231,7 @@ int DTExtend_BaseOffset(const char* tableName)
 	if (strcmp(tableName, "DT_VortexSphere") == 0)          return 2500;
 	if (strcmp(tableName, "DT_WeaponX") == 0)               return 6100;
 	// Value-proxied only -- the base is never consumed today.
-	// Explicit entry so a future NON-proxied prop cannot fall through to the 8192 default, which lands INSIDE real S3 CWeaponX fields (modvars ~+7000, live fields observed out to +11400). verified any real slack before ever using this base.
+	// Explicit entry so a future NON-proxied prop cannot fall through to the 8192 default, which lands INSIDE real dedi CWeaponX fields (modvars ~+7000, live fields observed out to +11400). verified any real slack before ever using this base.
 	if (strcmp(tableName, "DT_WeaponX_LocalWeaponData") == 0) return 6240;
 	// Value-proxied only (m_shotIndexForSpread) -- the base is never consumed.
 	// Live CWeaponX fields run past +11400; there is no proven slack here, so a
@@ -1251,12 +1253,12 @@ static void __fastcall Canon_AllowAutoMoveProxy(void* pProp, void* pStruct,
 	void* pData, void* pOut, int iElement, int objectID);
 
 // DT_Player.m_passives tail-zero proxy.
-// S3 backs 128 passives (2 Int64 words @ CPlayer+0x5FF0); S21's RecvProp is array[3] (192).
+// dedi backs 128 passives (2 Int64 words @ CPlayer+0x5FF0); S21's RecvProp is array[3] (192).
 void __fastcall Passives_TailZeroProxy(void* pProp, void* pStruct,
 	void* pData, void* pOut, int iElement, int objectID);
 
 // DT_HighlightSettings.m_highlightTeamBits context-translate proxy.
-// S3 carries the highlight as a (m_highlightServerContextID, m_highlightTeamBits) scalar pair in the DT_HighlightSettings sub-object (@ +0x218 / +0x21C); S21's RecvProp is a per-context Int32[8].
+// dedi carries the highlight as a (m_highlightServerContextID, m_highlightTeamBits) scalar pair in the DT_HighlightSettings sub-object (@ +0x218 / +0x21C); S21's RecvProp is a per-context Int32[8].
 static void __fastcall Highlight_TeamBitsTranslateProxy(void* pProp, void* pStruct,
 	void* pData, void* pOut, int iElement, int objectID);
 static void __fastcall Highlight_GenericContextProxy(void* pProp, void* pStruct,
@@ -1270,7 +1272,7 @@ static void __fastcall Highlight_FocusedProxy(void* pProp, void* pStruct,
 DTExtendProxyFn DTExtend_ZeroProxyForProp(const char* propName);
 
 // Gate for the comprehensive DT_HighlightSettings rebuild below.
-// The S21 highlight subsystem diverged from S3 (only m_highlightTeamBits is name-shared): S3's raw 7-member sub-table leaves 6 nodes unmatched on the S21 client, which desyncs the ENTER-PVS instance-baseline decode.
+// The S21 highlight subsystem diverged from dedi (only m_highlightTeamBits is name-shared): dedi's raw 7-member sub-table leaves 6 nodes unmatched on the S21 client, which desyncs the ENTER-PVS instance-baseline decode.
 static ConVar bridge_highlight_teambits("bridge_highlight_teambits", "1", FCVAR_RELEASE,
 	"Rebuild the shared DT_HighlightSettings sub-table to the S21 client's exact "
 	"6-member shape (translate m_highlightTeamBits, zero-fill the rest, drop S3-only "
@@ -1278,20 +1280,20 @@ static ConVar bridge_highlight_teambits("bridge_highlight_teambits", "1", FCVAR_
 	"desync crash on highlightable entities).");
 
 // m_modInventory 32-bit -> 64-bit widen.
-// S3 networks 32 player-mod entries (double-jump and other gameplay mods) as 32-bit UNSIGNED Int; S21 widened each element to Int64.
+// dedi networks 32 player-mod entries (double-jump and other gameplay mods) as 32-bit UNSIGNED Int; S21 widened each element to Int64.
 static ConVar bridge_canon_modinv_widen("bridge_canon_modinv_widen", "1", FCVAR_RELEASE,
 	"Canonical rebuild: 1 = retype m_modInventory's 32 elements Int32->Int64 and "
 	"zero-extend the S3 32-bit value (preserve S3 player-mod data); 0 = leave synth-zero. "
 	"Only meaningful when bridge_canonical_dt is 1.");
 
 // m_consumableInventory 16-bit -> 32-bit widen.
-// S3 networks the 32 carried-consumable slots (shields/batteries/heals/ordnance, keyed by a small type id -- the array behind SURVIVAL_AddToPlayerInventory/ConsumableInventory_Add, the mechanism that stores the bulk of general ground loot) as a packed 16-bit {type:u8, count:u8} value per slot
+// dedi networks the 32 carried-consumable slots (shields/batteries/heals/ordnance, keyed by a small type id -- the array behind SURVIVAL_AddToPlayerInventory/ConsumableInventory_Add, the mechanism that stores the bulk of general ground loot) as a packed 16-bit {type:u8, count:u8} value per slot
 
 // 2-byte-stride array at CPlayer+0x5FAC, and the native DT registration in
 // passes byte-width 2 / nBits 16 to the shared SendProp builder). The S21 client's own
 
 // element as a full 32-bit Int (byte-width 4), matching the auto-generated verified schema (s21_dt_schema.h: s_sch_m_consumableInventory elements type 0 = DPT_Int).
-// Same disease as m_modInventory above -- a native array that exists and works on both bridge endpoints, just never widened to match S21's wire width -- so the generic rebuild's name+type match (both sides type 0) blindly copies the narrower S3 SP_NBITS, truncating what reaches the client.
+// Same disease as m_modInventory above -- a native array that exists and works on both bridge endpoints, just never widened to match S21's wire width -- so the generic rebuild's name+type match (both sides type 0) blindly copies the narrower dedi SP_NBITS, truncating what reaches the client.
 static ConVar bridge_canon_consumableinv_widen("bridge_canon_consumableinv_widen", "1", FCVAR_RELEASE,
 	"Canonical rebuild: 1 = widen m_consumableInventory's 32 elements from the S3 native "
 	"16-bit {type,count} pack to the S21-expected 32-bit Int (zero-extend, preserve S3 "
@@ -1307,7 +1309,7 @@ static ConVar bridge_canon_consumableinv_widen("bridge_canon_consumableinv_widen
 static const char* const kHlElemNames[8] = {
 	"[0000]", "[0001]", "[0002]", "[0003]", "[0004]", "[0005]", "[0006]", "[0007]" };
 
-// Build one type-10 array-as-datatable member into destSlot (SP_SIZE bytes) by cloning a same-shaped S3 donor parent (m_highlightFunctionBits for Int32 arrays, m_highlightServerFadeBases for Float arrays): clone the donor's child SendTable, resize it to `count` elements, rename children to S21's "[000N]" recv convention, and install `childProxy` on each element.
+// Build one type-10 array-as-datatable member into destSlot (SP_SIZE bytes) by cloning a same-shaped dedi donor parent (m_highlightFunctionBits for Int32 arrays, m_highlightServerFadeBases for Float arrays): clone the donor's child SendTable, resize it to `count` elements, rename children to S21's "[000N]" recv convention, and install `childProxy` on each element.
 // When stashCtxIndex, each element's m_Offset (+0x78) is set to its index so Highlight_TeamBitsTranslateProxy can place TeamBits at element == ServerContextID.
 static bool Highlight_BuildArrayMember(uint8_t* destSlot, const uint8_t* donorParent,
 	int count, const char* name, DTExtendProxyFn childProxy, bool stashCtxIndex)
@@ -1348,7 +1350,7 @@ static bool Highlight_BuildArrayMember(uint8_t* destSlot, const uint8_t* donorPa
 	return true;
 }
 
-// Build one scalar member into destSlot by cloning an S3 Int scalar donor
+// Build one scalar member into destSlot by cloning a dedi Int scalar donor
 // (m_highlightServerContextID): inherit its type/nBits, rename, and install
 // childProxy (or the zero proxy when null).
 static void Highlight_BuildScalarMember(uint8_t* destSlot, const uint8_t* scalarDonor,
@@ -1392,7 +1394,7 @@ static void Highlight_RebuildSettingsInTree(uintptr_t table, uintptr_t* seen,
 				return;
 		}
 
-		// Locate the three S3 donors (all native to S3 DT_HighlightSettings) intDonor = m_highlightFunctionBits (type-10 -> Int32[8] child) floatDonor = m_highlightServerFadeBases (type-10 -> Float[2] child) scalarDonor = m_highlightServerContextID (type-0 Int scalar)
+		// Locate the three dedi donors (all native to dedi DT_HighlightSettings) intDonor = m_highlightFunctionBits (type-10 -> Int32[8] child) floatDonor = m_highlightServerFadeBases (type-10 -> Float[2] child) scalarDonor = m_highlightServerContextID (type-0 Int scalar)
 		const uint8_t* intDonor    = nullptr;
 		const uint8_t* floatDonor  = nullptr;
 		const uint8_t* scalarDonor = nullptr;
@@ -1415,7 +1417,7 @@ static void Highlight_RebuildSettingsInTree(uintptr_t table, uintptr_t* seen,
 		}
 
 		// Build a fresh props array matching S21's DT_HighlightSettings -- but OMIT m_highlightTeamIndex.
-		// It is a SYNTH (zero, no S3 backing) Int32[8] whose "[0000]".."[0007]" children are STRUCTURALLY IDENTICAL to m_highlightTeamBits'.
+		// It is a SYNTH (zero, no dedi backing) Int32[8] whose "[0000]".."[0007]" children are STRUCTURALLY IDENTICAL to m_highlightTeamBits'.
 		const int kNew = 5;
 		uint8_t* np = (uint8_t*)malloc((size_t)kNew * SP_SIZE);
 		if (!np)
@@ -1436,7 +1438,7 @@ static void Highlight_RebuildSettingsInTree(uintptr_t table, uintptr_t* seen,
 			return;
 		}
 
-		// Swap the S3 props array (7 members) for the S21 one (6). The S3-only members
+		// Swap the dedi props array (7 members) for the S21 one (6). The dedi-only members
 		// (m_highlightParams/FunctionBits/ServerFade*/ServerContextID) are GONE, so the
 		// dedi no longer ships them -> nothing for the S21 client to misread.
 		*(uint8_t**)(table + ST_PROPS) = np;
@@ -1460,7 +1462,7 @@ static void Highlight_RebuildSettingsInTree(uintptr_t table, uintptr_t* seen,
 }
 
 // Rebuild every DT_HighlightSettings in the table tree to the S21 6-member shape (the legacy reshape).
-// Runs on the legacy path (from DTExtend_Apply) AND the canonical path (from Hook_SendTable_Init -- the reshape table was deferred raw, see CanonIsReshapeTable, so its S3 donors are still present for the translate proxy).
+// Runs on the legacy path (from DTExtend_Apply) AND the canonical path (from Hook_SendTable_Init -- the reshape table was deferred raw, see CanonIsReshapeTable, so its dedi donors are still present for the translate proxy).
 void DTExtend_RebuildHighlightSettings(void** tables, int count)
 {
 	if (!bridge_highlight_teambits.GetBool())
@@ -1484,7 +1486,7 @@ void DTExtend_RebuildHighlightSettings(void** tables, int count)
 }
 
 // m_modInventory[i] widen value proxy.
-// S3 packs each 4-byte slot { u16 modName @0x0, u8 weaponIdx @0x2 (255 = "no specific weapon" / universal mod), u8 count @0x3 }; S21's ModInventoryItem_s is 8 bytes { u16 modName @0x0, u16 weaponNameIndex @0x2, u8 _pad[3], u8 count @0x7 } and Script_ModInventory_Get's occupied-slot test reads byte 7 (511 = the no-specific-weapon sentinel).
+// dedi packs each 4-byte slot { u16 modName @0x0, u8 weaponIdx @0x2 (255 = "no specific weapon" / universal mod), u8 count @0x3 }; S21's ModInventoryItem_s is 8 bytes { u16 modName @0x0, u16 weaponNameIndex @0x2, u8 _pad[3], u8 count @0x7 } and Script_ModInventory_Get's occupied-slot test reads byte 7 (511 = the no-specific-weapon sentinel).
 static void __fastcall ModInventory_WidenProxy(void* pProp, void* pStruct,
 	void* /*pData*/, void* pOut, int /*iElement*/, int /*objectID*/)
 {
@@ -1505,7 +1507,7 @@ static void __fastcall ModInventory_WidenProxy(void* pProp, void* pStruct,
 }
 
 // m_consumableInventory[i] widen value proxy.
-// S3 packs each slot {u8 type, u8 count}; S21's ConsumableInventoryItem_s is 32-bit { u16 type @0x0, u16 count @0x2 } and its occupied-slot test reads HIWORD != 0, so count must land in the HIGH 16 bits, not packed alongside type in the low 16.
+// dedi packs each slot {u8 type, u8 count}; S21's ConsumableInventoryItem_s is 32-bit { u16 type @0x0, u16 count @0x2 } and its occupied-slot test reads HIWORD != 0, so count must land in the HIGH 16 bits, not packed alongside type in the low 16.
 static int s_ciElemBaseOff = -1;   // SP_OFFSET of element 0, read off the built table
 static int s_ciElemStride  = 0;    // element 1 offset - element 0 offset
 
@@ -1522,7 +1524,7 @@ static void __fastcall ConsumableInventory_WidenProxy(void* pProp, void* pStruct
 	uint32_t type  = raw & 0xFF;
 	uint32_t count = (raw >> 8) & 0xFF;
 
-	// Base and stride come from the built table rather than the S3 array offset, so
+	// Base and stride come from the built table rather than the dedi array offset, so
 	// the slot stays correct whichever base the engine stamped into the elements.
 	if (count && s_ciElemStride > 0)
 	{
@@ -1569,8 +1571,8 @@ static const char* ModInv_ElemName(int i)
 	return (i >= 0 && i < 32) ? names[i] : "[0000]";
 }
 
-// Walk the DataTable hierarchy, find the nested "m_modInventory" array sub-table (deferred raw by CanonIsReshapeTable so its 32 S3 Int32 donor elements survive), and retype each child Int32->Int64 + install the widen proxy + rename to "[000N]".
-// The S3 element's real m_Offset is KEPT (field addressing unchanged); only the wire type + value width change.
+// Walk the DataTable hierarchy, find the nested "m_modInventory" array sub-table (deferred raw by CanonIsReshapeTable so its 32 dedi Int32 donor elements survive), and retype each child Int32->Int64 + install the widen proxy + rename to "[000N]".
+// The dedi element's real m_Offset is KEPT (field addressing unchanged); only the wire type + value width change.
 static void ModInv_RetypeInTree(uintptr_t table, uintptr_t* seen, int& seenCount,
 	int seenCap, int& found, int depth)
 {
@@ -1636,7 +1638,7 @@ static void DTExtend_RebuildModInventory(void** tables, int count)
 		count, found);
 }
 
-// Walk the DataTable hierarchy, find the nested "m_consumableInventory" array sub-table (deferred raw by CanonIsReshapeTable so its 32 S3 16-bit donor elements survive), and widen each child's SP_NBITS 16->32 + install the zero-extend proxy + rename to "[000N]" (bracket text is cosmetic housekeeping, matching the proven ModInventory scheme -- subtree correlation binds on the PARENT table name, not the child text).
+// Walk the DataTable hierarchy, find the nested "m_consumableInventory" array sub-table (deferred raw by CanonIsReshapeTable so its 32 dedi 16-bit donor elements survive), and widen each child's SP_NBITS 16->32 + install the zero-extend proxy + rename to "[000N]" (bracket text is cosmetic housekeeping, matching the proven ModInventory scheme -- subtree correlation binds on the PARENT table name, not the child text).
 // SP_TYPE stays 0 (DPT_Int) on both sides -- unlike m_modInventory this is a bit-width widen only, no type change.
 static void ConsumableInv_RetypeInTree(uintptr_t table, uintptr_t* seen, int& seenCount,
 	int seenCap, int& found, int depth)
@@ -1726,7 +1728,7 @@ bool DTExtend_ShouldZeroProxyAppendedProp(const char* tableName, const char* pro
 	if (!tableName || !propName)
 		return false;
 
-	// These are S21-only CPlayerDecoy tail props. The S3 dedicated entity does
+	// These are S21-only CPlayerDecoy tail props. The dedicated entity does
 	// not own backing storage for them, so reading the appended slack offsets
 	// can serialize garbage and desync the S21 decoder after m_decoyVelocity.
 	if (strcmp(tableName, "DT_PlayerDecoy") == 0)
@@ -1737,8 +1739,8 @@ bool DTExtend_ShouldZeroProxyAppendedProp(const char* tableName, const char* pro
 		       strcmp(propName, "m_decoyVelocity") == 0;
 	}
 
-	// [PASSMOD-ZERO] Same bug class as DT_PlayerDecoy: S3 has no backing storage for m_passThroughModCount, so "allocation slack" offset 5600 (DTExtend_BaseOffset) reads live entity memory.
-	// That offset is not free padding -- it aliases a real S3 field that defaults to 0x3F800000 (float 1.0f).
+	// [PASSMOD-ZERO] Same bug class as DT_PlayerDecoy: dedi has no backing storage for m_passThroughModCount, so "allocation slack" offset 5600 (DTExtend_BaseOffset) reads live entity memory.
+	// That offset is not free padding -- it aliases a real dedi field that defaults to 0x3F800000 (float 1.0f).
 	if (strcmp(tableName, "DT_Projectile") == 0)
 		return strcmp(propName, "m_passThroughModCount") == 0;
 
@@ -1820,7 +1822,7 @@ bool DTExtend_IsSafeToRead(const void* addr, size_t size, bool forWrite)
 }
 
 // ===========================================================================
-// [LAUNCH-ORIGIN] -- DT_Projectile.m_launchOrigin value sidecar S3 has no native launch-snapshot position; S21 trails FROM m_launchOrigin, so encoding 0 draws the trail to world origin.
+// [LAUNCH-ORIGIN] -- DT_Projectile.m_launchOrigin value sidecar dedi has no native launch-snapshot position; S21 trails FROM m_launchOrigin, so encoding 0 draws the trail to world origin.
 // Capture m_vecAbsOrigin at activation into a sidecar keyed by entity pointer; LaunchOrigin_ValueProxy serves it.
 // ===========================================================================
 
@@ -2020,7 +2022,7 @@ static void __fastcall AkimboDisabled_ValueProxy(void* /*pProp*/, void* pStruct,
 	*(int*)pOut = AkimboBridge_GetDisabledFromPlayerData(pStruct);
 }
 
-// S21-only DT_WeaponX prop; S3 has no disabled-mod bitfield. The akimbo state
+// S21-only DT_WeaponX prop; dedi has no disabled-mod bitfield. The akimbo state
 // machine owns it (optic mods off while OFFHAND/ACTIVE).
 static void __fastcall ModBitfieldDisabled_ValueProxy(void* /*pProp*/, void* pStruct,
 	void* /*pData*/, void* pOut, int /*iElement*/, int /*objectID*/)
@@ -2224,7 +2226,7 @@ static void __fastcall TargetingLaserEnabled_ValueProxy(void* /*pProp*/, void* p
 }
 
 // DT_WeaponX_PredictingClientOnly.m_shotIndexForSpread value proxy. pStruct = the weapon entity base.
-// S21 split S3's single shot counter in two; this serves S3's one counter (the same field m_shotCount publishes) to the client's spread index, so both sides index the same viewkick pattern row.
+// S21 split dedi's single shot counter in two; this serves dedi's one counter (the same field m_shotCount publishes) to the client's spread index, so both sides index the same viewkick pattern row.
 static constexpr ptrdiff_t WEAPON_SHOTCOUNT_OFFSET_LIVE = 5476;
 
 static ConVar bridge_weapon_spread_index("bridge_weapon_spread_index", "1",
@@ -2511,7 +2513,7 @@ static const struct { const char* propName; DTExtendProxyFn proxy; } s_playerLau
 
 // ===========================================================================
 // [ITEMFLAVOR] -- DT_BaseAnimating.m_itemFlavorGUID value sidecar The cosmetic identity (weapon/melee skin, artifact power source) the S21 client resolves through GetItemFlavorByGUID.
-// S3 has neither the prop nor the native, so both halves are ours.
+// dedi has neither the prop nor the native, so both halves are ours.
 // ===========================================================================
 struct ItemFlavorGUIDEntry
 {
@@ -2612,7 +2614,7 @@ bool DTExtend_GetItemFlavorGUID(const void* pEntity, int64_t* outGuid)
 	return false;
 }
 
-// [NATIVE-ROUTE] S21 declares these on a leaf table that S3 builds FLAT -- the
+// [NATIVE-ROUTE] S21 declares these on a leaf table that dedi builds FLAT -- the
 // dedi owns the field at its CBaseEntity offset but never lists it on that leaf,
 // so the append has a real source and does not need entity slack at all.
 // Offsets from the server DT_BaseEntity builder.
@@ -2688,7 +2690,7 @@ static void __fastcall ItemFlavorGUID_ValueProxy(void* /*pProp*/, void* pStruct,
 
 // ===========================================================================
 // DT_BaseEntity.m_ignoreParentRotation S21 RecvProp + C_BaseEntity::GetParentToWorldTransform already honor this bool (SetNoRotationMatrix when set).
-// S3 has no native field -- the EI append at DT_BaseEntity base 2500 is not safe slack on every carrier, so the value lives in a sidecar and a value proxy serves the wire.
+// dedi has no native field -- the EI append at DT_BaseEntity base 2500 is not safe slack on every carrier, so the value lives in a sidecar and a value proxy serves the wire.
 // ===========================================================================
 struct IgnoreParentRotEntry
 {
@@ -2791,7 +2793,7 @@ static void __fastcall IgnoreParentRotation_ValueProxy(void* /*pProp*/, void* pS
 
 // ===========================================================================
 // DT_BaseAnimating.m_animRelativeToGroundEnabled
-// S21 RecvProp + consumer already honor this; S3 has no field and no native.
+// S21 RecvProp + consumer already honor this; dedi has no field and no native.
 // Sidecar + value proxy; publish 1 only while the native collision flag is set.
 // ===========================================================================
 struct AnimRelativeToGroundEntry
@@ -2916,7 +2918,7 @@ static int Hook_CBaseAnimating_AnimEnableCollision(uintptr_t thisptr)
 }
 
 // ===========================================================================
-// [SCOPEHL] -- DT_BaseEntity.m_wantsScopeHighlight S21 declares this on DT_BaseEntity; S3 registers it natively only on DT_DynamicProp (its ServerClass registration + decoder build).
+// [SCOPEHL] -- DT_BaseEntity.m_wantsScopeHighlight S21 declares this on DT_BaseEntity; dedi registers it natively only on DT_DynamicProp (its ServerClass registration + decoder build).
 // CreateDecoders pairs by name WITHIN a table, so the native prop can never reach the client no matter where it sits in flat order -- the DT_BaseEntity append is the only copy that CAN bind, and un-proxied it served the synthetic append region.
 // ===========================================================================
 uint8_t* DTExtend_FindTableByName(const char* name);
@@ -3032,7 +3034,7 @@ PX_WIRE_PROXY(PxHoldToSprint_ValueProxy, m_playerSettingForHoldToSprint)
 PX_WIRE_PROXY(PxStickySprintForward_ValueProxy, m_playerSettingForStickySprintForward)
 PX_WIRE_PROXY(PxPlayerVehicleUseTime_ValueProxy, m_playerVehicleUseTime)
 
-// S3 CPlayer::m_playerVehicle @ +0x6120 is a memory EHANDLE
+// dedi CPlayer::m_playerVehicle @ +0x6120 is a memory EHANDLE
 // (serial<<16)|index. S21 RecvPropEHandle unpacks (serial<<14)|(index&0x3FFF)
 // with invalid=0xFFFFFF. Emitting the memory dword makes Get() fail the serial.
 static constexpr ptrdiff_t kPlayerVehicleHandleOff = 0x6120;
@@ -3139,10 +3141,28 @@ static const struct { const char* propName; DTExtendProxyFn proxy; } s_skywardEx
 	{ "m_skywardDeployStartPos", &PxSkywardDeployStartPos_ValueProxy },
 };
 
+// Idles at FLT_MAX, not zero: the S21 client grants a double jump whenever its clock passes this.
+static void __fastcall PxTimeShouldTryGivePlayerDoubleJump_ValueProxy(void* /*pProp*/, void* pStruct,
+	void* /*pData*/, void* pOut, int /*iElement*/, int /*objectID*/)
+{
+	if (!pOut)
+		return;
+
+	*reinterpret_cast<float*>(pOut) = FLT_MAX;
+	if (!pStruct)
+		return;
+
+	PlayerExtendBundle bundle;
+	if (!PlayerExtend_GetBundle(pStruct, &bundle))
+		return;
+	*reinterpret_cast<float*>(pOut) = bundle.player.m_timeShouldTryGivePlayerDoubleJump;
+}
+
 static const struct { const char* propName; DTExtendProxyFn proxy; } s_glideExclusiveWireProxies[] = {
 	{ "m_activateGlide",                &PxActivateGlide_ValueProxy },
 	{ "m_glideUpwardsBoostEndTime",     &PxGlideUpwardsBoostEndTime_ValueProxy },
 	{ "m_touchedGroundSinceLastGlide",  &PxTouchedGroundSinceLastGlide_ValueProxy },
+	{ "m_timeShouldTryGivePlayerDoubleJump", &PxTimeShouldTryGivePlayerDoubleJump_ValueProxy },
 };
 
 // DT_Local props are handed &CPlayer::m_Local; the sidecar is keyed on the player.
@@ -3291,7 +3311,7 @@ DTExtendProxyFn DTExtend_ValueProxyForAppendedProp(const char* tableName, const 
 		(strcmp(tableName, "DT_BaseAnimating") == 0 ||
 		 strcmp(tableName, "DT_PropSurvival") == 0))
 		return &ItemFlavorGUID_ValueProxy;
-	// [NATIVE-ROUTE] see the proxies: S3 owns these at their CBaseEntity offset
+	// [NATIVE-ROUTE] see the proxies: dedi owns these at their CBaseEntity offset
 	// but leaves them off the flat leaf table S21 declares them on.
 	if (tableName && propName && strcmp(tableName, "DT_RopeKeyframe") == 0)
 	{
@@ -3712,7 +3732,7 @@ bool DTExtend_MaterialHarvesterStateHasBacking(void);
 // Ziprail remains gated by sdk_ziprail_enable; material harvester is always registered.
 // ===========================================================================
 
-// nestRoot / wireParentDT are S21 client RecvTable parent chains: DT_LootRoller(3) -> DT_PhysicsProp DT_LootGrabber(6) -> DT_DynamicProp DT_CarePackageInsightProp(3) -> DT_DynamicProp DT_EnvDecoy(1) -> DT_BaseAnimating DT_VFogVolume(21) -> DT_BaseEntity DT_TriggerCylinderNetworked(5) -> DT_BaseTrigger DT_TriggerSlipSphere(5) -> DT_BaseTrigger DT_MaterialHarvester(2) -> DT_DynamicProp DT_Ziprail(2) -> DT_Zipline env_decoy and vfog_volume are the two whose S21 chain does NOT follow the S3 entity chain: the entity stays a prop_dynamic / info_target, only the tree we transmit changes.
+// nestRoot / wireParentDT are S21 client RecvTable parent chains: DT_LootRoller(3) -> DT_PhysicsProp DT_LootGrabber(6) -> DT_DynamicProp DT_CarePackageInsightProp(3) -> DT_DynamicProp DT_EnvDecoy(1) -> DT_BaseAnimating DT_VFogVolume(21) -> DT_BaseEntity DT_TriggerCylinderNetworked(5) -> DT_BaseTrigger DT_TriggerSlipSphere(5) -> DT_BaseTrigger DT_MaterialHarvester(2) -> DT_DynamicProp DT_Ziprail(2) -> DT_Zipline env_decoy and vfog_volume are the two whose S21 chain does NOT follow the dedi entity chain: the entity stays a prop_dynamic / info_target, only the tree we transmit changes.
 const S21ClassDef s_s21Classes[] = {
 	// Tier 1: Simple (clone parent, few unique props -- props deferred)
 	// entityName is what CreateEntity is called with from script (mp/_loot_rollers.nut).
@@ -3723,7 +3743,7 @@ const S21ClassDef s_s21Classes[] = {
 	// sh_firing_range_vending_machine.nut, sh_survival_loot.gnut, sh_ping.gnut).
 	{ "CLootGrabber",               "DT_LootGrabber",               "prop_loot_grabber",          "prop_dynamic",     "CDynamicProp",         6112, nullptr, 0, true },
 	{ "CEnvDecoy",                  "DT_EnvDecoy",                  "env_decoy",                  "prop_dynamic",     "CDynamicProp",         5952, nullptr, 0, true, "CBaseAnimating" },
-	// CTriggerSlipSphere: parentFactory = native "trigger_slip" (Create = real CTriggerSlip). parentDT = "CTriggerSlip" so the deep-clone SendTable is the native S3 DT_TriggerSlip tree (BaseTrigger nest + m_defaultSlipDirection @3296 + m_slipSpeed @3308 + m_slipAcceleration @3312, size 3328).
+	// CTriggerSlipSphere: parentFactory = native "trigger_slip" (Create = real CTriggerSlip). parentDT = "CTriggerSlip" so the deep-clone SendTable is the native dedi DT_TriggerSlip tree (BaseTrigger nest + m_defaultSlipDirection @3296 + m_slipSpeed @3308 + m_slipAcceleration @3312, size 3328).
 	// Root is renamed to DT_TriggerSlipSphere for the S21 client (cid 124, not stub 110).
 	{ "CTriggerSlipSphere",         "DT_TriggerSlipSphere",         "trigger_slip_sphere",        "trigger_slip",      "CTriggerSlip",        3328, nullptr, 0 },
 	{ "CTriggerCylinderNetworked",  "DT_TriggerCylinderNetworked",  "trigger_cylinder_networked", "trigger_cylinder",  "CBaseTrigger",        2592, nullptr, 0, true },
@@ -3755,7 +3775,7 @@ static const char* const s_materialHarvesterAliases[] = {
 	"material_harvester",
 };
 
-// S21 entity names that only need to RESOLVE -- script calls CreateEntity with them, but the class carries no S21-only networked data, so the entity is registered straight onto a native S3 factory instead of getting a synthesized ServerClass.
+// S21 entity names that only need to RESOLVE -- script calls CreateEntity with them, but the class carries no S21-only networked data, so the entity is registered straight onto a native dedi factory instead of getting a synthesized ServerClass.
 // It then networks as that parent. prop_ferro_prop (Catalyst's spike shards) is here rather than in s_s21Classes because its client RecvTable is the one FLAT table in the S21 set: 40 props whose prop[0] is m_cellX, not a DataTable named after the table.
 struct NativeFactoryAlias { const char* entityName; const char* nativeFactory; const char* className; };
 static const NativeFactoryAlias s_nativeFactoryAliases[] = {
@@ -4515,12 +4535,12 @@ static int S21Class_RetailAllocationSize(const S21ClassDef& def)
 	if (def.dtName && strcmp(def.dtName, "DT_MaterialHarvester") == 0)
 		return def.classSize;
 
-	// Same reason as the harvester: the S21 client's DT_LootRoller addresses m_tier at 5568 and m_hasVaultKey at 5572, and its DT_PhysicsProp base reaches 5548 -- all past CPhysicsProp's 5200-byte S3 allocation.
+	// Same reason as the harvester: the S21 client's DT_LootRoller addresses m_tier at 5568 and m_hasVaultKey at 5572, and its DT_PhysicsProp base reaches 5548 -- all past CPhysicsProp's 5200-byte dedi allocation.
 	// Mirroring down to the parent leaves the object hundreds of bytes short of the offsets the class is declared over. actualAllocSize routes Create through our cloned factory, so this is a real 6064-byte object, not just a larger number in FACT_ALLOCSIZE.
 	if (def.className && strcmp(def.className, "CLootRoller") == 0)
 		return def.classSize;
 
-	// Both address S21 fields past their S3 parent: CLootGrabber's m_impactEffectColorID..m_lootGrabDist sit at client 5600..5615 and CCarePackageInsightProp's m_lootIndex/m_contentsTaken at 5600/5604, while CDynamicProp allocates 4912.
+	// Both address S21 fields past their dedi parent: CLootGrabber's m_impactEffectColorID..m_lootGrabDist sit at client 5600..5615 and CCarePackageInsightProp's m_lootIndex/m_contentsTaken at 5600/5604, while CDynamicProp allocates 4912.
 	// One patched prop_dynamic Create covers both.
 	if (def.className &&
 		(strcmp(def.className, "CLootGrabber") == 0 ||
@@ -4542,13 +4562,13 @@ static int S21Class_RetailAllocationSize(const S21ClassDef& def)
 	return 0;
 }
 
-// DT_TriggerSlip SendProp offsets -- S3 CTriggerSlip entity.
+// DT_TriggerSlip SendProp offsets -- dedi CTriggerSlip entity.
 static constexpr int kS3TriggerSlip_DefaultSlipDirection = 3296; // Vector 12B
 static constexpr int kS3TriggerSlip_SlipSpeed            = 3308; // float
 static constexpr int kS3TriggerSlip_SlipAcceleration     = 3312; // float
 
 // After deep-clone of native DT_TriggerSlip: rename root + inheritance prop to DT_TriggerSlipSphere so the S21 client name-matches (recv root is "DT_TriggerSlipSphere" -> DT_BaseTrigger + the three slip floats).
-// Offsets and codecs stay S3-native so encode still reads CTriggerSlip memory.
+// Offsets and codecs stay dedi-native so encode still reads CTriggerSlip memory.
 bool DTExtend_RetargetTriggerSlipSphereWrapper(uint8_t* wrapperRoot)
 {
 	if (!wrapperRoot)
@@ -4573,7 +4593,7 @@ bool DTExtend_RetargetTriggerSlipSphereWrapper(uint8_t* wrapperRoot)
 	if (*reinterpret_cast<int*>(props + SP_TYPE) == 10)
 		*reinterpret_cast<const char**>(props + SP_VARNAME) = "DT_TriggerSlipSphere";
 
-	// Verify the three force fields still point at S3 CTriggerSlip memory.
+	// Verify the three force fields still point at dedi CTriggerSlip memory.
 	int foundDir = 0, foundSpd = 0, foundAcc = 0;
 	for (int i = 0; i < nProps && i < 16; ++i)
 	{
@@ -5292,7 +5312,7 @@ static void DTExtend_RegisterS21Classes()
 		const S21ClassDef& def = s_s21Classes[ci];
 		S21ClassSlot& slot = s_s21Slots[ci];
 
-		// CLootRoller and CVFogVolume have no gate: aliasing CLootRoller to its native S3 parent is never a usable fallback -- the entity builds as a C_PhysicsProp while the client's GetTier/GetHasVaultKey are bound to C_LootRoller, so every call throws and kills ShLootRoller_Spawned before it creates the eye FX.
+		// CLootRoller and CVFogVolume have no gate: aliasing CLootRoller to its native dedi parent is never a usable fallback -- the entity builds as a C_PhysicsProp while the client's GetTier/GetHasVaultKey are bound to C_LootRoller, so every call throws and kills ShLootRoller_Spawned before it creates the eye FX.
 		if (def.className && strcmp(def.className, "CZiprail") == 0 &&
 			!Ziprail_PromoteRequestedAtLaunch())
 		{
@@ -5707,7 +5727,7 @@ static __int64 __fastcall Hook_GlobalCreationCB(__int64 a1)
 	g_pScriptNetDataNonRewindEnt = (void*)entity;
 
 	// Run the entity-init pass.
-	// The 3rd arg indexes unk_1695091F0 (the per-category DEFAULT-VALUE table -- only 5 entries 0..4, NOT the 7-entry scriptNetCategories).
+	// The 3rd arg indexes the per-category DEFAULT-VALUE table (only 5 entries 0..4, NOT the 7-entry scriptNetCategories).
 	if (v_SNDCEntityInit)
 		v_SNDCEntityInit((void*)entity, 0, 0);
 
@@ -5732,12 +5752,12 @@ void DTExtend_RebuildSendTableCache(void** tables, int count,
 // SYSTEM 07: CANONICAL REBUILD (CORE)
 // ===========================================================================
 
-// Complete S3 SendTable index for the active SendTable_Init pass.
+// Complete dedi SendTable index for the active SendTable_Init pass.
 // SendTable_Init is passed ONLY the top-level ServerClass tables; the shared sub-tables (DT_BaseEntity, DT_CollisionProperty,...) are reachable solely through DataTable-prop recursion.
 CanonS3Tab s_canonS3Index[2048];
 int        s_canonS3IndexCount = 0;
 
-// One clean template SendProp per leaf type, captured from the live S3 tables.
+// One clean template SendProp per leaf type, captured from the live dedi tables.
 // Shared with the deathfield native-DT builder (see DTExtend_BuildDeathFieldArrays).
 const uint8_t* s_canonTmpl[16];
 
@@ -5801,7 +5821,7 @@ DTExtendProxyFn DTExtend_ZeroProxyForProp(const char* propName)
 	{
 		if (strcmp(propName, "m_bossPlayer") == 0)
 			return &Canon_InvalidEhandleProxy;
-		// S21-only turret crew handles with no S3 source. A zeroed EHANDLE is
+		// S21-only turret crew handles with no dedi source. A zeroed EHANDLE is
 		// entity 0 (worldspawn), which reads as a real driver holding a real
 		// weapon; -1 is the "nobody" the client tests for.
 		if (strcmp(propName, "m_driver") == 0 ||
@@ -5818,7 +5838,7 @@ DTExtendProxyFn DTExtend_ZeroProxyForProp(const char* propName)
 }
 
 // DT_Player.m_passives tail-zero value proxy.
-// The S3 dedi backs only 2 Int64 passive words (@ CPlayer+0x5FF0; GivePassive caps the index at 127).
+// The dedi backs only 2 Int64 passive words (@ CPlayer+0x5FF0; GivePassive caps the index at 127).
 void __fastcall Passives_TailZeroProxy(void* /*pProp*/, void* /*pStruct*/,
 	void* pData, void* pOut, int iElement, int /*objectID*/)
 {
@@ -5826,13 +5846,13 @@ void __fastcall Passives_TailZeroProxy(void* /*pProp*/, void* /*pStruct*/,
 	*(uint64_t*)pOut       = 0;
 	*((uint64_t*)pOut + 1) = 0;
 	*((uint64_t*)pOut + 2) = 0;
-	// Only words 0..1 are real S3 passives; synthetic word 2+ stays zero.
+	// Only words 0..1 are real dedi passives; synthetic word 2+ stays zero.
 	if (iElement < 2 && pData)
 		*(uint64_t*)pOut = *(uint64_t*)pData;
 }
 
 // DT_HighlightSettings.m_highlightTeamBits context-translate value proxy.
-// The S3 dedi networks the highlight as a (m_highlightServerContextID @ +0x218, m_highlightTeamBits @ +0x21C) scalar pair in the DT_HighlightSettings sub-object; S21 expects a per-context Int32[8].
+// The dedi networks the highlight as a (m_highlightServerContextID @ +0x218, m_highlightTeamBits @ +0x21C) scalar pair in the DT_HighlightSettings sub-object; S21 expects a per-context Int32[8].
 static void __fastcall Highlight_TeamBitsTranslateProxy(void* pProp, void* pStruct,
 	void* /*pData*/, void* pOut, int /*iElement*/, int /*objectID*/)
 {
@@ -5887,7 +5907,7 @@ static const S21SchemaTable* CanonSchemaFind(const char* name)
 	return nullptr;
 }
 
-// Recursively index every S3 SendTable reachable from a root, following each
+// Recursively index every dedi SendTable reachable from a root, following each
 // type-10 (DataTable) prop's m_pDataTable child. Dedups by pointer.
 void CanonDiscoverTable(uintptr_t table, int depth)
 {
@@ -6103,7 +6123,7 @@ static void DTExtend_DumpCPlayerFlat(void** tables, int count)
 				target, i, of, ty, nb, fl, ne, nm ? nm : "?");
 
 			// ty=5 (DPT_Array): follow SP_ARRAYPROP (+0x18) and dump the element template.
-			// Its ty/nBits/flags drive the per-element decode in the S3 delta decoder (element loop).
+			// Its ty/nBits/flags drive the per-element decode in the dedi delta decoder (element loop).
 			if (ty == 5)
 			{
 				uint8_t*    ep  = *reinterpret_cast<uint8_t**>(sp + SP_ARRAYPROP);
@@ -6142,7 +6162,7 @@ static void DTExtend_DumpCPlayerFlat(void** tables, int count)
 		DTExtend_DumpSendTree(st, 0);
 		Warning(eDLL_T::ENGINE, "[DT-TREE] === send tree done ===\n");
 		// no break: dump all matching tables (DT_DynamicProp + DT_PlayerDecoy + DT_Player).
-		// DT_Player keeps the REAL DT_BaseAnimatingOverlay sub-table (the decoy's is a separate synthetic alloc), so its m_animOverlay* props show the verified S3 send offsets to lift into the decoy/vehicle synthetic wrapper.
+		// DT_Player keeps the REAL DT_BaseAnimatingOverlay sub-table (the decoy's is a separate synthetic alloc), so its m_animOverlay* props show the verified dedi send offsets to lift into the decoy/vehicle synthetic wrapper.
 	}
 
 	Warning(eDLL_T::ENGINE, "[DT-DUMP] === done ===\n");
@@ -6447,7 +6467,7 @@ static void DTExtend_DumpOffhandSubTable(void** tables, int count)
 
 //-----------------------------------------------------------------------------
 // Deathfield realms: rebuild DT_WORLD's 6 scalar m_deathField* props into the S21 struct-of-arrays layout -- DataTable(type-10) sub-tables of 64 scalar children each (isActive=Int, origin=Vector, radiusStart/End=Float, timeStart/End=Float).
-// S3 sends them as scalars, so the client renames the type-mismatched native props to __skip_* and the realm rings never replicate.
+// dedi sends them as scalars, so the client renames the type-mismatched native props to __skip_* and the realm rings never replicate.
 //-----------------------------------------------------------------------------
 ConVar sdk_deathfield_native_dt("sdk_deathfield_native_dt", "1", FCVAR_RELEASE,
 	"Build DT_WORLD m_deathField*[64] DataTable arrays sourced from s_deathFields. "
@@ -6665,14 +6685,14 @@ static ConVar bridge_prop_renames("bridge_prop_renames", "1", FCVAR_RELEASE,
 	"them -- fixes the ~50-class unmatched-prop replication gap (attachments, dissolve fade, ideal "
 	"activity/seq, thirdPerson blend, world decoder) + the TE-path NULL-source crash. Pairs with client "
 	"bridge_recv_renames=0 (opposite direction; must not both run). 1=on (default), 0=off.");
-// [WEAP-IDEAL-BIND] Binds m_IdealActivity->m_idealActivity / m_nIdealSequence-> m_idealSequence (S3 -> S21) on DT_WeaponX so the dedicated ideal activity/sequence replicates instead of pure client prediction. The dedicated side is load-bearing for sustaining a custom-activity sequence.
+// [WEAP-IDEAL-BIND] Binds m_IdealActivity->m_idealActivity / m_nIdealSequence-> m_idealSequence (dedi -> S21) on DT_WeaponX so the dedicated ideal activity/sequence replicates instead of pure client prediction. The dedicated side is load-bearing for sustaining a custom-activity sequence.
 static ConVar bridge_weap_ideal_bind("bridge_weap_ideal_bind", "1", FCVAR_RELEASE,
 	"Bind m_IdealActivity/m_nIdealSequence (S3) -> m_idealActivity/m_idealSequence (S21) on "
 	"DT_WeaponX instead of leaving them client-predicted. Default ON. Inspect can play "
 	"the wrong animation (S3<->S21 model-sequence-index drift on m_nIdealSequence); "
 	"flip 0 to fall back to client-predicted if needed.");
 // [SKYDIVE-STATE-BIND] The state half of the freefall/skydive family, gated apart from the other 8 because it is the only ORDINAL in the set.
-// The two names are one field: the S3 dedi has m_freefallState and NO m_skydiveState, the S21 client has m_skydiveState and NO m_freefallState, both are int in DT_Player, and S3's own CPlayer interleaves m_freefallState inside the m_skydive* member run.
+// The two names are one field: the dedi has m_freefallState and NO m_skydiveState, the S21 client has m_skydiveState and NO m_freefallState, both are int in DT_Player, and dedi's own CPlayer interleaves m_freefallState inside the m_skydive* member run.
 static ConVar bridge_skydive_state_bind("bridge_skydive_state_bind", "1", FCVAR_RELEASE,
 	"Bind m_freefallState (S3) -> m_skydiveState (S21) so the client is told which skydive "
 	"phase it is in. Name pair and ordinals (0 NONE / 1 DIVING / 2 ANTICIPATING) are "
@@ -6686,7 +6706,7 @@ ConVar bridge_dt_dup_append_suppress("bridge_dt_dup_append_suppress", "1", FCVAR
 
 //-----------------------------------------------------------------------------
 // [RENAME-COLLIDE] An APPEND and a rename TARGET can land on the same name.
-// The append adds the S21 name with no S3 member behind it; the rename pass then overwrites a real S3 prop's varName with that same name -- leaving TWO props of that name in one SendTable.
+// The append adds the S21 name with no dedi member behind it; the rename pass then overwrites a real dedi prop's varName with that same name -- leaving TWO props of that name in one SendTable.
 //-----------------------------------------------------------------------------
 bool DTExtend_AppendSuppressedByRename(const char* tableName, const char* propName)
 {
@@ -6834,7 +6854,7 @@ static void DTExtend_WarnDuplicateRenameTarget(const uint8_t* props, const int n
 
 // Tripwire: a rename that lands the S21 name in the wrong table never binds
 // (CreateDecoders pairs by name WITHIN a table). Quiet if the table is not in
-// the canonical schema at all (many S3 tables have no S21 twin).
+// the canonical schema at all (many dedi tables have no S21 twin).
 static void DTExtend_WarnRenameTargetNotInSchema(const char* tableName, const char* toName)
 {
 	if (!tableName || !toName)
@@ -6901,11 +6921,11 @@ static void DTExtend_WarnRenameTargetNotInSchema(const char* tableName, const ch
 static void DTExtend_RenameProps()
 {
 	if (!bridge_prop_renames.GetBool()) return;
-	// scope==nullptr => all tables. type==-1 (default) => match any SendProp type; set it only when the S3 name is SHARED by two distinct props (the classic [template, array] idiom: the type=2 Vector template and the type=5 DPT_Array both named identically) and only ONE of the two needs the rename -- an unscoped rename would clobber the other's already-correct match.
+	// scope==nullptr => all tables. type==-1 (default) => match any SendProp type; set it only when the dedi name is SHARED by two distinct props (the classic [template, array] idiom: the type=2 Vector template and the type=5 DPT_Array both named identically) and only ONE of the two needs the rename -- an unscoped rename would clobber the other's already-correct match.
 	// See m_airMoveBlockPlanes below for the verified case.
 	struct R { const char* from; const char* to; const char* scope; int type = -1; };
 	static const R kRenames[] = {
-		// Attachment family: S3 "...Index" -> S21 "...Id" (and the lone m_parentAttachmentIndex ->
+		// Attachment family: dedi "...Index" -> S21 "...Id" (and the lone m_parentAttachmentIndex ->
 		// m_parentAttachment, suffix dropped). Global: these map 1:1 on every carrier.
 		{ "m_parentAttachmentIndex",                      "m_parentAttachment",                        nullptr },
 		{ "m_controlPoint1AttachmentIndex",               "m_controlPoint1AttachmentId",               nullptr },
@@ -6915,20 +6935,20 @@ static void DTExtend_RenameProps()
 		{ "m_attachmentIndex",                            "m_attachmentId",                            nullptr },
 		{ "m_attachmentIndex2",                           "m_attachmentId2",                           nullptr },
 		{ "m_customActivityAttachedModelAttachmentIndex", "m_customActivityAttachedModelAttachmentId", nullptr },
-		// Field renames -- distinctive S3 names, global-safe.
+		// Field renames -- distinctive dedi names, global-safe.
 		{ "m_flFadeInLength",                             "m_flFadeLength",                            nullptr },
 		{ "m_flFadeInStart",                              "m_flFadeStart",                             nullptr },
 		{ "m_ignoresCollisionWithPlayers",               "m_ignoresCollisionWithCombatCharacters",    nullptr },
-		// DT_WeaponX_LocalWeaponData: S3 m_lastPrimaryAttack -> S21 m_lastPrimaryAttackTime.
+		// DT_WeaponX_LocalWeaponData: dedi m_lastPrimaryAttack -> S21 m_lastPrimaryAttackTime.
 		// Absolute server time, no value drift -> safe. Scope is the table the prop is
 		// found in (DT_WeaponX itself does not register it).
 		{ "m_lastPrimaryAttack",                         "m_lastPrimaryAttackTime",                   "DT_WeaponX_LocalWeaponData" },
-		// NOT renamed HERE by default: m_IdealActivity/m_nIdealSequence carry a weapon ACTIVITY ENUM and a model-bound SEQUENCE INDEX that drift S3<->S21, so a raw rename breaks melee.
+		// NOT renamed HERE by default: m_IdealActivity/m_nIdealSequence carry a weapon ACTIVITY ENUM and a model-bound SEQUENCE INDEX that drift dedi<->S21, so a raw rename breaks melee.
 		// Leave ?_unmatched so the client predicts locally.
 		{ "m_thirdPersonEntBlendEaseInDuration",         "m_thirdPersonEntBlendInEaseInDuration",     nullptr },
 		{ "m_thirdPersonEntBlendTotalDuration",          "m_thirdPersonEntBlendInTotalDuration",      nullptr },
 		{ "m_thirdPersonEntBlendEaseOutDuration",        "m_thirdPersonEntBlendInEaseOutDuration",    nullptr },
-		// [SKYDIVE-BIND] The drop-sequence family: S3 calls it "freefall", S21 calls it "skydive", and S21 genericized the Leviathan special-case into "DisableSkydiveEndEntity".
+		// [SKYDIVE-BIND] The drop-sequence family: dedi calls it "freefall", S21 calls it "skydive", and S21 genericized the Leviathan special-case into "DisableSkydiveEndEntity".
 		// All 8 pairs exist on both sides with identical types.
 		{ "m_freefallStartTime",                         "m_skydiveStartTime",                        nullptr },
 		{ "m_freefallEndTime",                           "m_skydiveEndTime",                          nullptr },
@@ -6939,11 +6959,11 @@ static void DTExtend_RenameProps()
 		{ "m_skydiveLeviathanHitPosition",               "m_skydiveDisableSkydiveEndEntityHitPosition", nullptr },
 		{ "m_skydiveLeviathanHitNormal",                 "m_skydiveDisableSkydiveEndEntityHitNormal", nullptr },
 		// [DUCK-TIMER] Do NOT rename m_nDuckTransitionTimeMsecs -> m_duckTransitionRemainderMsec: that puts the S21 name in DT_Local while the client keeps it only in DT_CurrentData_LocalPlayer, and CreateDecoders pairs by name WITHIN a table, so the prop would never bind.
-		// [AIRMOVE-BLOCK-RENAME] m_airMoveBlockPlanes is the classic [template, array] idiom -- S3 has TWO SendProps of this name: type=2 Vector TEMPLATE and type=5 DPT_Array (nElements=2).
+		// [AIRMOVE-BLOCK-RENAME] m_airMoveBlockPlanes is the classic [template, array] idiom -- dedi has TWO SendProps of this name: type=2 Vector TEMPLATE and type=5 DPT_Array (nElements=2).
 		{ "m_airMoveBlockPlanes",                        "m_airMoveBlockPlanes[0]",                   "DT_Local", 2 },
-		// Generic S3 name -- SCOPED (m_fadeDist stays m_fadeDist on DT_PhysBox/DT_Zipline/etc.).
+		// Generic dedi name -- SCOPED (m_fadeDist stays m_fadeDist on DT_PhysBox/DT_Zipline/etc.).
 		{ "m_fadeDist",                                  "m_survivalPropFadeDist",                    "DT_PropSurvival" },
-		// World DataTable prop (type 10): S3 "DT_WORLD" (caps) vs S21 "DT_World" -- strict-case match
+		// World DataTable prop (type 10): dedi "DT_WORLD" (caps) vs S21 "DT_World" -- strict-case match
 		// fails -> world entity (classID 116) gets no decoder -> snapshot decode crash.
 		{ "DT_WORLD",                                    "DT_World",                                  nullptr },
 		// Applied only when native deathfield DT is OFF (see loop below).
@@ -7071,8 +7091,8 @@ static void DTExtend_RenameProps()
 	if (highFlagProps > 0)
 		Msg(eDLL_T::ENGINE,
 			"[PROP-HIGHFLAG] %d SendProp(s) carry bits above the networked subset "
-			"(census only -- widespread and mostly benign; diff against the client "
-			"with tools/wire_schema_diff.py before acting)\n",
+			"(census only -- widespread and mostly benign; diff against the client's "
+			"schema before acting)\n",
 			highFlagProps);
 	if (skippedTables > 0)
 	{
@@ -7176,7 +7196,7 @@ static void DTExtend_RenameProps()
 	}
 }
 
-// [PROP-DROP] Splice out S3-only props S21 removed entirely (a rename cannot express "gone").
+// [PROP-DROP] Splice out dedi-only props S21 removed entirely (a rename cannot express "gone").
 // Mid-table extras shift every later flatten index -- last index OOB and CL_CopyNewEntity FAIL.
 static ConVar bridge_prop_drops("bridge_prop_drops", "1", FCVAR_RELEASE,
 	"[PROP-DROP] Splice S3-only SendProps that S21 removed (e.g. DT_Team reserved/"
@@ -7518,8 +7538,8 @@ static void DTExtend_RewidenAllEffectIndexProps()
 			"[FXIDX-REWIDEN] skipped %d table(s) (preflight unreadable)\n", skippedTables);
 }
 
-// m_camoIndex S3->S21 sentinel translation.
-// S3 networks m_camoIndex as a SIGNED 10-bit int whose no-camo sentinel is -1 (valid range [-1, numSkins)); S21 made the no-camo sentinel 0 and indexes camo_skins as table[8*camo] for any NONZERO value, so an authentic S3 -1 arrives as 0xFFFFFFFF -> ~34GB OOB -> AV.
+// m_camoIndex dedi->S21 sentinel translation.
+// dedi networks m_camoIndex as a SIGNED 10-bit int whose no-camo sentinel is -1 (valid range [-1, numSkins)); S21 made the no-camo sentinel 0 and indexes camo_skins as table[8*camo] for any NONZERO value, so an authentic dedi -1 arrives as 0xFFFFFFFF -> ~34GB OOB -> AV.
 static void __fastcall Camo_ClampSentinelProxy(void* pProp, void* pStruct,
 	void* /*pData*/, void* pOut, int /*iElement*/, int /*objectID*/)
 {
@@ -7530,10 +7550,10 @@ static void __fastcall Camo_ClampSentinelProxy(void* pProp, void* pStruct,
 		const int off = *(int*)((const char*)pProp + SP_OFFSET) & 0xFFFFF;
 		v = *(const int*)((const char*)pStruct + off);
 	}
-	*(int*)pOut = (v < 0) ? 0 : v;   // S3 -1 (no camo) -> S21 0 (no camo)
+	*(int*)pOut = (v < 0) ? 0 : v;   // dedi -1 (no camo) -> S21 0 (no camo)
 }
 
-// Default ON. 0 = ship the raw S3 m_camoIndex (-1 reaches the S21 client; only the
+// Default ON. 0 = ship the raw dedi m_camoIndex (-1 reaches the S21 client; only the
 // client-side sdk_bridge_camo_fix masks then stand between -1 and the camo OOB AV).
 static ConVar bridge_camo_encode("bridge_camo_encode", "1", FCVAR_RELEASE,
 	"Translate m_camoIndex's S3 '-1 = no camo' sentinel to S21's '0 = no camo' on the "
@@ -7784,8 +7804,8 @@ static void DTExtend_GrowPoseParamArray(void)
 			"child table(s)\n", skippedVisitedCap);
 }
 
-// [WEAP-ACT-XLAT] S3->S21 activity ID translation for the wire-bound weapon ideal-activity field.
-// ActivityList_RegisterSharedActivities registers in strict sequential order, so ACT_* IDs are list positions -- S21 inserted/ reshuffled ACT_VM_* relative to S3: ACT_VM_IDLE S3=468/S21=472, ACT_VM_RELOAD 499/505, ACT_VM_WEAPON_INSPECT 557/564.
+// [WEAP-ACT-XLAT] dedi->S21 activity ID translation for the wire-bound weapon ideal-activity field.
+// ActivityList_RegisterSharedActivities registers in strict sequential order, so ACT_* IDs are list positions -- S21 inserted/ reshuffled ACT_VM_* relative to dedi: ACT_VM_IDLE dedi=468/S21=472, ACT_VM_RELOAD 499/505, ACT_VM_WEAPON_INSPECT 557/564.
 static void __fastcall WeapIdealActivity_XlatProxy(void* pProp, void* pStruct,
 	void* /*pData*/, void* pOut, int /*iElement*/, int /*objectID*/)
 {
@@ -7800,8 +7820,8 @@ static void __fastcall WeapIdealActivity_XlatProxy(void* pProp, void* pStruct,
 	*(int*)pOut = xlat;
 }
 
-// Comprehensive install: walk the cached SendTable set and install WeapIdealActivity_XlatProxy on the activity-carrying DPT_Int leaves of DT_WeaponX - "m_idealActivity" (post-rename name; only exists when bridge_weap_ideal_bind has renamed the S3 "m_IdealActivity" prop, so the name match self-gates on that convar) - "m_customActivity" (identically named, always wire-matched).
-// [WEAP-ACT-C2S] stores S3-space ids (inspect=557); raw on the S21 client is a wrong activity (S21 557 is a melee-tier act).
+// Comprehensive install: walk the cached SendTable set and install WeapIdealActivity_XlatProxy on the activity-carrying DPT_Int leaves of DT_WeaponX - "m_idealActivity" (post-rename name; only exists when bridge_weap_ideal_bind has renamed the dedi "m_IdealActivity" prop, so the name match self-gates on that convar) - "m_customActivity" (identically named, always wire-matched).
+// [WEAP-ACT-C2S] stores dedi-space ids (inspect=557); raw on the S21 client is a wrong activity (S21 557 is a melee-tier act).
 static bool s_weapActXlatProxyApplied = false;
 static void DTExtend_ApplyWeapIdealActivityXlatProxy()
 {
@@ -7826,7 +7846,7 @@ static void DTExtend_ApplyWeapIdealActivityXlatProxy()
 			const char* nm = *reinterpret_cast<const char**>(p + SP_VARNAME);
 			if (ODP_StrLenSafe(nm, 64) < 0) continue;
 			// m_weaponActivity: client's HUD-hide watch (sh_weapon_inspect.gnut)
-			// polls GetWeaponActivity per frame and bails when the raw S3-space
+			// polls GetWeaponActivity per frame and bails when the raw dedi-space
 			// wire value (557) mismatches S21 ACT_VM_WEAPON_INSPECT (564).
 			if (strcmp(nm, "m_idealActivity") != 0 && strcmp(nm, "m_customActivity") != 0
 				&& strcmp(nm, "m_weaponActivity") != 0) continue;
@@ -7841,8 +7861,8 @@ static void DTExtend_ApplyWeapIdealActivityXlatProxy()
 }
 
 //=============================================================================
-// [WEAPSTATE-XLAT] S3->S21 m_weapState wire remap.
-// S21 inserted ENERGIZE(8) and COOLDOWN_OVERHEAT(22) into WeaponState_e, so every S3 ordinal from 8 up is one-to-two low on the S21 client: S3 ATTACK(9) reads as SPRINT, RELOAD(10) as ATTACK, SPRINT(8) as ENERGIZE.
+// [WEAPSTATE-XLAT] dedi->S21 m_weapState wire remap.
+// S21 inserted ENERGIZE(8) and COOLDOWN_OVERHEAT(22) into WeaponState_e, so every dedi ordinal from 8 up is one-to-two low on the S21 client: dedi ATTACK(9) reads as SPRINT, RELOAD(10) as ATTACK, SPRINT(8) as ENERGIZE.
 //=============================================================================
 static ConVar bridge_weapstate_s21_ordinals("bridge_weapstate_s21_ordinals", "1", FCVAR_RELEASE,
 	"S21 bridge: emit S21 m_weapState ordinals on the wire (S3 ATTACK=9 -> S21 10). "
@@ -7851,7 +7871,7 @@ static ConVar bridge_weapstate_s21_ordinals("bridge_weapstate_s21_ordinals", "1"
 	"ENERGIZE for SPRINT.");
 
 // [WEAPSTATE-ENERGIZE] The one S21 state the translation can never produce.
-// WeapState_S3ToS21 is `s3 + (s3>=8) + (s3>=21)`, so s3=7 maps to 7 and s3=8 maps to 9: ordinal 8 is a HOLE in the output range, and it is exactly WEAP_STATE_ENERGIZE -- the state S21 inserted and S3 never had.
+// WeapState_S3ToS21 is `s3 + (s3>=8) + (s3>=21)`, so s3=7 maps to 7 and s3=8 maps to 9: ordinal 8 is a HOLE in the output range, and it is exactly WEAP_STATE_ENERGIZE -- the state S21 inserted and dedi never had.
 static constexpr int kWeapStateS21_Energize = 8;
 static constexpr int kEnergizeState_Energizing = 1; // EnergizeState_e::ENERGIZING
 
@@ -7979,7 +7999,7 @@ static void DTExtend_ApplyWeapStateXlatProxy()
 			else if (strcmp(nm, "m_customActivityFlags") == 0)
 			{
 				*reinterpret_cast<uintptr_t*>(p + 0x60) = (uintptr_t)&WeapCustomActFlags_XlatProxy;
-				// S3 ships 6 bits; S21 flags reach PLAYMELEERAISEONCOMPLETE (0x100).
+				// dedi ships 6 bits; S21 flags reach PLAYMELEERAISEONCOMPLETE (0x100).
 				int* const pnb = reinterpret_cast<int*>(p + SP_NBITS);
 				const int before = *pnb;
 				if (before < 9)
@@ -8002,7 +8022,7 @@ static void DTExtend_ApplyWeapStateXlatProxy()
 		installed);
 
 	// A zero install is indistinguishable from the feature working, so say so:
-	// the client would keep reading raw S3 ordinals with the convar reading 1.
+	// the client would keep reading raw dedi ordinals with the convar reading 1.
 	if (installed == 0)
 		Warning(eDLL_T::ENGINE,
 			"[WEAPSTATE-XLAT] no DT_WeaponX.m_weapState prop found -- weapon-state "
@@ -8012,12 +8032,12 @@ static void DTExtend_ApplyWeapStateXlatProxy()
 }
 
 //=============================================================================
-// [COLGROUP-XLAT] S3->S21 m_CollisionGroup wire remap.
+// [COLGROUP-XLAT] dedi->S21 m_CollisionGroup wire remap.
 // Each script VM binds TRACE_COLLISION_GROUP_* from its own engine table, and
 // S21 inserted groups that shift every index above DEBRIS_TRIGGER. m_CollisionGroup
-// is a networked 6-bit DPT_Int, so it reaches the client as a raw S3 index.
+// is a networked 6-bit DPT_Int, so it reaches the client as a raw dedi index.
 //
-//   group                        S3   S21
+//   group                        dedi   S21
 //   DEBRIS                        1     1
 //   DEBRIS_TRIGGER                2     2
 //   INTERACTIVE                   3     4
@@ -8045,7 +8065,7 @@ struct ColGroupPair_t
 };
 
 // Name-matched anchors plus the two unnamed groups resolved by BEHAVIOUR.
-// Indices with no entry pass through untouched and are reported once each -- guessing a uniform shift across the gaps would be inventing wire values. 17 (carrier CPhysicsProp) -> 18; 21 (carrier CTriggerNoZipline) -> 23: S3's matrix never sets bit 21 and 23 is S21's only no-collide group, so the picks are behaviour-unique and monotonic with their neighbours (16->17, 18->19 / 19->21, 20->22).
+// Indices with no entry pass through untouched and are reported once each -- guessing a uniform shift across the gaps would be inventing wire values. 17 (carrier CPhysicsProp) -> 18; 21 (carrier CTriggerNoZipline) -> 23: dedi's matrix never sets bit 21 and 23 is S21's only no-collide group, so the picks are behaviour-unique and monotonic with their neighbours (16->17, 18->19 / 19->21, 20->22).
 static const ColGroupPair_t s_colGroupMap[] = {
 	{  1,  1, "DEBRIS"                    },
 	{  2,  2, "DEBRIS_TRIGGER"            },
@@ -8250,8 +8270,8 @@ static void DTExtend_ApplyCollisionGroupXlatProxy()
 }
 
 //=============================================================================
-// [ANIM-XLATE] S3->S21 m_playAnimationType wire remap.
-// S3 networks CPlayer::m_playAnimationType (server +0x6914, int, 0..5) where 5 is grapple.
+// [ANIM-XLATE] dedi->S21 m_playAnimationType wire remap.
+// dedi networks CPlayer::m_playAnimationType (server +0x6914, int, 0..5) where 5 is grapple.
 //=============================================================================
 static ConVar bridge_anim_type_xlate("bridge_anim_type_xlate", "1", FCVAR_RELEASE,
 	"S21 bridge: remap m_playAnimationType on the wire (S3 grapple=5 -> S21 grapple=6). "
@@ -8414,7 +8434,7 @@ static void __fastcall RegenStamp_WireProxy(void* pProp, void* pStruct,
 }
 
 // Arms every DPT_Time m_lastRegenTime occurrence. Refuses (loudly) to touch one
-// that already carries a proxy -- the S3 slot is verified NULL, so a non-null
+// that already carries a proxy -- the dedi slot is verified NULL, so a non-null
 // proxy means the layout moved and chaining blind would corrupt the value.
 static int DTExtend_InstallRegenStampWireInTree(uint8_t* table, int& nFound, int depth = 0)
 {
@@ -8504,8 +8524,8 @@ static void DTExtend_InstallRegenStampWire(void** tables, int count)
 	// nFound > 0 && nPatched == 0: re-entry, already armed -- silent.
 }
 
-// seComboVars: one packed int per status-effect slot. S3 stores X<<7 (endless
-// |1); S21 expects X<<6. Wire-only remap so native S3 readers stay coherent.
+// seComboVars: one packed int per status-effect slot. dedi stores X<<7 (endless
+// |1); S21 expects X<<6. Wire-only remap so native dedi readers stay coherent.
 // With 256 types the dedi type already sits at bits 24-31, as on S21.
 static ConVar bridge_status_combo_wire("bridge_status_combo_wire", "1", FCVAR_RELEASE,
 	"S21 bridge: repack seComboVars from the S3 layout (final <<7) to the S21 layout "
@@ -9579,7 +9599,7 @@ static char Hook_SendTable_Init(void** tables, int count)
 	{
 		s_applied = true;
 		Msg(eDLL_T::ENGINE, "[BRIDGE-DT] SendTable rebuild path = LEGACY\n");
-		// Legacy: append S21-new props to the S3 SendTables.
+		// Legacy: append S21-new props to the dedi SendTables.
 		DTExtend_Apply(tables, count);
 		// Relocate top-level SendProps into named sub-tables so the matcher pairs them with S21 RecvProps that live one level deeper.
 		// Source entity offset + bit count preserved; only the wire-side serialization scope changes.
@@ -9587,13 +9607,13 @@ static char Hook_SendTable_Init(void** tables, int count)
 		// Bulk additive cross-scope copies (143 entries, auto-discover source).
 		// Adds wire-side prop emissions inside named sub-tables so the matcher pairs them on classes that DERIVE the destination -- without removing source-side emissions (which still match for classes that don't derive dest).
 		DTExtend_CopyProps();
-		// Apply data-driven SPROP_* flag overrides on existing S3 props (e.g.
+		// Apply data-driven SPROP_* flag overrides on existing dedi props (e.g.
 		// DT_PlayerDecoy.m_currentClass=0x1, m_localAngles=0x208).
 		DTExtend_ApplyFlagOverrides();
 		// [INF-AMMO-WIRE] PARKED: clip/stockpile value proxies do not fix infinite ammo (state=1 reaches the client; clip still mispredicts), and offset mistakes regress normal reload.
 		// Leave stock SendProps alone; m_infiniteAmmoState proxy (appended) stays; enforcement is gated by bridge_infinite_ammo (default 0).
 		DTExtend_RenameProps();
-		// [PROP-DROP] Structural sibling of the rename pass: splice S3-only props
+		// [PROP-DROP] Structural sibling of the rename pass: splice dedi-only props
 		// S21 removed (DT_Team reserved/connecting/loading counts). Same timing
 		// contract: before flag/bit-width overrides and the precalc.
 		DTExtend_DropProps();
@@ -9603,7 +9623,7 @@ static char Hook_SendTable_Init(void** tables, int count)
 		// predictableFlags 6-slot set/clear immediates -> 8-slot (pairs with the
 		// DT_Local.predictableFlags nBits widen above).
 		DTExtend_ApplyPFlagsSlots8();
-		// m_modInventory / m_consumableInventory: retype+widen the native S3 array sub-tables in place (Int32->Int64 for mods, 16bit->32bit Int for consumables) + install zero-extend proxies.
+		// m_modInventory / m_consumableInventory: retype+widen the native dedi array sub-tables in place (Int32->Int64 for mods, 16bit->32bit Int for consumables) + install zero-extend proxies.
 		// These native sub-tables are already in their raw, walkable shape on the legacy path, so the tree-walk runs unchanged here.
 		DTExtend_RebuildModInventory(tables, count);
 		DTExtend_RebuildConsumableInventory(tables, count);
@@ -9613,20 +9633,20 @@ static char Hook_SendTable_Init(void** tables, int count)
 		// Comprehensive effect-index re-widen (twin of the model-index pass) -- catches any *EffectIndex* SendProp the 2-entry s_bitWidthOverrides + assumed-inheritance missed (e.g.
 		// DT_TEScriptParticleSystemOnEntityWithPos as an independent synth copy), so no ParticleEffectNames index >= 2048 truncates.
 		DTExtend_RewidenAllEffectIndexProps();
-		// Translate m_camoIndex's S3 '-1 = no camo' sentinel to S21's '0 = no camo' on the wire across every carrier (DT_BaseAnimating, DT_PropSurvival, lightweight/ future).
+		// Translate m_camoIndex's dedi '-1 = no camo' sentinel to S21's '0 = no camo' on the wire across every carrier (DT_BaseAnimating, DT_PropSurvival, lightweight/ future).
 		// Fixes the camo OOB AV at the authoritative encode boundary so the S21 client never receives -1.
 		DTExtend_ApplyCamoSentinelProxy();
-		// [WEAP-ACT-XLAT] Translate m_idealActivity's S3 activity ID to its S21 equivalent at the wire-encode boundary (only meaningful once bridge_weap_ideal_bind has renamed the S3 prop into the S21 name).
+		// [WEAP-ACT-XLAT] Translate m_idealActivity's dedi activity ID to its S21 equivalent at the wire-encode boundary (only meaningful once bridge_weap_ideal_bind has renamed the dedi prop into the S21 name).
 		// Reuses the activity translation map.
 		DTExtend_ApplyWeapIdealActivityXlatProxy();
-		// [WEAPSTATE-XLAT] Translate DT_WeaponX.m_weapState from S3's 22-state enum to S21's 25-state one at the same wire-encode boundary (S21 inserted ENERGIZE at 8 and COOLDOWN_OVERHEAT at 22).
+		// [WEAPSTATE-XLAT] Translate DT_WeaponX.m_weapState from dedi's 22-state enum to S21's 25-state one at the same wire-encode boundary (S21 inserted ENERGIZE at 8 and COOLDOWN_OVERHEAT at 22).
 		// Sender-side by design -- every client-side attempt degenerated into a compare mask on a predicted field.
 		DTExtend_ApplyWeapStateXlatProxy();
-		// [COLGROUP-XLAT] Translate m_CollisionGroup from the S3 collision-group enum to S21's at the same wire-encode boundary (S21 inserted groups, shifting PLAYER/BREAKABLE_GLASS/NPC/WEAPON/PROJECTILE by 1 and BLOCK_WEAPONS by 2).
+		// [COLGROUP-XLAT] Translate m_CollisionGroup from the dedi collision-group enum to S21's at the same wire-encode boundary (S21 inserted groups, shifting PLAYER/BREAKABLE_GLASS/NPC/WEAPON/PROJECTILE by 1 and BLOCK_WEAPONS by 2).
 		// The dedi keeps its own index for local collision; only the wire value moves.
 		DTExtend_ApplyCollisionGroupXlatProxy();
 		// Insert missing inheritance levels (synthesized wrapper SendTables).
-		// For chain-mismatch divergent classes where S21 added a level the dedi's S3 chain lacks (e.g.
+		// For chain-mismatch divergent classes where S21 added a level the dedi's dedi chain lacks (e.g.
 		DTExtend_InsertWrapperTables();
 		// Grow m_flPoseParameter 12->24 and bind 12..23 before precalc. New
 		// elements are pre-bracketed so Bracketize leaves them alone.
@@ -9713,7 +9733,7 @@ static char Hook_SendTable_Init(void** tables, int count)
 	// [REGEN-WIRE] Same common tail: the DPT_Time sentinel for m_lastRegenTime.
 	DTExtend_InstallRegenStampWire(tables, count);
 
-	// [SE-COMBO-WIRE] Same common tail: repack seComboVars S3 (<<7) -> S21 (<<6).
+	// [SE-COMBO-WIRE] Same common tail: repack seComboVars dedi (<<7) -> S21 (<<6).
 	DTExtend_InstallStatusComboWire(tables, count);
 #ifndef CLIENT_DLL
 	DTExtend_InstallModBitfieldCurrentWire(tables, count);

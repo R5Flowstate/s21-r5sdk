@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: S3 native gap-fills for ballistic player overheat. Backed by
+// Purpose: dedi native gap-fills for ballistic player overheat. Backed by
 // bridge-owned appended DT_BaseCombatCharacter props with no engine writer --
 // pure SDK state that scripts own end-to-end.
 //

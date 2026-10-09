@@ -6,7 +6,7 @@
 // player_slideSuperJumpEnabled (the "boosted_slide_jump" mod): after a jump
 // taken from a slide, a jump or dodge press within 0.3s of leaving the ground adds
 // up * sqrt(2 * gravity * slideSuperJumpHeight) once per slideSuperJumpCooldown.
-// The S3 Jump returns 0 for any airborne press, so the twin evaluates the same
+// The dedi Jump returns 0 for any airborne press, so the twin evaluates the same
 // gates around the native and applies the same impulse to the move velocity.
 //
 //=============================================================================//

@@ -52,7 +52,6 @@ target_compile_definitions( ${PROJECT_NAME} PRIVATE "MEM_DEBUG_CLASSNAME" )
 if( ${LIB_NAME} STREQUAL "tier1_cl" )
 target_compile_definitions( ${PROJECT_NAME} PRIVATE
     "CLIENT_DLL"
-    "GAMEDLL_S21"
 )
 endif()
 target_include_directories( ${PROJECT_NAME} PRIVATE "${ENGINE_SOURCE_DIR}/tier0/" )

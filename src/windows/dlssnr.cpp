@@ -2742,6 +2742,7 @@ static void DlssNr_Dump_f(const CCommand& args)
 	DlssNr_DumpStatus();
 }
 
+// Release so players can attach the report to a denoiser bug.
 static ConCommand dlssnr_dump("dlssnr_dump", DlssNr_Dump_f,
 	"Write NGX/NR census to the console and dlssnr.log next to the exe.", FCVAR_RELEASE);
 

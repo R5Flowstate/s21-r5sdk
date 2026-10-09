@@ -14,6 +14,8 @@ class CUserCmd;
 struct ScriptClassDescriptor_t;
 
 void Glide_PreRunCommand(CPlayer* pPlayer, CUserCmd* pUserCmd);
+// A jump pad launch ends a glide, as the client's launch does.
+void Glide_StopOnLaunch(void* pPlayer);
 void Glide_LevelShutdown(void);
 void Glide_RegisterScriptFunctions(ScriptClassDescriptor_t* playerStruct);
 

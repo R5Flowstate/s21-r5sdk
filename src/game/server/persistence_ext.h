@@ -1,6 +1,6 @@
 //=============================================================================
 //
-// Purpose: raise S3 persistence DataDef caps to S21 capacity.
+// Purpose: raise dedi persistence DataDef caps to S21 capacity.
 // Stock offsets stay: implicit IMUL/SHL/ADD bakes pdef-internal offsets into immediates.
 //
 //=============================================================================

@@ -51,7 +51,7 @@ class V_Weapon_Parse : public IDetour
 };
 ///////////////////////////////////////////////////////////////////////////////
 
-// S21 melee_anim_1p is a string; S3 schema only has melee_anim_1p_number (1/2/3).
+// S21 melee_anim_1p is a string; dedi schema only has melee_anim_1p_number (1/2/3).
 // Inject the integer before the stock parser stores the var.
 inline void (*v_WeaponSchemaParse)(__int64 a1, __int64 a2, char* a3, int a4);
 

@@ -66,11 +66,13 @@
 #include "game/server/slide_gate_launch.h"
 #include "game/server/drag_revive.h"
 #include "game/server/entity_script_ext.h"
+#include "game/server/base_push.h"
 #include "game/server/skyward.h"
 #include "game/server/missile_expand_contract.h"
 #include "game/server/cmd_recorder.h"
 #include "game/server/demo_natives_sv.h"
 #include "game/server/mapedit_paks.h"
+#include "game/server/source_push.h"
 #include "game/server/mapedit_models.h"
 #include "game/server/bot_cmd.h"
 #include "game/server/player_overheat.h"
@@ -1976,7 +1978,7 @@ void Script_RegisterCoreServerFunctions(CSquirrelVM* s)
     s->RegisterConstant("PLAYER_SKYWARD_LAUNCH_STATE_LAUNCH", 3);
     s->RegisterConstant("PLAYER_SKYWARD_LAUNCH_STATE_TRANSITION", 4);
     s->RegisterConstant("WT_GADGET", 9);
-    s->RegisterConstant("TRACE_COLLISION_GROUP_NPC_MOVEMENT", 10); // S3 engine index
+    s->RegisterConstant("TRACE_COLLISION_GROUP_NPC_MOVEMENT", 10); // dedi engine index
     // Newer script alias of the restrict-who-targets bit (same value as AI_AP_FLAG_TITAN_ONLY).
     s->RegisterConstant("AI_AP_FLAG_SMART_AI_ONLY", 1);
 
@@ -2046,10 +2048,10 @@ void Script_RegisterCoreServerFunctions(CSquirrelVM* s)
     Script_RegisterFuncNamed(s, "GetGlobalNonRewindNetEnt", "Script_GetGlobalNonRewindNetEnt", "Gets a global non-rewind entity", "entity ornull", "string name", false, Script_GetGlobalNonRewindNetEnt);
 
 
-    // Indexed deathfield natives (S21 signatures overwrite S3 no-index ones).
+    // Indexed deathfield natives (S21 signatures overwrite dedi no-index ones).
     DeathField_RegisterOnVM(s);
 
-    // FreeDM/Control alliance natives (S3 missing SetTeamIsInAlliance) -- same RegisterOnVM pattern as DeathField
+    // FreeDM/Control alliance natives (dedi missing SetTeamIsInAlliance) -- same RegisterOnVM pattern as DeathField
     AllianceCompat_RegisterOnVM(s);
 }
 
@@ -2064,6 +2066,7 @@ void Script_RegisterAdminServerFunctions(CSquirrelVM* s)
     CmdRecorder_RegisterGlobalFuncs(s);
     DemoSv_RegisterServerFunctions(s);
     MapEditPaks_RegisterServerFunctions(s);
+    SourcePush_RegisterServerFunctions(s);
     MapEditModels_RegisterServerFunctions(s);
     AgentLink_RegisterScriptFunctions(s);
 
@@ -2166,6 +2169,7 @@ static void Script_RegisterServerPlayerClassFuncs()
     SlideGateLaunch_RegisterScriptFunctions(g_serverScriptPlayerStruct);
     DragRevive_RegisterScriptFunctions(g_serverScriptPlayerStruct);
     EntityScriptExt_RegisterPlayerFunctions(g_serverScriptPlayerStruct);
+    BasePush_RegisterScriptFunctions(g_serverScriptPlayerStruct);
     SkywardBridge_RegisterScriptFunctions(g_serverScriptPlayerStruct);
     CmdRecorder_RegisterPlayerFuncs(g_serverScriptPlayerStruct);
     BotCmd_RegisterPlayerFuncs(g_serverScriptPlayerStruct);
@@ -2296,7 +2300,7 @@ static void Script_RegisterServerFirstPersonProxyClassFuncs()
 //---------------------------------------------------------------------------------
 static void Hook_Script_RegisterServerCodeConstants(CSquirrelVM* s)
 {
-    v_Script_RegisterServerCodeConstants(s); // run engine codeconsts (writes S3 schema)
+    v_Script_RegisterServerCodeConstants(s); // run engine codeconsts (writes dedi schema)
 
     // S21 GRX_CURRENCY: keep PREMIUM/CREDITS/CRAFTING; COUNT is 7 with four new keys.
     s->RegisterConstant("GRX_CURRENCY_HEIRLOOM", 3);
@@ -2311,7 +2315,7 @@ static void Hook_Script_RegisterServerCodeConstants(CSquirrelVM* s)
 //---------------------------------------------------------------------------------
 static void Hook_Script_RegisterServerWeaponSlotConstants(CSquirrelVM* s)
 {
-    v_Script_RegisterServerWeaponSlotConstants(s); // run engine codeconsts (writes S3 schema)
+    v_Script_RegisterServerWeaponSlotConstants(s); // run engine codeconsts (writes dedi schema)
 
     s->RegisterConstant("WEAPON_INVENTORY_SLOT_ANTI_TITAN",     5);
     s->RegisterConstant("WEAPON_INVENTORY_SLOT_DUALPRIMARY_0",  7);

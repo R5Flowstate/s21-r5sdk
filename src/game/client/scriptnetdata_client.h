@@ -23,7 +23,7 @@ enum ScriptNetDataCategory_e
 	SNDC_PLAYER_EXCLUSIVE = 2,
 	SNDC_TITAN_SOUL = 3,
 	SNDC_DEATH_BOX = 4,
-	SNDC_GLOBAL_NON_REWIND = 5,  // SDK extension -- appended to S3's 5 categories
+	SNDC_GLOBAL_NON_REWIND = 5,  // SDK extension -- appended to dedi's 5 categories
 
 	SNDC_COUNT = 6
 };
@@ -77,7 +77,7 @@ enum ScriptNetDataCategory_e
 	SNDC_PLAYER_EXCLUSIVE = 2,
 	SNDC_TITAN_SOUL = 3,
 	SNDC_DEATH_BOX = 4,
-	SNDC_GLOBAL_NON_REWIND = 5,  // SDK extension — appended to S3's 5 categories
+	SNDC_GLOBAL_NON_REWIND = 5,  // SDK extension — appended to dedi's 5 categories
 
 	SNDC_COUNT = 6
 };

@@ -11,6 +11,9 @@
 inline int64_t (*v_CClient_SendSnapshot)(int64_t a1, int64_t a2, int a3, int a4) = nullptr;
 inline int64_t (*v_CServer_SendClientMessages)(int64_t, char) = nullptr;
 
+// When set, called each server frame just before the client snapshots are built.
+inline void (*g_pfnSnapshotSend_BeforeClientSnapshots)(void) = nullptr;
+
 void SnapshotSend_LevelShutdown(void);
 void SnapshotSend_OnPackFreezeReleased(void);
 bool Bridge_SnapSyncSendActive(void);

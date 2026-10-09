@@ -6,7 +6,7 @@
 //
 // Client (CLIENT_DLL): detour Pak_FindAssetVoid / uniqueId lookup.
 // Server (DEDICATED): insert into the engine pak asset hash table after
-// asset-publish (S3 lookups are inlined, so there is no find chokepoint).
+// asset-publish (dedi lookups are inlined, so there is no find chokepoint).
 //
 //=============================================================================//
 

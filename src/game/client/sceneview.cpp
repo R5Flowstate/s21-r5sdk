@@ -1,7 +1,7 @@
 //=============================================================================//
 //
 // Purpose: Full-resolution scene views (see sceneview.h). Setup runs after the
-// retail monitors are set up, drawing runs where the retail monitors draw
+// engine's monitors are set up, drawing runs where those monitors draw
 // (before the main scene, after shadow depth), and the output is copied into
 // per-view full-frame targets _rt_SceneView<N> / _rt_SceneViewMV<N>.
 //

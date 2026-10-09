@@ -172,7 +172,7 @@ void sq_pop(HSQUIRRELVM v, SQInteger nelemstopop)
 
 //---------------------------------------------------------------------------------
 // Prefer engine sq_push* (VSquirrelS21Core resolves S21 type tags + _top@+0x68).
-// SDK v->Push uses S3 SQVM layout and AVs on S21 natives.
+// SDK v->Push uses dedi SQVM layout and AVs on S21 natives.
 //---------------------------------------------------------------------------------
 void sq_pushnull(HSQUIRRELVM v)
 {

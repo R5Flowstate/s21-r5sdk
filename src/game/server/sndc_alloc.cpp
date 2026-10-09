@@ -104,7 +104,7 @@ static __int64 __fastcall Hook_ClientInit(__int64 a1)
 	}
 
 	// The original memset'd entries 0-4 (0x528 bytes) of the expanded copy
-	// and wrote S3 limits. Re-prime ALL entries with S21 limits (the SDK is
+	// and wrote dedi limits. Re-prime ALL entries with S21 limits (the SDK is
 	// the authority). Entries 5-6 also get their counts zeroed.
 	if (g_pExpandedCats)
 	{

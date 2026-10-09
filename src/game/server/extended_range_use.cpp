@@ -57,7 +57,7 @@ typedef void(__fastcall* UseCandidateSort_t)(void* pStart, void* pEnd, __int64 c
 	unsigned char reverse);
 typedef void*(__fastcall* FindUseEntity_t)(CBaseEntity* player);
 // Post-LOS "is the hit still on this usable entity?" -- only called when the
-// eye->usePos trace was blocked. S3 has no USABLE_NO_LOS_REQUIREMENT path.
+// eye->usePos trace was blocked. dedi has no USABLE_NO_LOS_REQUIREMENT path.
 typedef bool(__fastcall* UseHitInEntityBounds_t)(const float* hitPos, CBaseEntity* pEnt);
 
 static FindPlayerUseCandidate_t v_FindPlayerUseCandidate = nullptr;
@@ -84,7 +84,7 @@ static bool s_bCallbackMissingLatched = false;
 static bool s_bAlwaysSortGatePatched = false;
 static bool s_bUsableBoundPatched = false;
 
-// S3 Set/Add/RemoveUsableValue reject with `if (arg > 0x200000)`. That is a
+// dedi Set/Add/RemoveUsableValue reject with `if (arg > 0x200000)`. That is a
 // scalar ceiling, not a bit-mask check -- so stock
 //   USABLE_EXTENDED_USE | USABLE_FROM_EXTENDED_RANGE | ...
 // (0x200868) errors even though every individual flag is valid.
@@ -330,7 +330,7 @@ static void* __fastcall Hook_FindPlayerUseCandidate(CBaseEntity* player,
 //-----------------------------------------------------------------------------
 // Hook 3 -- honor USABLE_NO_LOS_REQUIREMENT on the post-trace accept path
 // FindPlayerUseCandidate: if fraction!=1, call this; accept on true.
-// S3 never reads bit 0x40; later builds skip the LOS gate when it is set.
+// dedi never reads bit 0x40; later builds skip the LOS gate when it is set.
 //-----------------------------------------------------------------------------
 static bool __fastcall Hook_UseHitInEntityBounds(const float* hitPos, CBaseEntity* pEnt)
 {

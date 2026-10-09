@@ -242,7 +242,7 @@ void CmdRecorder_Free(int nId)
 
 //-----------------------------------------------------------------------------
 // Builds a recording from one pov's USERCMD chunks of a server demo (or a drill
-// cut by r5dem_to_cmdrec.py) so the Lab recorder can replay a demo moment.
+// cut from one) so the Lab recorder can replay a demo moment.
 // Seconds are relative to the pov's first full snapshot, or to its first
 // command when the file has no packets.
 //-----------------------------------------------------------------------------

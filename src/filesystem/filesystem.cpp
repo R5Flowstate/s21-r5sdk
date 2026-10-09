@@ -13,7 +13,7 @@ CFileSystem_Stdio* FileSystem()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: IBaseFileSystem is the second base (+8). Implicit S3 cast is wrong on S21.
+// Purpose: IBaseFileSystem is the second base (+8). Implicit dedi cast is wrong on S21.
 //-----------------------------------------------------------------------------
 IBaseFileSystem* BaseFileSystem()
 {

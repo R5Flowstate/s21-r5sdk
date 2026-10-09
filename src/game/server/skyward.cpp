@@ -345,13 +345,11 @@ static void Skyward_End(void* pPlayer, const bool bInterrupt, const bool bWarnIf
 	if (bWasFollowing)
 		Entity_SetParent(pPlayer, nullptr);
 
-	WeaponScriptVars_EnableWeaponTypes(pPlayer, Skyward_DisabledWeaponTypes(bWasFollowing));
-
+	// The dive starts from rest: a seeded climb velocity carries the player up past the apex.
 	if (!bInterrupt)
-	{
-		CBaseEntity* const pEnt = reinterpret_cast<CBaseEntity*>(pPlayer);
-		SkydiveBridge_BeginFreefall(pPlayer, pEnt->Diag_AbsVelocity());
-	}
+		SkydiveBridge_BeginFreefall(pPlayer, Vector3D(0.0f, 0.0f, 0.0f));
+
+	WeaponScriptVars_EnableWeaponTypes(pPlayer, Skyward_DisabledWeaponTypes(bWasFollowing));
 
 	if (bInterrupt)
 		Translocation_SetMoveType(pPlayer, SW_MOVETYPE_WALK);
@@ -1175,7 +1173,7 @@ void SkywardBridge_RegisterScriptFunctions(ScriptClassDescriptor_t* playerStruct
 }
 
 //-----------------------------------------------------------------------------
-// The S3 PlayerMove only knows MOVETYPE_FLY from skydive: FLY with no freefall
+// The dedi PlayerMove only knows MOVETYPE_FLY from skydive: FLY with no freefall
 // is reset to WALK before the move dispatch, which would drop every ride back
 // to walking. That one reset is skipped while a ride is active.
 //-----------------------------------------------------------------------------

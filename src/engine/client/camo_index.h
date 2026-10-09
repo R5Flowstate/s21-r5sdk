@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: Clamp S21 camo table index. Hostile dedi (or S3 -1) must not
+// Purpose: Clamp S21 camo table index. Hostile dedi (or dedi -1) must not
 //          index camo_skins as table[8*eax] for a negative or oversized value.
 //
 //=============================================================================//

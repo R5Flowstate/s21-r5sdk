@@ -435,7 +435,7 @@ inline uintptr_t NetObs_ResolveEHandle(uint32_t eh)
 	return entPtr;
 }
 
-// S2C ScriptRemote frame magic (S3 net_ScriptMessage 68, isTyped=0). Must match the dedi.
+// S2C ScriptRemote frame magic (dedi net_ScriptMessage 68, isTyped=0). Must match the dedi.
 static constexpr uint32_t BRIDGE_S2C_SCRIPTREMOTE_MAGIC = 0x53523244u;
 static constexpr uint32_t BRIDGE_S2C_MANTLEBOOST_MAGIC = 0x3156424Du;
 
@@ -462,7 +462,7 @@ extern uintptr_t S21_GetExeBase();
 extern const char* Bridge_GetLevelBaseName();
 // Re-arm the stale stub modelprecache sweep after an extra map pak lands.
 extern void Bridge_ModelPrecacheFix_Rearm(void);
-// Forget the S3 CreateStringTable order used to route UpdateStringTable by name.
+// Forget the dedi CreateStringTable order used to route UpdateStringTable by name.
 extern void S21Bridge_ResetS3TableNames(void);
 // S21 CClientState*; 0 before the first signon.
 extern uintptr_t Bridge_ClientStatePtr(void);

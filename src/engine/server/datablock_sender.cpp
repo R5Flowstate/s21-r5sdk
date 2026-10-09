@@ -42,7 +42,7 @@ void ServerDataBlockSender::SendDataBlock(const short transferId, const int tran
 	buf.WriteLong(CONNECTIONLESS_HEADER);
 	buf.WriteByte(S2C_DATABLOCK_FRAGMENT);
 
-	// transfer info -- S3 wire is shorts (client parser at 0x4F)
+	// transfer info -- dedi wire is shorts (client parser at 0x4F)
 	buf.WriteShort(transferId);
 	buf.WriteLong(transferSize);
 	buf.WriteShort(transferNr);

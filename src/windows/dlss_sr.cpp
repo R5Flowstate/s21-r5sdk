@@ -2996,6 +2996,7 @@ static void DlssSr_Dump_f(const CCommand& args)
 	NOTE_UNUSED(args);
 	DlssSr_DumpStatus();
 }
+// Release so players can attach the report to an upscaler bug.
 static ConCommand dlss_sr_dump("dlss_sr_dump", DlssSr_Dump_f, "Report what the engine's FSR2 upscale pass is doing.", FCVAR_RELEASE);
 
 ID3D12Resource* DlssSr_ResourceFromTexture(void* pTexture)

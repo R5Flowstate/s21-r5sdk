@@ -30,7 +30,7 @@ static ConVar sdk_signon_buffer_size("sdk_signon_buffer_size", "4194303",
 	true, 786432.0f, true, 4194303.0f);
 
 //-----------------------------------------------------------------------------
-// RVAs. r5apex.exe == r5apex_ds.exe at S3.
+// RVAs. r5apex.exe == r5apex_ds.exe at dedi.
 //-----------------------------------------------------------------------------
 static constexpr uintptr_t kImageBase = 0x140000000ull;
 

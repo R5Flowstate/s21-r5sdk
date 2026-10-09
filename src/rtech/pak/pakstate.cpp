@@ -15,7 +15,7 @@
 #include "pakstate.h"
 #include "ui_image_skip.h"
 
-// Default paks\Win64\; S3 left these NULL and Asserted on first use.
+// Default paks\Win64\; dedi left these NULL and Asserted on first use.
 static const char* s_pakReadPath  = "paks\\Win64\\";
 static const char* s_pakWritePath = "paks\\Win64\\";
 

@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <cstring>
 
-// Bump on any change to the S3->S21 message table, the SendTable preprocess,
+// Bump on any change to the dedi->S21 message table, the SendTable preprocess,
 // the prop huffman codebook, the subchannel / DataBlock parsers or the
 // datagram header layout. The player refuses a mismatch.
 constexpr uint32_t R5DEM_PROTOCOL = 1;

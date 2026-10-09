@@ -35,7 +35,7 @@ static constexpr size_t kMaxSeqsPerRig = 4096;
 // S21 arig header: u16 externalCount +0x10, u16 count +0x12, heads +0x18.
 static constexpr uintptr_t kRigSeqCountOffset = 0x12;
 #else
-// S3 arig header: u32 unk +0x10, u32 count +0x14, heads +0x18.
+// dedi arig header: u32 unk +0x10, u32 count +0x14, heads +0x18.
 static constexpr uintptr_t kRigSeqCountOffset = 0x14;
 #endif // CLIENT_DLL
 static constexpr uintptr_t kRigSeqArrayOffset = 0x18;

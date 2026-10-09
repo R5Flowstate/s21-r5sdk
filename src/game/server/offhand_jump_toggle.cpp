@@ -5,7 +5,7 @@
 // The S21 client selects an offhand whose weapon sets
 // 'offhand_deactivate_on_jump_toggle_or_release' while the movement ability
 // (IN_DODGE) is held, and with the toggle_on_jump_to_deactivate userinfo on,
-// holsters it on the next press. The S3 server halves predate the key; both branches run here after
+// holsters it on the next press. The dedi server halves predate the key; both branches run here after
 // the stock per-offhand frames, on the same command the client runs them.
 //
 //=============================================================================//
@@ -165,7 +165,7 @@ bool OffhandJumpToggle_IsReleasing(const void* pPlayer)
 	const int nState = OJ_Read<int>(pMain, OJ_WEAPON_OFF_WEAPSTATE);
 	if (nState == OJ_WEAPSTATE_HOLSTER)
 		return true;
-	// S3 runs the active offhand frame after movement; S21 releases before it.
+	// dedi runs the active offhand frame after movement; S21 releases before it.
 	return nState == OJ_WEAPSTATE_CHARGE
 		&& OJ_Read<int>(pMain, OJ_WEAPON_OFF_ACTIVESTATE) == OJ_ACTIVESTATE_ACTIVE
 		&& OJ_TriggerReleased(pPlayer, kv);
@@ -315,7 +315,7 @@ static int64_t Hook_WeaponX_OffhandFrame(void* pWeapon, void* pPlayer, unsigned 
 // while jump is held (toggle off), or until the next jump press (toggle on).
 // Busy frame: the idle fast-holster is skipped while jump is held with toggle
 // on. offhand_holds_on_tactical also counts a held tactical button in both.
-// The S3 halves only know the offhand's own IN_OFFHAND button.
+// The dedi halves only know the offhand's own IN_OFFHAND button.
 //-----------------------------------------------------------------------------
 static void OJ_DiagInput(const char* pszWhat, const void* pWeapon, const void* pPlayer)
 {
@@ -455,7 +455,7 @@ static bool OJ_CanSwitchToOffhand(void* pWeapon)
 // offhand_switch_slot: a candidate that is not already in a hand raises in the
 // alt hand while the main hand holds an offhand that is not holstering (Missile
 // Swarm over Valkyrie's jets). The dispatcher buckets the candidate by its
-// active slot right after this test passes; S3 predates the key.
+// active slot right after this test passes; dedi predates the key.
 //-----------------------------------------------------------------------------
 static bool Hook_WeaponX_CanSwitchToOffhand(void* pWeapon)
 {
@@ -639,6 +639,24 @@ void OffhandJumpToggle_OnBusyFrame(void* pWeapon)
 	if (bridge_offhand_jump_diag.GetBool())
 		Msg(eDLL_T::SERVER, "[OFFHAND-JUMP] holster '%s' player=%p\n",
 			static_cast<const char*>(pWeapon) + OJ_WEAPON_OFF_CLASSNAME, pPlayer);
+}
+
+void OffhandJumpToggle_ReleaseOnLanding(void* pPlayer)
+{
+	if (!pPlayer || !bridge_offhand_jump.GetBool() || !v_WeaponX_HolsterInternal || TitanGate_IsTitanPlayer(pPlayer))
+		return;
+
+	void* const pMain = OJ_ActiveWeapon(pPlayer, 0);
+	if (!pMain || !OJ_WeaponKV(pMain).bOffhandJumpToggle)
+		return;
+	if (OJ_Read<int>(pMain, OJ_WEAPON_OFF_WEAPSTATE) != OJ_WEAPSTATE_CHARGE
+		|| OJ_Read<int>(pMain, OJ_WEAPON_OFF_ACTIVESTATE) != OJ_ACTIVESTATE_ACTIVE)
+		return;
+
+	v_WeaponX_HolsterInternal(pMain, false);
+
+	if (bridge_offhand_jump_diag.GetBool())
+		OJ_DiagInput("landed", pMain, pPlayer);
 }
 
 void VOffhandJumpToggle::GetAdr(void) const

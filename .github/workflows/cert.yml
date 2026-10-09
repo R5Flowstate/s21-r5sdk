@@ -1,0 +1,166 @@
+name: cert
+
+# Builds the release (CERT) client.dll and server.dll from the tagged source with
+# the exact toolset the shipped DLLs use, and publishes them with build provenance.
+on:
+  push:
+    tags: [ "sdk-v*" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+env:
+  MSVC_VERSION: "14.51.36231"
+  CL_VERSION: "19.51.36260.0"
+  LINK_VERSION: "14.51.36260.0"
+  WINDOWS_SDK: "10.0.26100.0"
+  WINDOWS_SDK_BUILD: "10.1.26100.9457"
+
+jobs:
+  cert:
+    runs-on: windows-2025
+    timeout-minutes: 240
+    steps:
+      # Line endings are part of the build input; releases build from a CRLF checkout.
+      - run: git config --global core.autocrlf true
+      - uses: actions/checkout@v4
+
+      - name: Install Visual Studio 2026 Build Tools 18.10.3
+        shell: pwsh
+        run: |
+          $bootstrap = "$env:RUNNER_TEMP\vs_buildtools.exe"
+          Invoke-WebRequest "https://download.visualstudio.microsoft.com/download/pr/e5f740e0-92f9-49d7-ab3b-5d17b84108fd/283d526008bf3ac56ec2c6aeb3102b8ca68b9af75643c8f5d0ee58060a1886bb/vs_BuildTools.exe" -OutFile $bootstrap
+          $want = "283d526008bf3ac56ec2c6aeb3102b8ca68b9af75643c8f5d0ee58060a1886bb"
+          if ((Get-FileHash $bootstrap -Algorithm SHA256).Hash.ToLower() -ne $want) { throw "bootstrapper hash mismatch" }
+          $dir = Join-Path $env:SystemDrive "BuildTools2026"
+          $p = Start-Process $bootstrap -Wait -PassThru -ArgumentList @(
+            "--quiet", "--wait", "--norestart", "--nocache", "--installPath", $dir,
+            "--add", "Microsoft.VisualStudio.Workload.VCTools",
+            "--add", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+            "--add", "Microsoft.VisualStudio.Component.VC.ATL",
+            "--add", "Microsoft.VisualStudio.Component.VC.CMake.Project")
+          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { throw "Build Tools install failed: $($p.ExitCode)" }
+          "VSDIR=$dir" | Out-File $env:GITHUB_ENV -Append
+
+      # The CRT and Windows import libraries are link inputs. Every 26100 servicing build
+      # shares one folder and a newer file survives an older install, so start from empty.
+      - name: Install Windows SDK 10.0.26100.9457
+        shell: pwsh
+        run: |
+          Get-ChildItem HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall, HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall |
+            ForEach-Object { Get-ItemProperty $_.PSPath } |
+            Where-Object { $_.DisplayName -like "Windows Software Development Kit - Windows 10.0.26100*" -and $_.QuietUninstallString } |
+            ForEach-Object {
+              "removing $($_.DisplayName)"
+              $u = Start-Process cmd.exe -Wait -PassThru -ArgumentList "/c", $_.QuietUninstallString
+              if ($u.ExitCode -ne 0 -and $u.ExitCode -ne 3010) { throw "uninstall of $($_.DisplayName) failed: $($u.ExitCode)" }
+            }
+          $kits = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10"
+          foreach ($sub in "Lib", "Include") {
+            Remove-Item (Join-Path $kits "$sub\$env:WINDOWS_SDK") -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          $setup = "$env:RUNNER_TEMP\winsdksetup.exe"
+          Invoke-WebRequest "https://go.microsoft.com/fwlink/?linkid=2382321" -OutFile $setup
+          $want = "b0bdbad38ae74c40ccae8cdbcf229807627fba2bc3100be28301c4ba884f755e"
+          if ((Get-FileHash $setup -Algorithm SHA256).Hash.ToLower() -ne $want) { throw "SDK installer hash mismatch" }
+          $p = Start-Process $setup -Wait -PassThru -ArgumentList @(
+            "/features", "OptionId.DesktopCPPx64", "/quiet", "/norestart", "/ceip", "off")
+          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { throw "SDK install failed: $($p.ExitCode)" }
+
+      - name: Check the toolset matches the shipped builds
+        shell: pwsh
+        run: |
+          $dir = (Get-Content "$env:VSDIR\VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt").Trim()
+          $bin = "$env:VSDIR\VC\Tools\MSVC\$dir\bin\Hostx64\x64"
+          $cl = (Get-Item "$bin\cl.exe").VersionInfo.FileVersion
+          $link = (Get-Item "$bin\link.exe").VersionInfo.FileVersion
+          if ($dir -ne $env:MSVC_VERSION -or $cl -ne $env:CL_VERSION -or $link -ne $env:LINK_VERSION) {
+            throw "toolset $dir / cl $cl / link $link; releases use $env:MSVC_VERSION / $env:CL_VERSION / $env:LINK_VERSION"
+          }
+          $kits = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\Lib\$env:WINDOWS_SDK"
+          $crt = "$env:VSDIR\VC\Tools\MSVC\$dir\lib\x64"
+          $inputs = [ordered]@{
+            "$kits\ucrt\x64\libucrt.lib" = "c3a20426b5142bfd0848468a3b95c47440759f0391ef2764e5020672811803cb"
+            "$kits\um\x64\kernel32.lib"  = "842f5ce7ad8cf5aab7491b791e7968d2be510ae93f4019d3311797289399d221"
+            "$crt\libvcruntime.lib"      = "f0a898588ecb26fe4c7530b2495a6fe5e768856309a33391702a3cbcb72b0589"
+            "$crt\libcmt.lib"            = "d4cc4c224455825dec1669f9ad6a9872a4f5b37ed1daae1fd0b9044d7650d908"
+            "$crt\libcpmt.lib"           = "96f3a2e1113ae8884f459e679a38a35cab542013229a9e6106f58382a6fb47c8"
+          }
+          $bad = @()
+          foreach ($f in $inputs.Keys) {
+            $h = if (Test-Path $f) { (Get-FileHash $f -Algorithm SHA256).Hash.ToLower() } else { "missing" }
+            if ($h -ne $inputs[$f]) { $bad += "$f = $h" }
+          }
+          if ($bad) {
+            Get-ChildItem HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall |
+              ForEach-Object { Get-ItemProperty $_.PSPath } |
+              Where-Object { $_.DisplayName -match "Windows Software Development Kit" } |
+              ForEach-Object { "installed: $($_.DisplayName) $($_.DisplayVersion)" }
+            throw "link inputs differ from the release builds:`n$($bad -join "`n")"
+          }
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          $cmake = "$env:VSDIR\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+          & $cmake -S . -B build_cert -G "Visual Studio 18 2026" -A x64 `
+            "-DCMAKE_SYSTEM_VERSION=$env:WINDOWS_SDK" `
+            -DBOOST_REGEX_STANDALONE=OFF -DOPTION_CERTAIN=ON -DOPTION_RETAIL=ON `
+            -DOPTION_LTCG_MODE=ALL -DOPTION_WARNINGS_AS_ERRORS=OFF
+          if ($LASTEXITCODE) { throw "configure failed" }
+
+      - name: Build client and server
+        shell: pwsh
+        run: |
+          $msbuild = "$env:VSDIR\MSBuild\Current\Bin\MSBuild.exe"
+          foreach ($p in "src\core\client.vcxproj", "src\core\server.vcxproj") {
+            & $msbuild "build_cert\$p" -t:Build -p:Configuration=Release -p:Platform=x64 -m -v:minimal
+            if ($LASTEXITCODE) { throw "$p failed" }
+          }
+
+      - name: Hashes
+        shell: pwsh
+        run: |
+          Get-FileHash game\client.dll, game\server.dll -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
+            Tee-Object SHA256SUMS.txt
+
+      - uses: actions/attest-build-provenance@v2
+        if: startsWith(github.ref, 'refs/tags/') && github.event.repository.private == false
+        with:
+          subject-path: |
+            game/client.dll
+            game/server.dll
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cert-${{ github.ref_name }}
+          path: |
+            game/client.dll
+            game/client.pdb
+            game/server.dll
+            game/server.pdb
+            SHA256SUMS.txt
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Patch notes come from .github/release-notes/<tag>.md; every release ends with how to verify it.
+          $version = $env:GITHUB_REF_NAME -replace '^sdk-v', ''
+          $notes = ".github/release-notes/$env:GITHUB_REF_NAME.md"
+          $body = if (Test-Path $notes) { Get-Content $notes -Raw } else { "" }
+          $fence = '```'
+          $footer = @(
+            "", "---", "",
+            "Built by this workflow from $env:GITHUB_SHA. SHA256SUMS.txt lists the DLL hashes; check a DLL with:",
+            "", $fence, "gh attestation verify client.dll -R $env:GITHUB_REPOSITORY", $fence)
+          ($body.TrimEnd() + "`n" + ($footer -join "`n") + "`n") | Out-File "$env:RUNNER_TEMP\notes.md" -Encoding utf8
+          gh release create $env:GITHUB_REF_NAME game\client.dll game\server.dll game\client.pdb game\server.pdb SHA256SUMS.txt `
+            --title "R5Flowstate $version" --notes-file "$env:RUNNER_TEMP\notes.md"
+          if ($LASTEXITCODE) { throw "release failed" }

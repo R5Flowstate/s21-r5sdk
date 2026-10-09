@@ -3,7 +3,7 @@
 
 //=============================================================================//
 //
-// Purpose: S21 ContextAction_Set/Clear/IsEmoting on S3 CBaseCombatCharacter.
+// Purpose: S21 ContextAction_Set/Clear/IsEmoting on dedi CBaseCombatCharacter.
 // Writes the existing m_contextAction sendprop; no layout growth.
 //
 //=============================================================================//

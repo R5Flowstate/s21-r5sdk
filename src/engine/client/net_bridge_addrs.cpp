@@ -421,7 +421,7 @@ static int s_nNetObsHostIndex = -1;
 static size_t s_nNetObsSymsUnresolved = 0;
 
 //-----------------------------------------------------------------------------
-// Purpose: parses an IDA-style pattern ("48 8B ?? 24") into bytes and mask
+// Purpose: parses a byte pattern ("48 8B ?? 24") into bytes and mask
 //-----------------------------------------------------------------------------
 static size_t NetObs_ParsePattern(const char* const pszPattern, uint8_t* const pBytes, char* const pMask, const size_t nMax)
 {

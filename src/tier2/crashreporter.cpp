@@ -10,7 +10,12 @@
 #include "tier2/curlutils.h"
 #include "tier2/crashreporter.h"
 
+#ifdef CLIENT_DLL
 static ConVar backtrace_enabled("backtrace_enabled", "1", FCVAR_RELEASE, "Whether to report fatal errors to the collection server");
+#else
+// Opt-in on dedicated servers: hosts have no EULA prompt to consent through.
+static ConVar backtrace_enabled("backtrace_enabled", "0", FCVAR_RELEASE, "Whether to report fatal errors to the collection server");
+#endif // CLIENT_DLL
 static ConVar backtrace_hostname("backtrace_hostname", "submit.backtrace.io", FCVAR_RELEASE, "Holds the error collection server hostname");
 static ConVar backtrace_universe("backtrace_universe", "sl-6556232ce754460e9d00aa5add149582", FCVAR_RELEASE, "Holds the error collection server hosted instance");
 static ConVar backtrace_token("backtrace_token", "196e7fb990dd91e3c6bc088a42c2f0cea36a1c9dc7118abdfc6f78f99ec1511c", FCVAR_RELEASE, "Holds the error collection server submission token");
@@ -58,7 +63,7 @@ static inline bool CrashReporter_ShouldSubmitReport()
 	}
 
 #ifndef CLIENT_DLL
-	return true;
+	return false;
 #else
 	return CrashReporter_ShowMessageBox();
 #endif
@@ -69,7 +74,7 @@ static inline string CrashReporter_FormatAttributes(const CCrashHandler* const h
 	const CPUInformation& pi = GetCPUInformation();
 	const CrashHardWareInfo_s& hi = handler->GetHardwareInfo();
 
-	const char* const format = "uuid=%s&" "build_id=%lld&" "role=%s&"
+	const char* const format = "uuid=%s&" "build_id=%lld&" "role=%s&" "ring=" SDK_RING "&"
 		"cpu_model=%s&" "cpu_speed=%lf GHz&" "gpu_model=%s&" "gpu_flags=%lu&"
 		"ram_phys_total=%.2lf MiB&" "ram_phys_avail=%.2lf MiB&"
 		"ram_virt_total=%.2lf MiB&" "ram_virt_avail=%.2lf MiB&"

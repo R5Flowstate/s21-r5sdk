@@ -25,7 +25,6 @@ macro( add_inputsystem_lib LIB_NAME )
 	if( ${LIB_NAME} STREQUAL "inputsystem_cl" )
 		target_compile_definitions( ${PROJECT_NAME} PRIVATE
 			"CLIENT_DLL"
-			"GAMEDLL_S21"
 		)
 	endif()
 endmacro()

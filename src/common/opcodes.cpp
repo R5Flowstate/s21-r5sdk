@@ -48,7 +48,7 @@ static bool TryPatchSQVMCompileErrorSeverity()
 void RuntimePtc_Init()
 {
 	// Reduce script error severity from fatal (1) to warning (0). Same
-	// patch as S3 SDK -- prevents script errors from crashing. On S21
+	// patch as dedi SDK -- prevents script errors from crashing. On S21
 	// v_SQVM_CompileError is resolved by VSquirrelS21Core's IDetour::GetFun
 	// pass; if that pattern shifts on a future build the pointer is null
 	// and FindPatternSelf would walk from address 0 and AV. Guard hard.
@@ -68,10 +68,10 @@ void RuntimePtc_Init()
 	}
 
 	// -----------------------------------------------------------------
-	// S3-on-S21 bridge: redirect engine vtable[40] -> vtable[39] in
+	// dedi-on-S21 bridge: redirect engine vtable[40] -> vtable[39] in
 	// C_Player::SetLocalView and C_Player::PostDataUpdate
 
-	// On S3-hosted S21 client, only vtable[39] matches the local slot.
+	// On dedi-hosted S21 client, only vtable[39] matches the local slot.
 	// Patch three SetLocalView/PostDataUpdate sites (vtable[40]->[39],
 	// one-byte disp 0x40->0x38) so LocalClientPlayer and LocalViewPlayer both arm.
 
@@ -476,7 +476,7 @@ void Dedicated_Init()
 // p_CHLClient_LevelShutdown.Patch({ 0xB8, 0x00, 0x00, 0x00, 0x00, 0xC3 }); // FUN --> RET | Return early in 'CHLClient::LevelShutdown' during DLL shutdown.
 // p_CHLClient_HudProcessInput.Patch({ 0xC3 }); // FUN --> RET | Return early in 'CHLClient::HudProcessInput' to prevent infinite loop.
 //
-// Module_FindPattern(g_GameDll, "41 85 C8 0F 84").Offset(0x40).Patch({ 0xEB, 0x23 }); // MOV --> JMP | Skip virtual call during settings layout parsing (S0/S1/S2/S3).
+// Module_FindPattern(g_GameDll, "41 85 C8 0F 84").Offset(0x40).Patch({ 0xEB, 0x23 }); // MOV --> JMP | Skip virtual call during settings layout parsing (S0/S1/S2/dedi).
 //
 //	//-------------------------------------------------------------------------
 //	// CCLIENTSTATE
@@ -685,7 +685,7 @@ void Dedicated_Init()
 //	p_UpdateCurrentVideoConfig.Offset(0x0).Patch({ 0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3 }); // FUN --> RET | Return early to prevent the server from writing a videoconfig.txt file to the disk (overwriting the existing one).
 //	p_HandleConfigFile.Offset(0x0).Patch({ 0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3 }); // FUN --> RET | Return early to prevent the server from writing various input and ConVar config files to the disk (overwriting the existing one).
 //	p_ResetPreviousGameState.Offset(0x0).Patch({ 0xC3 }); // FUN --> RET | Return early to prevent the server from writing a previousgamestate.txt file to the disk (overwriting the existing one).
-//	p_LoadPlayerConfig.Offset(0x0).Patch({ 0xC3 }); // FUN --> RET | Return early to prevent the server from executing 'config_default_pc.cfg' (execPlayerConfig) and (only for >S3) running 'chat_wheel' code.
+//	p_LoadPlayerConfig.Offset(0x0).Patch({ 0xC3 }); // FUN --> RET | Return early to prevent the server from executing 'config_default_pc.cfg' (execPlayerConfig) and (only for >dedi) running 'chat_wheel' code.
 //
 //	//-------------------------------------------------------------------------
 //	// RUNTIME: COMMUNITIES

@@ -73,7 +73,7 @@ static bool Portal_PtrReadable(const void* p, size_t n)
 }
 
 // S21 C_BaseEntity world pose. Read directly: the SDK's IClientEntity vtable
-// is the S3 layout, so its GetAbsOrigin/GetAbsAngles slots are not safe here.
+// is the dedi layout, so its GetAbsOrigin/GetAbsAngles slots are not safe here.
 static constexpr ptrdiff_t kClientEntAbsOrigin = 0x188;
 static constexpr ptrdiff_t kClientEntAbsAngles = 0x194;
 

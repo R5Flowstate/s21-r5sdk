@@ -39,8 +39,6 @@ CPlayerMove::CPlayerMove(void)
 {
 }
 
-static ConVar sv_autobunnyhopping("sv_autobunnyhopping", "0", FCVAR_RELEASE | FCVAR_REPLICATED | FCVAR_CHEAT, "Players automatically re-jump while holding the jump button.");
-
 //-----------------------------------------------------------------------------
 // Purpose: Runs movement commands for the player
 // Input: *player -
@@ -71,15 +69,6 @@ void CPlayerMove::StaticRunCommand(CPlayerMove* thisp, CPlayer* player, CUserCmd
 				ucmd ? ucmd->command_number : -1,
 				ucmd ? ucmd->frametime : -1.0f);
 		}
-	}
-
-	// Auto bunny hopping: strip the jump button from the usercmd while the
-	// player is airborne. This way, when they land, the engine sees IN_JUMP
-	// appear as a fresh press and triggers a new jump automatically.
-	if (sv_autobunnyhopping.GetBool() && (ucmd->buttons & IN_JUMP))
-	{
-		if (!(player->GetFlags() & FL_ONGROUND))
-			ucmd->buttons &= ~IN_JUMP;
 	}
 
 	CClientExtended* const cle = g_pServer->GetClientExtended(player->GetEdict() - 1);
@@ -187,7 +176,7 @@ void VPlayerMove::Detour(const bool bAttach) const
 
 	if (bAttach)
 	{
-		// g_PlayerMove object (S3 S21 layout): the vtable ptr IS the object's first
+		// g_PlayerMove object (dedi S21 layout): the vtable ptr IS the object's first
 		// qword; slot 1 is CPlayerMove::RunCommand -- what engine helper dispatches.
 		void** const ppPlayerMoveVtbl = *reinterpret_cast<void***>(
 			g_GameDll.GetModuleBase() + PMOVE_RVA_G_PLAYERMOVE);

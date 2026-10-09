@@ -95,7 +95,7 @@ static float GetSeverityForTimedItem(const StatusEffectTimedData* item, float cu
 	if (curTime >= seTimeEnd && !isPaused)
 		return 0.0f;
 
-	// S3 storage: severity at bits[14:7] (final <<7). Wire proxy remaps for S21.
+	// dedi storage: severity at bits[14:7] (final <<7). Wire proxy remaps for S21.
 	const float baseSeverity = static_cast<float>(
 		static_cast<unsigned char>(item->seComboVars >> 7)) / 255.0f;
 

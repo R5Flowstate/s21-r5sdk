@@ -235,7 +235,7 @@ SQBool sq_release(HSQUIRRELVM v, SQObject* po);
 
 /*UTILITY MACRO*/
 // S21 tags numerics with 0x40000000 (int 0x40000002, float 0x40000004);
-// the S3 SQOBJECT_NUMERIC bit is never set, so this rejected every number.
+// the dedi SQOBJECT_NUMERIC bit is never set, so this rejected every number.
 #define SQ_S21_NUMERIC_MASK 0x40000000
 #define SQ_S21_OT_INTEGER   0x40000002
 #define SQ_S21_OT_FLOAT     0x40000004
@@ -319,22 +319,22 @@ class VSquirrelAPI : public IDetour
 	}
 	virtual void GetFun(void) const
 	{
-		// S21-first patterns (type tags + SQVM _top@+0x68). S3 fallbacks below.
+		// S21-first patterns (type tags + SQVM _top@+0x68). dedi fallbacks below.
 		// VSquirrelS21Core also resolves these.
 		Module_FindPattern(g_GameDll, "48 83 EC 28 8B 51 ?? 44 8B C2").GetPtr(v_sq_pushroottable);
-		// OT_BOOL S21=0x10000008 (setne path); S3=0x01000008
+		// OT_BOOL S21=0x10000008 (setne path); dedi=0x01000008
 		Module_FindPattern(g_GameDll, "48 83 EC 38 33 C0 48 C7 44 24 20 08 00 00 10 48 89 44 24 28 85 D2 8B 51 68 0F 95 C0").GetPtr(v_sq_pushbool);
 		if (!v_sq_pushbool)
 			Module_FindPattern(g_GameDll, "48 83 EC 38 33 C0 48 C7 44 24 20 08 ?? ?? 01 48").GetPtr(v_sq_pushbool);
-		// sq_pushstring S21 (sub rsp,20h + jz 0x92); S3 used sub rsp,30h
+		// sq_pushstring S21 (sub rsp,20h + jz 0x92); dedi used sub rsp,30h
 		Module_FindPattern(g_GameDll, "40 56 48 83 EC 20 48 8B F1 48 85 D2 0F 84 92 00 00 00").GetPtr(v_sq_pushstring);
 		if (!v_sq_pushstring)
 			Module_FindPattern(g_GameDll, "40 56 48 83 EC 30 48 8B F1 48 85 D2 0F 84 8F ??").GetPtr(v_sq_pushstring);
-		// OT_INTEGER S21=0x40000002; S3=0x05000002
+		// OT_INTEGER S21=0x40000002; dedi=0x05000002
 		Module_FindPattern(g_GameDll, "48 83 EC 38 33 C0 48 C7 44 24 20 02 00 00 40 48").GetPtr(v_sq_pushinteger);
 		if (!v_sq_pushinteger)
 			Module_FindPattern(g_GameDll, "48 83 EC 38 33 C0 48 C7 44 24 20 02 ?? ?? 05 48").GetPtr(v_sq_pushinteger);
-		// OT_FLOAT S21=0x40000004 + _top@+0x68; S3 read _top@+0x78
+		// OT_FLOAT S21=0x40000004 + _top@+0x68; dedi read _top@+0x78
 		Module_FindPattern(g_GameDll, "48 83 EC 38 8B 51 68 33 C0 48 89 44 24 28 F3 0F 11 4C 24 28 48 C7 44 24 20 04 00 00 40").GetPtr(v_sq_pushfloat);
 		if (!v_sq_pushfloat)
 			Module_FindPattern(g_GameDll, "48 83 EC 38 8B 51 78 33 C0").GetPtr(v_sq_pushfloat);

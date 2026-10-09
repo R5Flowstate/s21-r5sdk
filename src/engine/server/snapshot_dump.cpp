@@ -49,7 +49,7 @@ static char __fastcall Hook_CreatePhysicsFollower(int64_t a1, int64_t ownerEnt,
 		ownerRefH = *reinterpret_cast<const uint32_t*>(ownerEnt + 0x8);
 		ownerModelIdx = *reinterpret_cast<const int16_t*>(ownerEnt + 0xDE);
 
-		// CStudioHdr wrapper @ entity+4056 (S3 dedi CBaseAnimating path).
+		// CStudioHdr wrapper @ entity+4056 (dedi CBaseAnimating path).
 		const uint64_t csh = *reinterpret_cast<const uint64_t*>(ownerEnt + 4056);
 		const uint64_t hdr = csh
 			? *reinterpret_cast<const uint64_t*>(csh + 8)
@@ -403,7 +403,7 @@ static void S21Bridge_ScanDecoyPropIndices(int64_t frameObj,
 // can be diffed class-by-class. ~2000 lines per boot, so it stays opt-in.
 static ConVar bridge_flatn_dump_all("bridge_flatn_dump_all", "0", FCVAR_DEVELOPMENTONLY,
 	"One-shot [FLATN-DUMP] of EVERY server class's encode precalc at FLATN-SCAN. "
-	"Pair with the client's +bridge_dump_recvflat * and wire_flat_diff.py.");
+	"Pair with the client's +bridge_dump_recvflat *.");
 
 static ConVar bridge_flatn_dump_residual("bridge_flatn_dump_residual", "0", FCVAR_DEVELOPMENTONLY,
 	"One-shot [FLATN-DUMP] of residual encode-precalc classes at FLATN-SCAN. Default 0.");

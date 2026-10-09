@@ -20,7 +20,6 @@ end_sources()
 if( ${LIB_NAME} STREQUAL "memoverride_cl" )
 target_compile_definitions( ${PROJECT_NAME} PRIVATE
     "CLIENT_DLL"
-    "GAMEDLL_S21"
 )
 endif()
 endmacro()
@@ -100,7 +99,6 @@ end_sources()
 if( ${LIB_NAME} STREQUAL "tier0_cl" )
 target_compile_definitions( ${PROJECT_NAME} PRIVATE
     "CLIENT_DLL"
-    "GAMEDLL_S21"
 )
 endif()
 endmacro()

@@ -2,7 +2,7 @@
 //
 // Purpose: 256 status-effect types on the dedicated server.
 //
-// The S3 dedi packs a status effect as severity<<7 | generation<<15 | type<<25,
+// The dedi packs a status effect as severity<<7 | generation<<15 | type<<25,
 // so the type is 7 bits and the name table holds 128. The S21 client already
 // reads an 8-bit type (bits 24-31) and parses 256 names. This takes one bit
 // from the 10-bit generation counter, moves the type down to bit 24, grows the

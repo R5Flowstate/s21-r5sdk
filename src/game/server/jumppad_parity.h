@@ -1,8 +1,7 @@
 //=============================================================================//
 //
-// Purpose: Jump-pad parity on the dedi -- ducked m_vertOverride scale during
-// the launch pass, and per-player relaunch debounce authored into
-// m_jumpPadDebounceExpireTime so the client stops re-punching every tick.
+// Purpose: Jump-pad parity on the dedi -- per-command touch, launch gates, and
+// the launch state the pad scripts set, on the command the client predicts it.
 //
 //=============================================================================//
 #ifndef JUMPPAD_PARITY_H
@@ -12,6 +11,13 @@
 
 // JumpPad launch pass -- ctx+8 is the CPlayer, ctx+16 the CMoveData.
 inline int64_t (*JumpPad__ApplyLaunchPass)(void* pCtx) = nullptr;
+
+// Start and end of CGameMovement::PlayerMove for one command; the PlayerMove hook's owner calls both.
+void JumpPad_OnPlayerMoveBegin(void* pCtx);
+void JumpPad_OnPlayerMoveEnd(void* pCtx);
+
+// A jump pad or gravity cannon launched the player on this command.
+void JumpPad_OnLauncherLaunched(void* pPlayer);
 
 ///////////////////////////////////////////////////////////////////////////////
 class VJumpPadParity : public IDetour

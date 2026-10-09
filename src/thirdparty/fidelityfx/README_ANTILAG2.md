@@ -95,7 +95,7 @@ Recommended UI text can be found here: https://gpuopen.com/fidelityfx-naming-gui
 
 AMD Anti-Lag 2 SDK is open source, and available under the MIT license.
 
-For more information on the license terms please refer to [license](LICENSE.txt).
+For more information on the license terms please refer to [license](LICENSE_ANTILAG2.txt).
 
 <h2>Disclaimer</h2>
 

@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: client S3->S21 activity translator. Binary-search over the static table.
+// Purpose: client dedi->S21 activity translator. Binary-search over the static table.
 //
 //=============================================================================//
 #include "core/stdafx.h"

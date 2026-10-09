@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: Per-field prediction-authority contract for the S3->S21 bridge.
+// Purpose: Per-field prediction-authority contract for the dedi->S21 bridge.
 // One table entry per networked+predicted field this layer touches.
 //
 //=============================================================================//
@@ -156,7 +156,7 @@ int PredAuth_GetDmapKind(void* pEntity);
 bool PredAuth_ResolveFlatOff(uintptr_t dmap, const char* want, int* pOff0, int* pOff1);
 
 //-----------------------------------------------------------------------------
-// Copy wire-fed m_shotCount into m_shotIndexForSpread (S3 networks the pre-split counter).
+// Copy wire-fed m_shotCount into m_shotIndexForSpread (dedi networks the pre-split counter).
 //-----------------------------------------------------------------------------
 void PredAuth_ShotIndexFanout(void* pEntity);
 
@@ -167,7 +167,7 @@ typedef void(__fastcall* PFN_PredSaveData)(void*, const char*, int, int);
 PFN_PredSaveData PredAuth_SaveData(void);
 
 //-----------------------------------------------------------------------------
-// S3 m_nDuckTransitionTimeMsecs and S21 m_duckTransitionRemainderMsec sit in different tables.
+// dedi m_nDuckTransitionTimeMsecs and S21 m_duckTransitionRemainderMsec sit in different tables.
 //-----------------------------------------------------------------------------
 void PredAuth_OnDuckRemainderWire(int nEntIndex, int nMsec);
 void PredAuth_ResetSession(void);

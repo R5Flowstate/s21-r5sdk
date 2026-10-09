@@ -20,8 +20,8 @@
 
 //-----------------------------------------------------------------------------
 // [PRED-UNFED] THE crouch/jump correction fix. S21 added networked+predicted
-// player fields that DO NOT EXIST in S3 (string-absent from the S3 binary): the dedi's dt_extend
-// carries the S21-shaped props with no S3 source (s21_dt_schema.h maps them empty), so the wire
+// player fields that DO NOT EXIST in dedi (string-absent from the dedi binary): the dedi's dt_extend
+// carries the S21-shaped props with no dedi source (s21_dt_schema.h maps them empty), so the wire
 // honestly delivers a constant 0 while the client predicts real values (duck timer 158-393ms,
 // jump press times,...). Every ack during a crouch/jump the PNR compare then sees pred!=0 vs
 // srv==0 -> false "had errors" -> the rebase copies originalData (0) over the client's LIVE state
@@ -33,7 +33,7 @@
 // originalData (server-baseline) slot for exactly these fields -> the compare sees equal (no
 // false error) AND the restore writes the predicted value back (no stomp). The client owns these
 // input-derived timers (in native S21 the server computes them from the same usercmds it replays
-// verbatim, so genuine divergence is not expected); every field the S3 wire ACTUALLY feeds stays
+// verbatim, so genuine divergence is not expected); every field the dedi wire ACTUALLY feeds stays
 // fully server-authoritative.
 ConVar sdk_pred_unfed_mask(
 	"sdk_pred_unfed_mask", "1", FCVAR_RELEASE,
@@ -128,7 +128,7 @@ static ConVar bridge_punch_legacy_mask("bridge_punch_legacy_mask", "0", FCVAR_RE
 // sub-0.12s corrections and (b) could not stop a GENUINE error ack's rebase from restoring
 // server-DOMAIN gate times onto the client -- the fire gate re-opened anyway).
 // MECHANISM: the player clock m_currentFramePlayer.timeBase differs across the bridge by an
-// irreducible +-2-tick sawtooth (the S3 dedi batches ~138Hz cmds at 20Hz through its own
+// irreducible +-2-tick sawtooth (the dedi batches ~138Hz cmds at 20Hz through its own
 // budget/remainder machinery; the S21 client's prediction cannot replicate it bit-exactly).
 // Every clock-DERIVED field (m_flNextAttack, m_meleePressTime, m_raiseFromMeleeEndTime,
 // attackStartTime) = timeBase + offset, so its absolute value inherits the sawtooth -- but its
@@ -319,7 +319,7 @@ ConVar bridge_time_domain_convert("bridge_time_domain_convert", "1", FCVAR_RELEA
 	"fire-gate early-open / phantom bolt class. 1=on (default), 0=ship raw (legacy).");
 
 // [INF-AMMO-CLIENT] GetActiveAmmoSource: m_infiniteAmmoState != 0 => AMMOSOURCE_INFINITE.
-// Clip still cycles client-side; reserve is infinite. On the bridge the S3 dedi often
+// Clip still cycles client-side; reserve is infinite. On the bridge the dedi often
 // holds stale wire clip/stockpile that PNR would stomp over the client's predicted
 // values. When state is live on the weapon, client owns those two fields for the
 // compare/rebase (same mechanism as Shape-A unfed, scoped to infinite weapons only).
@@ -775,7 +775,7 @@ static const PredAuthEntry_t s_authTable[] =
 	// record is always older than the fire. Repairing the live member from it puts
 	// the pre-fire time back and the next frame fires the same event again -- one
 	// frame later, which is the +14 ms double melee registration. Masking the
-	// compare is still right: S3 seq/model ids are namespace-divergent
+	// compare is still right: dedi seq/model ids are namespace-divergent
 	// (1091-vs-1095 class), so the wire copy can never equal the prediction.
 	{ kAnimEvtTimesName, PredAuthClass_t::CLIENT_TIMING_COMPARE_ONLY, AUTH_SCOPE_ANY, nullptr, nullptr, 0,
 		"client's own fire-effect replay-dedup state; consumed by zeroing on the frame path, so a command-slot snapshot can only resurrect it." },
@@ -790,8 +790,8 @@ static const PredAuthEntry_t s_authTable[] =
 	{ "m_predictedAnimEventModel", PredAuthClass_t::CLIENT_TIMING_COMPARE_ONLY, AUTH_SCOPE_ANY, nullptr, nullptr, 0,
 		"predicted-anim-event dedup state, same contract as m_predictedAnimEventTimes." },
 	// [ZOOM RECLASS ] The 07-15 "client-authoritative zoom" masks were the wrong
-	// class (S3-parity bar: S3 clients reconciled zoom natively; only the clock EPOCH is
-	// bridge-structural). m_bZooming is now FED (deleted -- native compare/adopt; the S3
+	// class (dedi-parity bar: dedi clients reconciled zoom natively; only the clock EPOCH is
+	// bridge-structural). m_bZooming is now FED (deleted -- native compare/adopt; the dedi
 	// dedi delivers it, and the epoch skew lives in the TIME stamps, not the bool);
 	// m_zoomBaseTime/m_zoomFullStartTime moved to DOMAIN_TRANSPLANT below (the
 	// m_flNextAttack treatment: relative-time compare cancels the epoch, genuine
@@ -837,7 +837,7 @@ static const PredAuthEntry_t s_authTable[] =
 	// cooldown stamp -- restarting the regen of any ability that is regenerating.
 	{ "m_lastRegenTime", PredAuthClass_t::CLIENT_TIMING, AUTH_SCOPE_WEAPON, nullptr, &bridge_regen_stamp_client, 0,
 		"the dedi cannot author this stamp (regen FSM gated on cl_predict, false on a dedicated server), so the client owns what it alone simulates; without ownership the wire sentinel stomps a live cooldown every ack." },
-	// [SCRIPTVEC] S21-only props appended with no S3 member; dedi value-proxies
+	// [SCRIPTVEC] S21-only props appended with no dedi member; dedi value-proxies
 	// each to a constant 0 by design, so the wire has nothing to say and the client owns it.
 	{ "m_scriptVector", PredAuthClass_t::CLIENT_TIMING, AUTH_SCOPE_WEAPON, nullptr, &bridge_scriptvec_client, 0,
 		"S21-only prop appended with no S3 member; the dedi value-proxies it to a constant 0 by design, so the wire has nothing to say and the client owns it." },
@@ -964,7 +964,7 @@ static const PredAuthEntry_t s_authTable[] =
 		"melee hit stamp, same contract as attackStartTime; hit-vs-no-hit disagreements still flag." },
 	{ "attackLastHitNonWorldEntity", PredAuthClass_t::DOMAIN_TRANSPLANT, AUTH_SCOPE_ANY, nullptr, nullptr, 0,
 		"melee non-world hit stamp, same contract as attackHitEntityTime." },
-	// [ZOOM RECLASS ] moved from CLIENT_TIMING: S3 delivers both stamps; only
+	// [ZOOM RECLASS ] moved from CLIENT_TIMING: dedi delivers both stamps; only
 	// the epoch is bridge-structural, which is exactly what transplant cancels.
 	{ "m_zoomBaseTime", PredAuthClass_t::DOMAIN_TRANSPLANT, AUTH_SCOPE_ANY, nullptr, nullptr, 0,
 		"ADS toggle stamp: clock-derived, compared/repaired in RELATIVE time; a genuine server zoom denial/reset still flags and adopts." },
@@ -1826,7 +1826,7 @@ static bool TimeDomain_ComputeDelta(void* pPlayer, unsigned int nCmd, float* pDe
 			const int nTicksCli = *reinterpret_cast<const int*>(pPredicted + t1);
 			const float flRemSrv = *reinterpret_cast<const float*>(pLive + r0);
 			const float flRemCli = *reinterpret_cast<const float*>(pPredicted + r1);
-			// S3 dedi / S21 client both run 0.05s tick interval for this bridge.
+			// dedi / S21 client both run 0.05s tick interval for this bridge.
 			constexpr float kInterval = 0.05f;
 			tbSrv = static_cast<float>(nTicksSrv) * kInterval + flRemSrv;
 			tbCli = static_cast<float>(nTicksCli) * kInterval + flRemCli;
@@ -1917,6 +1917,9 @@ static void TimeDomain_ConvertEntity(void* pEntity, unsigned int nCmd, float flD
 		if (name && !strcmp(name, "m_currentFramePlayer.timeBase"))
 			continue;
 		if (name && !strcmp(name, "m_lastUCmdSimulationRemainderTime"))
+			continue;
+		// The dedi writes these from the per-command clock, which already matches the client's.
+		if (name && (!strcmp(name, "m_jumpPadDebounceExpireTime") || !strcmp(name, "m_prevJumpPressTime")))
 			continue;
 
 		const int off0 = *reinterpret_cast<int*>(td + TD_FLATOFFSET0);
@@ -3338,8 +3341,8 @@ int PredAuth_GetDmapKind(void* pEntity)
 }
 
 //-----------------------------------------------------------------------------
-// [SHOT-IDX-FANOUT] S21 split S3's single burst-shot counter into
-// m_shotIndexForSpread + m_shotCount; S3 only networks m_shotCount, so the
+// [SHOT-IDX-FANOUT] S21 split dedi's single burst-shot counter into
+// m_shotIndexForSpread + m_shotCount; dedi only networks m_shotCount, so the
 // spread index arrives as permanent 0 and the S21 start-of-burst viewkick
 // clamp in AddViewKickForAttack re-fires on EVERY shot -- the frozen recoil
 // pattern row. At PNR time the live members hold the wire-applied server

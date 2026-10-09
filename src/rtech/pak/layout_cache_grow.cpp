@@ -49,7 +49,7 @@ static uint64_t* s_pNewLayoutCache = nullptr;
 
 //-----------------------------------------------------------------------------
 
-// (S3 r5apex.exe == r5apex_ds.exe). Image base in is.
+// (dedi r5apex.exe == r5apex_ds.exe). Image base in is.
 //-----------------------------------------------------------------------------
 static constexpr uintptr_t kImageBase = 0x140000000ull;
 

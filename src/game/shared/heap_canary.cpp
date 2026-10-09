@@ -170,7 +170,7 @@ namespace
 	static void  (*v_mspace_free)(void*) = nullptr;
 	static uint64_t* s_pMagicCookie = nullptr;
 	// Size-field mask paired with the matched mspace_free pattern.
-	// S3 dedi: 0xFFFFFFFFFFFFFFF8; S21 client: 0x001FFFFFFFFFFFF8.
+	// dedi: 0xFFFFFFFFFFFFFFF8; S21 client: 0x001FFFFFFFFFFFF8.
 	static uint64_t s_mspaceSizeMask = 0xFFFFFFFFFFFFFFF8ull;
 	static bool   s_mspaceFreeLatched = false;
 
@@ -432,7 +432,7 @@ void InitMspaceMonitor()
 		"mspace global slot=0x%p\n",
 		mspaceMalloc.GetPtr(), static_cast<void*>(s_ppMspaceGlobal));
 
-	// mspace_free: S3 cookie at fn+0x27 mask ~7; S21 cookie at fn+0x36 mask 0x001FFFFFFFFFFFF8.
+	// mspace_free: dedi cookie at fn+0x27 mask ~7; S21 cookie at fn+0x36 mask 0x001FFFFFFFFFFFF8.
 	CMemory mspaceFree = Module_FindPattern(g_GameDll,
 		"48 83 EC 28 48 85 C9 0F 84 ?? ?? ?? ?? 48 8B 41 F8 48 89 5C 24 30 "
 		"48 83 E0 F8 48 89 7C 24 20 48 8D 79 F0 48 8B 1C 38 48 8B 05");
@@ -461,7 +461,7 @@ void InitMspaceMonitor()
 	}
 
 	// Cookie load: `48 8B 0D/05 disp32` (7 bytes); RIP base is the next insn.
-	// S21 client uses rcx form (0D); the S3 dedicated server build uses rax (05).
+	// S21 client uses rcx form (0D); the dedicated server build uses rax (05).
 	uint8_t* mfp = mspaceFree.Offset(cookieOff).RCast<uint8_t*>();
 	if (!(mfp[0] == 0x48 && mfp[1] == 0x8B && (mfp[2] == 0x0D || mfp[2] == 0x05)))
 	{

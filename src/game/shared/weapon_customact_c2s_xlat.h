@@ -1,6 +1,6 @@
 //=============================================================================
 //
-// Purpose: S21->S3 weaponCustomActivity ids before Weapon_ExecuteCustomActivityCmd.
+// Purpose: S21->dedi weaponCustomActivity ids before Weapon_ExecuteCustomActivityCmd.
 // Two LTCG clones exist; hook both. Live clone reads ucmd+0x3A.
 //
 //=============================================================================
@@ -18,7 +18,7 @@ class VWeaponCustomActC2SXlat : public IDetour
 	virtual void Detour(const bool bAttach) const;
 };
 
-// Resolves the S3 activity id by name and calls the original trampoline so an already-S3 id is not re-translated.
+// Resolves the dedi activity id by name and calls the original trampoline so an already-dedi id is not re-translated.
 bool WeaponCustomAct_ServerExecuteByName(void* pPlayer, const char* activityName);
 
 #endif // WEAPON_CUSTOMACT_C2S_XLAT_H

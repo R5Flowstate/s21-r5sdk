@@ -39,7 +39,7 @@
 extern CGlobalVars* gpGlobals;
 
 //-----------------------------------------------------------------------------
-// TraversalMove/Jump layout offsets for S3 CGameMovement ctx, CMoveData, player.
+// TraversalMove/Jump layout offsets for dedi CGameMovement ctx, CMoveData, player.
 //-----------------------------------------------------------------------------
 static constexpr ptrdiff_t MB_CTX_OFF_PLAYER   = 8;    // CPlayer*
 static constexpr ptrdiff_t MB_CTX_OFF_MOVEDATA = 16;   // CMoveData*
@@ -87,10 +87,9 @@ static ConVar mantle_boost_input_setting("mantle_boost_input_setting", "1", FCVA
 	"[MANTLE-BOOST] Activation input FALLBACK default (per-client value comes from the client's "
 	"FCVAR_USERINFO copy): 0=Off, 1=Jump (S21 default), 2=Crouch, 3=Movement Ability/custom "
 	"(bridge_mantle_boost_button_mask). Must match the client-side default for lockstep prediction.");
-static ConVar bridge_mantle_boost_sweet_spot_angle("bridge_mantle_boost_sweet_spot_angle", "5.25", FCVAR_RELEASE,
-	"[MANTLE-BOOST] trigger: max |animViewPitch - eyePitch| (degrees) that still counts as the sweet spot. "
-	"Live S30 grants the boost anywhere past min_valid_traversal_frac while the camera settles; its mantle "
-	"clips peak at 5.2 deg, so the gate clears them. Must match the client-side default.");
+static ConVar bridge_mantle_boost_sweet_spot_angle("bridge_mantle_boost_sweet_spot_angle", "1.5", FCVAR_RELEASE,
+	"[MANTLE-BOOST] trigger: max |animViewPitch - eyePitch| (degrees) that still counts as the sweet spot; "
+	"1.5 opens about the last 0.10-0.13 s of a mantle. Also sizes the timing ring. Must match the client-side default.");
 static ConVar mantle_boost_require_increasing_view_angle("mantle_boost_require_increasing_view_angle", "0", FCVAR_RELEASE,
 	"[MANTLE-BOOST] tweak (default 0): require |delta| still opening (moving away from zero). Must match client.");
 static ConVar mantle_boost_require_decreasing_view_angle("mantle_boost_require_decreasing_view_angle", "1", FCVAR_RELEASE,
@@ -772,7 +771,18 @@ static char Hook_CGameMovement_TraversalMove(void* ctx, char justStarted)
 	if (!justStarted && mvTrig && s.m_nState == 0)
 		MantleBoost_EvaluateTrigger(player, mvTrig, s, slot);
 
+	// A decided climb (>=3) must not jump off: past the mid frac a jump press stamps
+	// the jump-off and finishes the climb in the same call, before progress hits 1.0.
+	uint32_t* const pPressed = mvTrig ? reinterpret_cast<uint32_t*>(mvTrig + MB_MV_OFF_BUTTONS_HELD) : nullptr;
+	const bool bMaskJump = pPressed && s.m_nState >= 3;
+	const uint32_t nJumpSave = bMaskJump ? (*pPressed & static_cast<uint32_t>(IN_JUMP)) : 0;
+	if (bMaskJump)
+		*pPressed &= ~static_cast<uint32_t>(IN_JUMP);
+
 	const char ret = v_CGameMovement__TraversalMove(ctx, justStarted);
+
+	if (bMaskJump)
+		*pPressed |= nJumpSave;
 
 	// Armed 3/4: clear a native jump-off stamp so auto-dismount cannot abort the pull-through.
 	if (s.m_nState >= 3 && flJumpOffBefore == 0.0f)

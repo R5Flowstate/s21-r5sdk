@@ -16,7 +16,7 @@
 #include <atomic>
 
 // ---------------------------------------------------------------------------
-// Layout (S3 native)
+// Layout (dedi native)
 // ---------------------------------------------------------------------------
 static constexpr ptrdiff_t kConsumableInvOff = 0x5FAC;
 static constexpr ptrdiff_t kEntIndexOff      = 0x58;

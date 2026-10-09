@@ -78,7 +78,7 @@ static ConCommand net_generatekey("net_generatekey", NET_GenerateKey_f, "Generat
 //-----------------------------------------------------------------------------
 bool NET_ReceiveDatagram(int iSocket, netpacket_s* pInpacket, bool bEncrypted)
 {
-	// S21->S3 Bridge: inject pending bridge packets first.
+	// S21->dedi Bridge: inject pending bridge packets first.
 	if (S21Bridge_PollReceive(iSocket, pInpacket))
 		return true;
 
@@ -455,7 +455,7 @@ const char* NET_ErrorString(int iCode)
 ///////////////////////////////////////////////////////////////////////////////
 void VNet::Detour(const bool bAttach) const
 {
-	// Guard: only detour functions whose S3/S21 patterns matched.
+	// Guard: only detour functions whose dedi/S21 patterns matched.
 	// On S21, only NET_ReceiveDatagram is guaranteed to resolve.
 	if (v_NET_Config)
 		DetourSetup(&v_NET_Config, &NET_Config, bAttach);
@@ -660,7 +660,7 @@ int NET_SendDatagram(SOCKET s, void* pPayload, int iLenght, netadr_t* pAdr, bool
 {
 	const bool encryptPacket = (bEncrypt && net_encryptionEnable.GetBool());
 
-	// S3 S2C_CHALLENGE is ffffffff 49 + a ~38-byte body, not the 9-byte
+	// dedi S2C_CHALLENGE is ffffffff 49 + a ~38-byte body, not the 9-byte
 	// (ffffffff 49 u32) stub. Append a 0x00 + bare map + 0x00 suffix so the
 	// S21 client can 0x04-rewrite the dest map instead of mp_lobby.
 	if (iLenght >= 9 && iLenght <= 128 && pPayload && g_pHostState && g_pHostState->m_levelName[0])

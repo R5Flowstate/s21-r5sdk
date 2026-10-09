@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: S3 surface-id lookup stops at 127; S21 does not.
+// Purpose: dedi surface-id lookup stops at 127; S21 does not.
 //
 //=============================================================================//
 #ifndef SURFACEPROP_ID_H

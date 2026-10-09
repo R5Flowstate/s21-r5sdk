@@ -16,6 +16,7 @@
 #include "baseentity.h"
 #include "player.h"
 #include "trigger_cannon.h"
+#include "jumppad_parity.h"
 #include "player_stance.h"
 #include "jetdrive.h"
 #include "halfduck_zip_parity.h"
@@ -998,7 +999,9 @@ static void Hook_CGameMovement_PlayerMove(void* ctx)
 			memset(mv + 0x84, 0, 12);
 		}
 	}
+	JumpPad_OnPlayerMoveBegin(ctx);
 	v_CGameMovement__PlayerMove(ctx);
+	JumpPad_OnPlayerMoveEnd(ctx);
 }
 
 void ArmoredLeap_BeforeDuck(void* ctx)

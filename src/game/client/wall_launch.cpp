@@ -20,6 +20,7 @@
 #include "game/shared/wall_launch_math.h"
 #include "game/shared/titan_gate.h"
 #include "wall_launch.h"
+#include "source_push.h"
 #include <cmath>
 
 // C_GameMovement ctx.
@@ -230,7 +231,7 @@ static void __fastcall Hook_GameMovement_JumpOutOfWallRun(void* ctx)
 	}
 }
 
-static void __fastcall Hook_GameMovement_AirAccelerate(void* ctx, float* wishDir, float wishSpeed, float accel, float dt)
+static void WallLaunch_AirAccelerate(void* ctx, float* wishDir, float wishSpeed, float accel, float dt)
 {
 	uint8_t* const player = ctx ? *reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(ctx) + WL_CTX_OFF_PLAYER) : nullptr;
 	uint8_t* const mv = ctx ? *reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(ctx) + WL_CTX_OFF_MV) : nullptr;
@@ -263,6 +264,12 @@ static void __fastcall Hook_GameMovement_AirAccelerate(void* ctx, float* wishDir
 	}
 
 	v_GameMovement_AirAccelerate(ctx, bEdge ? dir : wishDir, flWishSpeed, flAccel, dt);
+}
+
+static void __fastcall Hook_GameMovement_AirAccelerate(void* ctx, float* wishDir, float wishSpeed, float accel, float dt)
+{
+	WallLaunch_AirAccelerate(ctx, wishDir, wishSpeed, accel, dt);
+	SourcePushClient_AfterAirAccelerate(ctx);
 }
 
 //-----------------------------------------------------------------------------

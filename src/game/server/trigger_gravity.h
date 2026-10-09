@@ -43,7 +43,7 @@ bool TriggerGravity_IsLiftActive(const void* pPlayer);
 void TriggerGravity_Wire_LevelShutdown(void);
 
 // Line trace ignoring one entity. False when the engine trace is unresolved.
-// nTraceType is the filter's +8 word, which S3 only hands to the entity
+// nTraceType is the filter's +8 word, which dedi only hands to the entity
 // partition query (script TraceLine passes 0); world geometry is always traced.
 class Vector3D;
 class CGameTrace;

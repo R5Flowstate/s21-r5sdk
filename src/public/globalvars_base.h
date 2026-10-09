@@ -47,7 +47,7 @@ public:
 	// [client_current_tick * tick_interval]
 	float curTime;
 
-	// These seem to be mainly used in c:\depot\r5launch\src\engine\client\clientstate.cpp.
+	// These seem to be mainly used by the client state.
 	float m_flCurTimeUnknown0; // Empty on server.
 	float m_flCurTimeUnknown1; // Empty on server.
 	float m_flCurTimeUnknown2; // Empty on server.

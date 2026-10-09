@@ -3,7 +3,7 @@
 
 //=============================================================================//
 //
-// Purpose: S3 native gap-fills for Loba translocation (and any other caller
+// Purpose: dedi native gap-fills for Loba translocation (and any other caller
 // of the same S21 surface).
 //
 //=============================================================================//

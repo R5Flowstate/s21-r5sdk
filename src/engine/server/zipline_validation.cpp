@@ -3835,7 +3835,7 @@ void VZiplineValidationDedi::GetFun(void) const
 			"[ZIPRAIL-DEDI] partition suspend/resume pattern unresolved -- a chain "
 			"start keeps its spawn-time list mask and stays invisible to the mount search\n");
 
-	// in the S3 dedicated binary
+	// in the dedicated binary
 	// sub rsp, 28h
 	// cmp dword ptr [rcx+0B1Ch], 1
 	Module_FindPattern(g_GameDll,

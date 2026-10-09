@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: S21-capacity port of the S3 audio bank digest. See header.
+// Purpose: S21-capacity port of the dedi audio bank digest. See header.
 //
 //=============================================================================//
 #include "core/stdafx.h"
@@ -29,7 +29,7 @@ static ConVar sdk_audio_digest_expand("sdk_audio_digest_expand", "1",
 	"with stock S3 limits.");
 
 //-----------------------------------------------------------------------------
-// S3 layout constants (where things live in r5apex_ds.exe's static.data).
+// dedi layout constants (where things live in r5apex_ds.exe's static.data).
 //-----------------------------------------------------------------------------
 namespace s3 {
 	// Digest base at module_base + 0x25E58260 (kBaseRVA).

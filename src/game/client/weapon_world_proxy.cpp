@@ -12,7 +12,6 @@
 #include "tier0/memaddr.h"
 #include "tier0/module.h"
 #include "tier1/cvar.h"
-#include "game/client/classvar_natives.h"
 #include "game/client/weapon_world_proxy.h"
 
 static ConVar cl_weapon_proxy_player_owner_only("cl_weapon_proxy_player_owner_only", "1", FCVAR_RELEASE,
@@ -22,13 +21,13 @@ static constexpr ptrdiff_t PROXY_OFF_WEAPON  = 0x1598; // proxy -> owning weapon
 static constexpr ptrdiff_t WEAPON_OFF_OWNER  = 0x1560; // weapon m_hOwner (EHANDLE)
 static constexpr ptrdiff_t PROXY_UPDATE_TABLE_LEA = 0x33; // lea rdx, [rip+entity handle table]
 static constexpr uint32_t  INVALID_EHANDLE = 0xFFFFFFFFu;
+static constexpr size_t    ENT_VT_ISPLAYER = 0x4E0 / sizeof(void*); // the slot the proxy update itself tests
 
 typedef void(__fastcall* PFN_ProxyUpdate)(uintptr_t proxy);
 
 static PFN_ProxyUpdate v_WeaponWorldProxy_Update = nullptr;
 // Entity handle table: 32-byte entries, entity pointer at +0, serial at +8.
 static const uint8_t* s_pEntTable = nullptr;
-static const void* s_pPlayerVtable = nullptr;
 static bool s_bLoggedSkip = false;
 
 static uintptr_t ResolveHandle(const uint32_t hEnt)
@@ -47,18 +46,11 @@ static void __fastcall Hook_WeaponWorldProxy_Update(const uintptr_t proxy)
 {
 	if (cl_weapon_proxy_player_owner_only.GetBool())
 	{
-		// Every player is the same class; learn its vtable from the local player.
-		if (!s_pPlayerVtable)
-		{
-			const void* const pLocal = ClassVar_LocalPlayer();
-			if (pLocal)
-				s_pPlayerVtable = *reinterpret_cast<const void* const*>(pLocal);
-		}
-
 		const uintptr_t weapon = *reinterpret_cast<const uintptr_t*>(proxy + PROXY_OFF_WEAPON);
 		const uintptr_t owner = weapon ? ResolveHandle(*reinterpret_cast<const uint32_t*>(weapon + WEAPON_OFF_OWNER)) : 0;
 
-		if (owner && s_pPlayerVtable && *reinterpret_cast<const void* const*>(owner) != s_pPlayerVtable)
+		typedef bool(__fastcall* PFN_IsPlayer)(uintptr_t);
+		if (owner && !(*reinterpret_cast<PFN_IsPlayer* const*>(owner))[ENT_VT_ISPLAYER](owner))
 		{
 			if (!s_bLoggedSkip)
 			{

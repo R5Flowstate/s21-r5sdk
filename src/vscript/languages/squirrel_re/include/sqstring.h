@@ -6,7 +6,7 @@
 
 #if defined(CLIENT_DLL)
 
-// S21 SQString has no _context/_extraData; _val is at +0x30, not S3's +0x40.
+// S21 SQString has no _context/_extraData; _val is at +0x30, not dedi's +0x40.
 struct SQString
 {
 	void* _vftable;

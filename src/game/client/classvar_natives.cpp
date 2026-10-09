@@ -66,7 +66,7 @@ static void ClientScript_ResolveClassVar(void)
 		return;
 	s_bClassVarResolved = true;
 
-	// Byte-identical to the S3 lookup -- same source, same codegen.
+	// Byte-identical to the dedi lookup -- same source, same codegen.
 	Module_FindPattern(g_GameDll,
 		"48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 4C 89 44 24 ?? "
 		"57 41 54 41 55 41 56 41 57 8B 71")
@@ -742,7 +742,7 @@ void ClassVar_BindShipped(void)
 	pCmd->m_fnCommandCallback = ClassVar_Set_f;
 	s_bSetBound = true;
 
-	// The SDK's own _setClassVarClient still points at the S3 handler, which never resolves here.
+	// The SDK's own _setClassVarClient still points at the dedi handler, which never resolves here.
 	if (ConCommand* const pClientCmd = g_pCVar->FindCommand("_setClassVarClient"))
 	{
 		pClientCmd->RemoveFlags(FCVAR_DEVELOPMENTONLY);

@@ -68,7 +68,7 @@ static bool DeployGate_IsPlayer(__int64 entity)
 
 //-----------------------------------------------------------------------------
 // Purpose: S21 tries DRAWFIRST before the sprint skip. Neutralise
-// m_fIsSprinting for a first raise so S3 takes that same branch.
+// m_fIsSprinting for a first raise so dedi takes that same branch.
 //-----------------------------------------------------------------------------
 static char DeployGate_Deploy(__int64 weapon, unsigned char skipRaise)
 {

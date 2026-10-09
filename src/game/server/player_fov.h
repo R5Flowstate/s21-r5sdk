@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: CPlayer.GetDefaultFOV() server native. S3 only exposes GetFOV on
+// Purpose: CPlayer.GetDefaultFOV() server native. dedi only exposes GetFOV on
 // the client class; the S21 scripts size third-person camera distance off the
 // player's own FOV setting.
 //

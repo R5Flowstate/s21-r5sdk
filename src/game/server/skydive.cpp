@@ -97,7 +97,7 @@ static void (*v_CBaseEntity__SetAbsVelocity)(void* entity, const Vector3D* veloc
 // CGameMovement::FullTossMove, server half (`this+8` = player). Dispatched for movetype 4/5.
 static int64_t (*v_CGameMovement__FullTossMove)(int64_t movement) = nullptr;
 
-// Engine freefall entry/exit -- the S3 names for what the client calls skydive.
+// Engine freefall entry/exit -- the dedi names for what the client calls skydive.
 // Validating wrappers the script natives call; each assert-guards its preconditions.
 static void (*v_CPlayer__BeginFreefall)(void* pPlayer, const Vector3D* pInitialVelocity) = nullptr;
 static void (*v_CPlayer__EndFreefall)(void* pPlayer) = nullptr;

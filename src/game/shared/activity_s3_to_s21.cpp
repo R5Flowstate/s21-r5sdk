@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: S3->S21 activity ID translation map builder + translator.
+// Purpose: dedi->S21 activity ID translation map builder + translator.
 // See activity_s3_to_s21.h for context. Map is built once at dedi
 // host-state init after the activity loader finishes.
 //
@@ -17,9 +17,9 @@
 #include <string>
 #include <vector>
 
-// Map sized for the S3 engine table plus the script-added activities loaded by
+// Map sized for the dedi engine table plus the script-added activities loaded by
 // LoadCustomActivitiesFromFile (activity_types.txt now restores the 92 S21 names
-// the S3 engine lacks, so the dedi table runs ~1024). 2048 keeps headroom.
+// the dedi engine lacks, so the dedi table runs ~1024). 2048 keeps headroom.
 static constexpr int kS3MapSize = 2048;
 static int  s_s3ToS21[kS3MapSize];
 static int  s_s3MaxIdAtBuild = -1;
@@ -27,7 +27,7 @@ static bool s_ready = false;
 static int  s_mappedCount = 0;
 static int  s_unmappedCount = 0;
 
-// [WEAP-ACT-C2S] Reverse map, S21->S3. Sized to the embedded S21 enum table
+// [WEAP-ACT-C2S] Reverse map, S21->dedi. Sized to the embedded S21 enum table
 // (kS21ActivityCount, currently 975) with headroom; built as a companion pass
 // in the same Bridge_BuildS3ToS21ActivityMap walk below.
 static constexpr int kS21MapSize = 2048;
@@ -145,7 +145,7 @@ void Bridge_BuildS3ToS21ActivityMap()
 
 		if (s21 >= 0 && s21 < kS21MapSize)
 		{
-			// Reverse entry. Two S3 ids resolving to one S21 id would make the
+			// Reverse entry. Two dedi ids resolving to one S21 id would make the
 			// C2S direction arbitrary (last write wins), so keep the first and
 			// report rather than silently overwrite.
 			if (s_s21ToS3[s21] < 0)
@@ -160,7 +160,7 @@ void Bridge_BuildS3ToS21ActivityMap()
 		}
 	}
 
-	// C2S coverage: S21 activities with no S3 source. The build reports both
+	// C2S coverage: S21 activities with no dedi source. The build reports both
 	// directions so a reverse hole shows up in the boot log even while nothing
 	// consumes it yet.
 	int revMissing = 0;
@@ -187,7 +187,7 @@ void Bridge_BuildS3ToS21ActivityMap()
 		bridge_act_xlat_unmapped.GetBool() ? "sentinel" : "raw pass-through");
 
 	// A large reverse hole means activity_types.txt is missing S21 names again --
-	// that file feeds the DEDI, so the test is whether the S3 engine has the
+	// that file feeds the DEDI, so the test is whether the dedi engine has the
 	// name, never whether the client does. See the header of activity_types.txt.
 	if (revMissing > 0)
 		Warning(eDLL_T::ENGINE,

@@ -698,7 +698,7 @@ void VScriptRemoteS2CBridge::GetAdr(void) const
 
 void VScriptRemoteS2CBridge::GetFun(void) const
 {
-	// Shared S3 impl behind Remote_CallFunction_NonReplay/_Replay/_UI.
+	// Shared dedi impl behind Remote_CallFunction_NonReplay/_Replay/_UI.
 
 	// Landmark: function prologue through first vmCtx deref + near-call into the SQ entity-resolve helper.
 	CMemory fn = Module_FindPattern(g_GameDll,

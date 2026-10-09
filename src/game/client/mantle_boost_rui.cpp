@@ -82,37 +82,37 @@ static uintptr_t MantleBoostRui_LocalPlayer(void)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: tanHalfFovX * aspectRatioYOverX, inverted.
-//
-// Not read off CViewSetup: the SDK's declaration of that struct does not match
-// what this build lays out, so its field offsets are not trustworthy here.
-// Projecting a probe point one unit forward and one unit up from the eye gives
-// an NDC y of exactly 1/(tanHalfFovX * aspectRatioYOverX), which is the whole
-// term both getters divide by.
+// The rendered main view: the S21 CViewRender's main logical view setup.
 //-----------------------------------------------------------------------------
-static bool MantleBoostRui_InvProjectionScale(float* pflInvScale)
+static uintptr_t s_pViewRenderS21 = 0;
+
+static constexpr ptrdiff_t VIEWRENDER_MAIN_SETUP = 0x81700;
+static constexpr ptrdiff_t SETUP_FORWARD         = 0x10;    // float[3]
+static constexpr ptrdiff_t SETUP_UP              = 0x30;    // float[3]
+static constexpr ptrdiff_t SETUP_TAN_HALF_FOV_Y  = 0x194;   // tanHalfFovX * aspectRatioYOverX
+
+static ConVar bridge_mantle_boost_rui_offsets("bridge_mantle_boost_rui_offsets", "1",
+	FCVAR_RELEASE,
+	"Feed the timing ring its view-angle and crosshair offsets (0 = both stay 0).");
+
+// pForward and pUp may be null.
+static bool MantleBoostRui_MainView(Vector3D* pForward, Vector3D* pUp, float* pflTanHalfFovY)
 {
-	if (!g_pViewRender)
+	if (!s_pViewRenderS21 || !bridge_mantle_boost_rui_offsets.GetBool())
 		return false;
 
-	const VMatrix* const pWorldToScreen =
-		g_pViewRender->GetViewProjectionMatrix(VMATRIX_TYPE_VIEW);
-	if (!pWorldToScreen)
+	const uint8_t* const pSetup = reinterpret_cast<const uint8_t*>(s_pViewRenderS21 + VIEWRENDER_MAIN_SETUP);
+	const float* const pFwd = reinterpret_cast<const float*>(pSetup + SETUP_FORWARD);
+	const float* const pUpv = reinterpret_cast<const float*>(pSetup + SETUP_UP);
+	const float flTan = *reinterpret_cast<const float*>(pSetup + SETUP_TAN_HALF_FOV_Y);
+	if (!isfinite(flTan) || flTan <= 0.0f || flTan > 16.0f)
 		return false;
 
-	Vector3D vecForward, vecRight, vecUp;
-	AngleVectors(MainViewAngles(), &vecForward, &vecRight, &vecUp);
-
-	const Vector3D vecProbe = MainViewOrigin() + vecForward + vecUp;
-
-	Vector2D ndc;
-	if (ClipTransform(*pWorldToScreen, vecProbe, &ndc))
-		return false;   // behind the eye: the clamp path, not a usable ratio
-
-	if (!isfinite(ndc.y) || ndc.y <= 0.0f)
-		return false;
-
-	*pflInvScale = ndc.y;
+	if (pForward)
+		*pForward = Vector3D(pFwd[0], pFwd[1], pFwd[2]);
+	if (pUp)
+		*pUp = Vector3D(pUpv[0], pUpv[1], pUpv[2]);
+	*pflTanHalfFovY = flTan;
 	return true;
 }
 
@@ -226,20 +226,21 @@ static SQRESULT ClientScript_MantleBoostGetSweetSpotFrac(HSQUIRRELVM v)
 	return SQ_OK;
 }
 
-// 0.5 * cos(threshold) / (sin(threshold) * tanHalfFovX * aspectRatioYOverX)
+// The threshold angle above the view centre as a fraction of screen height:
+// -0.5 * tan(threshold) / tanHalfFovY. The RUI spans its sweet-spot band from it.
 static SQRESULT ClientScript_MantleBoostGetViewAngleRuiOffset(HSQUIRRELVM v)
 {
-	float flInvScale = 0.0f;
-	if (!MantleBoostRui_InvProjectionScale(&flInvScale))
+	float flTanHalfFovY = 0.0f;
+	if (!MantleBoostRui_MainView(nullptr, nullptr, &flTanHalfFovY))
 	{
 		sq_pushfloat(v, 0.0f);
 		return SQ_OK;
 	}
 
 	const float flRad = MantleBoostClient_GetSweetSpotAngle() * float(M_PI_F / 180.0f);
-	const float flSin = fmaxf(0.001f, sinf(flRad));
+	const float flCos = fmaxf(0.001f, cosf(flRad));
 
-	sq_pushfloat(v, 0.5f * cosf(flRad) * flInvScale / flSin);
+	sq_pushfloat(v, -0.5f * sinf(flRad) / (flCos * flTanHalfFovY));
 	return SQ_OK;
 }
 
@@ -249,9 +250,10 @@ static SQRESULT ClientScript_MantleBoostGetViewAngleRuiOffset(HSQUIRRELVM v)
 static SQRESULT ClientScript_MantleBoostGetCrosshairRuiOffset(HSQUIRRELVM v)
 {
 	const uintptr_t pPlayer = MantleBoostRui_LocalPlayer();
-	float flInvScale = 0.0f;
+	Vector3D vecForward, vecUp;
+	float flTanHalfFovY = 0.0f;
 
-	if (!pPlayer || !v_C_Player_GetViewVector || !MantleBoostRui_InvProjectionScale(&flInvScale))
+	if (!pPlayer || !v_C_Player_GetViewVector || !MantleBoostRui_MainView(&vecForward, &vecUp, &flTanHalfFovY))
 	{
 		sq_pushfloat(v, 0.0f);
 		return SQ_OK;
@@ -260,12 +262,22 @@ static SQRESULT ClientScript_MantleBoostGetCrosshairRuiOffset(HSQUIRRELVM v)
 	Vector3D vecAim;
 	v_C_Player_GetViewVector(reinterpret_cast<void*>(pPlayer), &vecAim);
 
-	Vector3D vecForward, vecRight, vecUp;
-	AngleVectors(MainViewAngles(), &vecForward, &vecRight, &vecUp);
-
 	const float flDenom = fmaxf(0.001f, DotProduct(vecForward, vecAim));
+	const float flOffset = 0.5f * -DotProduct(vecUp, vecAim) / (flDenom * flTanHalfFovY);
 
-	sq_pushfloat(v, 0.5f * -DotProduct(vecUp, vecAim) * flInvScale / flDenom);
+	if (bridge_mantle_boost_rui_log.GetBool())
+	{
+		static float s_flNextLog = 0.0f;
+		const float flNow = static_cast<float>(Plat_FloatTime());
+		if (flNow >= s_flNextLog)
+		{
+			s_flNextLog = flNow + 0.1f;
+			Msg(eDLL_T::CLIENT, "[MB-RUI] crosshair fwd=(%.3f %.3f %.3f) aim=(%.3f %.3f %.3f) tanY=%.3f offset=%.4f\n",
+				vecForward.x, vecForward.y, vecForward.z, vecAim.x, vecAim.y, vecAim.z, flTanHalfFovY, flOffset);
+		}
+	}
+
+	sq_pushfloat(v, flOffset);
 	return SQ_OK;
 }
 
@@ -318,6 +330,14 @@ void MantleBoostRui_RegisterClientFunctions(CSquirrelVM* s)
 
 void VMantleBoostRuiCl::GetFun(void) const
 {
+	// CViewRender global initializer: the store after the vtable lea is the instance.
+	s_pViewRenderS21 = Module_FindPattern(g_GameDll,
+		"48 89 5C 24 08 57 48 83 EC 20 F3 0F 10 0D ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 80 25 ?? ?? ?? ?? FC "
+		"33 DB 0F 28 05 ?? ?? ?? ?? 48 89 05")
+		.Offset(0x29).ResolveRelativeAddressSelf(0x3, 0x7).GetPtr();
+	if (!s_pViewRenderS21)
+		Warning(eDLL_T::CLIENT, "[MB-RUI] CViewRender unresolved -- the timing ring stays on the crosshair\n");
+
 	// C_Player::GetViewVector -- AngleVectors(GetAimAngles(this)).
 	Module_FindPattern(g_GameDll,
 		"40 53 48 83 EC ?? 48 8B DA 48 8D 54 24 ?? E8 ?? ?? ?? ?? 48 8B C8 48 8B D3 "

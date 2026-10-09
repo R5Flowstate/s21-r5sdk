@@ -155,7 +155,7 @@ void VUIImageSkipS21::Detour(const bool bAttach) const
 //-----------------------------------------------------------------------------
 // RUI image misses: every name that falls back to the "missing" image, once.
 //-----------------------------------------------------------------------------
-static ConVar ui_image_miss_log("ui_image_miss_log", "1", FCVAR_DEVELOPMENTONLY | FCVAR_ACCESSIBLE_FROM_THREADS,
+static ConVar ui_image_miss_log("ui_image_miss_log", "0", FCVAR_DEVELOPMENTONLY | FCVAR_ACCESSIBLE_FROM_THREADS,
 	"Log each RUI image name that resolves to the missing image (once per name).");
 
 static constexpr size_t kMaxLoggedMisses = 512;

@@ -284,7 +284,7 @@ static void CC_ActivityList_Dump(const CCommand& args)
 		Msg(eDLL_T::ENGINE, "  ID %4d: %s\n", act.second, act.first.c_str());
 }
 
-static ConCommand activity_dump("activity_dump", CC_ActivityList_Dump, "List registered activities. Usage: activity_dump [filter]", FCVAR_RELEASE);
+static ConCommand activity_dump("activity_dump", CC_ActivityList_Dump, "List registered activities. Usage: activity_dump [filter]", FCVAR_DEVELOPMENTONLY);
 
 static void CC_ActivityList_Reload(const CCommand& args)
 {
@@ -388,7 +388,7 @@ bool IsActivitySystemReady()
 	if (IsActivitySystemInitialized())
 		return true;
 
-	// S3 dedicated: client activity patterns 0-hit; server list is hardcoded
+	// dedicated: client activity patterns 0-hit; server list is hardcoded
 	// base+RVA and is the only live table.
 	if (s_serverInitialized && g_pActivityList_Server && g_pMaxActivityId_Server
 		&& *g_pMaxActivityId_Server >= 100)
@@ -832,7 +832,7 @@ static void CC_ActivityList_Dump(const CCommand& args)
 		shownCount, totalCount, totalCount - customCount, customCount);
 }
 
-static ConCommand activity_dump("activity_dump", CC_ActivityList_Dump, "List registered activities. Usage: activity_dump [filter]", FCVAR_RELEASE);
+static ConCommand activity_dump("activity_dump", CC_ActivityList_Dump, "List registered activities. Usage: activity_dump [filter]", FCVAR_DEVELOPMENTONLY);
 
 static void CC_ActivityList_Reload(const CCommand& args)
 {

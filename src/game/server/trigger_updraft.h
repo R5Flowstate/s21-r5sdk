@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: Server-authoritative updraft state + movement. S3 dedi has none.
+// Purpose: Server-authoritative updraft state + movement. dedi has none.
 //
 //=============================================================================//
 #ifndef TRIGGER_UPDRAFT_BRIDGE_H
@@ -8,7 +8,7 @@
 
 #include "thirdparty/detours/include/idetour.h"
 
-// Per-player updraft state. SDKEntityMap-backed -- S3 has no members for any
+// Per-player updraft state. SDKEntityMap-backed -- dedi has no members for any
 // of this. The twelve wire fields come first (value-proxy offsetof order);
 // touch bookkeeping after them never ships.
 struct UpdraftState

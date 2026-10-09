@@ -35,15 +35,15 @@ static constexpr ptrdiff_t MB_MV_OFF_VIEWANGLES = 0x0C;   // QAngle m_vecAbsView
 static constexpr ptrdiff_t MB_MV_OFF_BUTTONS    = 0x24;   // int m_nButtons (held)
 static constexpr ptrdiff_t MB_MV_OFF_OLDBUTTONS = 0x28;   // int m_nOldButtons
 static constexpr ptrdiff_t MB_MV_OFF_PRESSED    = 0x2C;   // int m_nButtonsPressed -- activation press-edge input
+static constexpr uint32_t  MB_IN_JUMP           = 0x2;    // IN_JUMP
 
 // ConVars: names/defaults must match the dedi registration.
 static ConVar mantle_boost_enabled("mantle_boost_enabled", "1", FCVAR_RELEASE,
 	"[MB] master enable for the client-predicted mantle-exit boost. "
 	"Must match the dedi-side default.");
-static ConVar bridge_mantle_boost_sweet_spot_angle("bridge_mantle_boost_sweet_spot_angle", "5.25", FCVAR_RELEASE,
-	"[MB] sweet-spot angle threshold (deg): |animPitch - eyePitch| must stay BELOW this. Live S30 grants "
-	"the boost anywhere past min_valid_traversal_frac while the camera settles; its mantle clips peak "
-	"at 5.2 deg, so the gate clears them. Must match the dedi-side default.");
+static ConVar bridge_mantle_boost_sweet_spot_angle("bridge_mantle_boost_sweet_spot_angle", "1.5", FCVAR_RELEASE,
+	"[MB] sweet-spot angle threshold (deg): |animPitch - eyePitch| must stay BELOW this; 1.5 opens about the "
+	"last 0.10-0.13 s of a mantle. Also sizes the timing ring. Must match the dedi-side default.");
 // FCVAR_USERINFO: mode-3 (Movement Ability/custom) uses this mask as the
 // activation button -- network it per-client like mantle_boost_input_setting so the dedi
 // gates the authoritative boost on the same bits the client predicts.
@@ -1197,7 +1197,18 @@ static char __fastcall Hook_TraversalMove(void* ctxRaw, char justStarted)
 				s_nTrigFaults);
 	}
 
+	// A decided climb (>=3) must not jump off: past the mid frac a jump press stamps
+	// the jump-off and finishes the climb in the same call, before progress hits 1.0.
+	uint32_t* const pPressed = reinterpret_cast<uint32_t*>(pMove + MB_MV_OFF_PRESSED);
+	const bool bMaskJump = MantleBoost_ApplyState() >= 3;
+	const uint32_t nJumpSave = bMaskJump ? (*pPressed & MB_IN_JUMP) : 0;
+	if (bMaskJump)
+		*pPressed &= ~MB_IN_JUMP;
+
 	const char ret = C_GameMovement__TraversalMove(ctxRaw, justStarted);
+
+	if (bMaskJump)
+		*pPressed |= nJumpSave;
 
 	__try
 	{

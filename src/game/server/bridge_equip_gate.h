@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: S3 Weapon_IsPlaying3pEquipActivity accepts the full ACT_MP_EQUIP_* block.
+// Purpose: dedi Weapon_IsPlaying3pEquipActivity accepts the full ACT_MP_EQUIP_* block.
 //
 //=============================================================================//
 #ifndef BRIDGE_EQUIP_GATE_H

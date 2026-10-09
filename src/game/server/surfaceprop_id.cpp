@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: S3 CPhysicsSurfaceProps remaps materialIndex > 127 to slot 0.
+// Purpose: dedi CPhysicsSurfaceProps remaps materialIndex > 127 to slot 0.
 // S21 indexes the id directly. Digital_Water is 133.
 //
 //=============================================================================//

@@ -1372,7 +1372,7 @@ static int64_t Hook_Server_PrecacheModel(uint8_t* a1)
 	}
 	const int64_t result = v_Server_PrecacheModel(a1);
 
-	// S3 PrecacheModel is server-local only; S21 also replicates into
+	// dedi PrecacheModel is server-local only; S21 also replicates into
 	// modelprecache so the client can resolve GetModelIndex / SetModel.
 	// Mirror that here for every successful script-side PrecacheModel.
 	if (a1 && *a1 && result != 0xFFFFFFFFLL)
@@ -2020,7 +2020,7 @@ static ConVar sdk_skip_crasher_entities("sdk_skip_crasher_entities", "1",
 	"Block s_pszMapSkipClasses at map LUMP_ENTITIES parse. Canonical DT rebuild "
 	"retires classes as cleared; player_vehicle remains. Set 0 to unblock all.");
 
-// Classes whose S21 recv-table dropped props vs the S3 SendTable.
+// Classes whose S21 recv-table dropped props vs the dedi SendTable.
 static const char* const s_pszMapSkipClasses[] =
 {
 	// Remaining wire-desync class names only.

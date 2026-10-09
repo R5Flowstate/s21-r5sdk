@@ -1,8 +1,8 @@
 //=============================================================================//
 //
 // Purpose: Remap wallrun/climb SettingsFieldFinder offsets from the live
-// S21 player layout, bind disable_wall_run onto the native type slot, and
-// emit [WALLCLIMB] attach/detach/on-wall taps.
+// S21 player layout, gate the wall run and the double jump on their own S21
+// status effects, and emit [WALLCLIMB] attach/detach/on-wall taps.
 //
 //=============================================================================//
 #include "core/stdafx.h"
@@ -13,6 +13,7 @@
 #include "tier1/strtools.h"
 #include "engine/server/snapshot_diag.h"
 #include "game/shared/dt_extend.h"
+#include "public/tier0/memory_patch.h"
 
 //-----------------------------------------------------------------------------
 // CGameMovement ctx / CMoveData / CPlayer -- server half.
@@ -75,6 +76,15 @@ static ConVar bridge_wallclimb_tap("bridge_wallclimb_tap", "0", FCVAR_DEVELOPMEN
 	"[WALLCLIMB] attach/detach + every 8th on-wall FullWalkMove dump. Join on cmd=.");
 
 static int (*v_StatusEffect_LookupType)(const char* pszName) = nullptr;
+
+static ConVar bridge_double_jump_disable_effect("bridge_double_jump_disable_effect", "1", FCVAR_RELEASE,
+	"Gate the double jump on disable_double_jump, as the S21 client does, instead of the "
+	"type slot it shares with the wall run. 0 = shared slot.");
+
+// The double jump's "mov edx, [rip+disp32]" load of the shared disable-effect type slot.
+static uint8_t* s_pDoubleJumpEffectLoad = nullptr;
+static int32_t s_nDoubleJumpEffectDisp = 0;
+static int* s_pDoubleJumpEffectIdx = nullptr;
 static __int64 (*v_StatusEffectTypes_Load)(void) = nullptr;
 
 static bool WallClimb_IsFamilyName(const char* pszName)
@@ -177,7 +187,19 @@ static void WallClimb_ApplySettingsFinders(void)
 	}
 
 	if (nWrote > 0)
-		Warning(eDLL_T::SERVER, "[WALLCLIMB] remapped %d wallrun/climb finders from the live player layout\n", nWrote);
+		Msg(eDLL_T::SERVER, "[WALLCLIMB] remapped %d wallrun/climb finders from the live player layout\n", nWrote);
+}
+
+// Live type index of a status effect, or -1; warns once per call site when it is missing.
+static int WallClimb_LookupEffect(const char* const pszName, bool* const pbWarned)
+{
+	const int nLive = v_StatusEffect_LookupType(pszName);
+	if (nLive < 0 && !*pbWarned)
+	{
+		*pbWarned = true;
+		Warning(eDLL_T::SERVER, "[WALLCLIMB] %s missing from status_effect_types.txt\n", pszName);
+	}
+	return nLive;
 }
 
 static void WallClimb_BindDisableWallRun(void)
@@ -194,31 +216,64 @@ static void WallClimb_BindDisableWallRun(void)
 	int* const pIdx = reinterpret_cast<int*>(WallClimb_FinderDword(mod, WC_DISABLE_WALLRUN_IDX_RVA));
 	if (!pIdx)
 		return;
-	const int nLive = v_StatusEffect_LookupType("disable_wall_run");
+	static bool s_warned = false;
+	const int nLive = WallClimb_LookupEffect("disable_wall_run", &s_warned);
 	if (nLive < 0)
-	{
-		static bool s_warned = false;
-		if (!s_warned)
-		{
-			s_warned = true;
-			Warning(eDLL_T::SERVER,
-				"[WALLCLIMB] disable_wall_run missing from status_effect_types.txt\n");
-		}
 		return;
-	}
 
 	if (*pIdx == nLive)
 		return;
 
 	const int nPrev = *pIdx;
 	*pIdx = nLive;
-	Warning(eDLL_T::SERVER, "[WALLCLIMB] disable_wall_run idx %d -> %d\n", nPrev, nLive);
+	Msg(eDLL_T::SERVER, "[WALLCLIMB] disable_wall_run idx %d -> %d\n", nPrev, nLive);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: the server build gates the double jump and the wall run on one status effect,
+// disable_wall_run_and_double_jump; S21 splits it, and the client refuses a
+// double jump under disable_double_jump alone. Point the double jump's load at
+// its own slot so both engines refuse on the same effect.
+//-----------------------------------------------------------------------------
+static void WallClimb_BindDisableDoubleJump(void)
+{
+	if (!s_pDoubleJumpEffectLoad || !v_StatusEffect_LookupType || !bridge_double_jump_disable_effect.GetBool())
+		return;
+
+	static bool s_warned = false;
+	const int nLive = WallClimb_LookupEffect("disable_double_jump", &s_warned);
+	if (nLive < 0)
+		return;
+
+	if (!s_pDoubleJumpEffectIdx)
+		s_pDoubleJumpEffectIdx = reinterpret_cast<int*>(Mem_AllocNearModule(g_GameDll, sizeof(int)));
+	if (!s_pDoubleJumpEffectIdx)
+	{
+		Warning(eDLL_T::SERVER, "[WALLCLIMB] no near-module slot for disable_double_jump\n");
+		return;
+	}
+	*s_pDoubleJumpEffectIdx = nLive;
+
+	const intptr_t nDisp = reinterpret_cast<intptr_t>(s_pDoubleJumpEffectIdx)
+		- reinterpret_cast<intptr_t>(s_pDoubleJumpEffectLoad + 6);
+	if (nDisp < INT32_MIN || nDisp > INT32_MAX)
+	{
+		Warning(eDLL_T::SERVER, "[WALLCLIMB] disable_double_jump slot out of rel32 range -- double jump stays on the combined effect\n");
+		return;
+	}
+
+	const int32_t nDisp32 = static_cast<int32_t>(nDisp);
+	if (*reinterpret_cast<const int32_t*>(s_pDoubleJumpEffectLoad + 2) == nDisp32)
+		return;
+	if (Mem_PatchCode(s_pDoubleJumpEffectLoad + 2, &nDisp32, sizeof(nDisp32)))
+		Msg(eDLL_T::SERVER, "[WALLCLIMB] double jump gated on disable_double_jump idx %d\n", nLive);
 }
 
 static __int64 Hook_StatusEffectTypes_Load(void)
 {
 	const __int64 ret = v_StatusEffectTypes_Load ? v_StatusEffectTypes_Load() : 0;
 	WallClimb_BindDisableWallRun();
+	WallClimb_BindDisableDoubleJump();
 	return ret;
 }
 
@@ -415,10 +470,23 @@ void VWallClimb::GetFun(void) const
 		.GetPtr(v_StatusEffect_LookupType);
 	if (!v_StatusEffect_LookupType)
 		Warning(eDLL_T::SERVER, "[WALLCLIMB] StatusEffect_LookupType pattern unresolved\n");
+
+	// Server-half Jump, the disable-effect argument to its status-effect query.
+	Module_FindPattern(g_GameDll,
+		"8B 15 ?? ?? ?? ?? 4C 8D 4C 24 58 4C 8D 44 24 50 C7 44 24 50 00 00 00 00 49 8B CA "
+		"C7 44 24 58 00 00 00 00 C6 44 24 20 00 E8")
+		.GetPtr(s_pDoubleJumpEffectLoad);
+	if (s_pDoubleJumpEffectLoad)
+		s_nDoubleJumpEffectDisp = *reinterpret_cast<const int32_t*>(s_pDoubleJumpEffectLoad + 2);
+	else
+		Warning(eDLL_T::SERVER, "[WALLCLIMB] double jump effect load unresolved -- it keeps the wall run's effect\n");
 }
 
 void VWallClimb::Detour(const bool bAttach) const
 {
+	if (!bAttach && s_pDoubleJumpEffectLoad && s_nDoubleJumpEffectDisp)
+		Mem_PatchCode(s_pDoubleJumpEffectLoad + 2, &s_nDoubleJumpEffectDisp, sizeof(s_nDoubleJumpEffectDisp));
+
 	if (v_StatusEffectTypes_Load)
 		DetourSetup(&v_StatusEffectTypes_Load, &Hook_StatusEffectTypes_Load, bAttach);
 }

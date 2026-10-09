@@ -574,11 +574,11 @@ void SDK_Init()
 	Winsock_Startup();
 
 	//=========================================================================
-	// Verified S21 patterns only -- Systems_Init would scan unmatched S3 sites.
+	// Verified S21 patterns only -- Systems_Init would scan unmatched dedi sites.
 	//=========================================================================
 	SDK_TRACE("S21 pattern scanning (verified functions only)...");
 	{
-		// Scan for verified S21 functions using their S3 patterns
+		// Scan for verified S21 functions using their dedi patterns
 
 		Module_FindPattern(g_GameDll,
 			"48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 48 63 D9 41 8B F8 48 8D 0D")
@@ -649,7 +649,7 @@ void SDK_Init()
 
 		// (CNetChan::SendNetMsg is a class method, not a separate function pointer)
 
-		// CClientState -- S21-specific pattern (S3 pattern didn't match)
+		// CClientState -- S21-specific pattern (dedi pattern didn't match)
 		Module_FindPattern(g_GameDll,
 			"48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 48 8B 32 48 8B DA 48 8B 11")
 			.GetPtr(CClientState__Connect);
@@ -1052,7 +1052,7 @@ void SDK_Init()
 	}
 
 	//=========================================================================
-	// Emit S3 C2S_CHALLENGE: type 0x48, bit-count lea keeps r8d=8, encryption flags=0.
+	// Emit dedi C2S_CHALLENGE: type 0x48, bit-count lea keeps r8d=8, encryption flags=0.
 	//=========================================================================
 	SDK_TRACE("Patching connect-challenge builder (type byte + encryption)...");
 	{
@@ -1221,7 +1221,7 @@ void SDK_Init()
 		}
 		SDK_Log("S2C_CHALLENGE advanced patches: %d/%d applied\n", ok, (int)(sizeof(patches)/sizeof(patches[0])));
 	}
-	// S3 pattern: 48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 48 63 D9 41 8B F8 48 8D 0D
+	// dedi pattern: 48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 48 63 D9 41 8B F8 48 8D 0D
 	//=========================================================================
 	SDK_TRACE("Finding Cbuf_AddText...");
 	{

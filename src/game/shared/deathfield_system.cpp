@@ -39,7 +39,7 @@ extern CGlobalVars* gpGlobals;
 static constexpr int MAX_DEATHFIELDS = 64;
 static constexpr float DF_INACTIVE_RADIUS = 3.4028235e38f;
 
-// S3 CWorld single-ring scalars. SetDeathFieldParams writes these.
+// dedi CWorld single-ring scalars. SetDeathFieldParams writes these.
 static constexpr int WORLD_DF_ISACTIVE     = 0xB3C;
 static constexpr int WORLD_DF_ORIGIN       = 0xB40;
 static constexpr int WORLD_DF_RADIUS_START = 0xB4C;

@@ -75,7 +75,7 @@ static int64_t (*v_WeaponTossRelease_orig)(int64_t weapon, uint8_t a2) = nullptr
 // DoToss: SetIdealWeaponActivity(ACT_VM_TOSS) + GRENADE gesture. Emits id 81.
 static char (*v_WeaponDoToss_orig)(int64_t weapon) = nullptr;
 
-// S3 SetIdealWeaponActivity(weapon, activity). SetupPredictedAnimEvents is inside.
+// dedi SetIdealWeaponActivity(weapon, activity). SetupPredictedAnimEvents is inside.
 static char (*v_WeaponSetIdealActivity_orig)(int64_t weapon, int activity) = nullptr;
 
 // CBaseEntity::SetModel(const char*). Server half; m_nModelIndex is WORD at +0xDE.
@@ -86,7 +86,7 @@ extern int64_t Server_PrecacheModel_Invoke(const char* modelName);
 static void (*v_CPlayer_SetOneHandedOn)(void* pPlayer) = nullptr;
 static void (*v_CPlayer_SetOneHandedOff)(void* pPlayer) = nullptr;
 
-// S3 ACT_VM_TOSS. Holospray rseqs name-bind this; they have no ONEHANDED_TOSS.
+// dedi ACT_VM_TOSS. Holospray rseqs name-bind this; they have no ONEHANDED_TOSS.
 static constexpr int kActVmToss = 542;
 
 // CPlayer weapon frame. Re-applies the select latch so button bits survive

@@ -46,8 +46,7 @@ target_include_directories( ${PROJECT_NAME} PRIVATE
 
 if( ${LIB_NAME} STREQUAL "tier2_cl" )
 target_compile_definitions( ${PROJECT_NAME} PRIVATE
-    "CLIENT_DLL"
-    "GAMEDLL_S21"
+    "CLIENT_DLL"
 )
 endif()
 endmacro()

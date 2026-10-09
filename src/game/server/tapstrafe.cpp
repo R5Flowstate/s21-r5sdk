@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: mantle_boost tap-strafe suppression on S3's native inline lurch.
+// Purpose: mantle_boost tap-strafe suppression on dedi's native inline lurch.
 //
 //=============================================================================//
 #include "core/stdafx.h"
@@ -19,16 +19,16 @@
 static constexpr ptrdiff_t TS_CTX_OFF_PLAYER   = 8;    // CPlayer*
 static constexpr ptrdiff_t TS_CTX_OFF_MOVEDATA = 16;   // CMoveData*
 
-// CMoveData (S3): m_nButtonsPressed at mv+0x2C. Masking it suppresses only the lurch.
+// CMoveData (dedi): m_nButtonsPressed at mv+0x2C. Masking it suppresses only the lurch.
 static constexpr ptrdiff_t TS_MV_OFF_BUTTONS_PRESSED = 44;
 
 // IN_FORWARD|IN_BACK|IN_MOVELEFT|IN_MOVERIGHT -- the native lurch press gate.
 static constexpr uint32_t TS_LURCH_PRESS_MASK = 0x618;
 
-// CMoveData (S3): m_vecVelocity at mv+304.
+// CMoveData (dedi): m_vecVelocity at mv+304.
 static constexpr ptrdiff_t TS_MV_OFF_VELOCITY = 304;
 
-// The S21 client skips the lurch above jump_grace_cutoff_speed; the S3 inline
+// The S21 client skips the lurch above jump_grace_cutoff_speed; the dedi inline
 // lurch has no speed gate, so the dedi mirrors the client's refusal here.
 static ConVar bridge_lurch_cutoff_speed("bridge_lurch_cutoff_speed", "1100", FCVAR_RELEASE,
 	"[TAPSTRAFE] Horizontal speed above which the dedi suppresses the tap-strafe lurch, "

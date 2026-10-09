@@ -544,7 +544,7 @@ static Vector3D BoltVel_GetAbsVelocity(void* entity)
 	return out;
 }
 
-// S3 substitutes InterpOwnerVel (lag-history full velocity) for m_vecBaseVelocity
+// dedi substitutes InterpOwnerVel (lag-history full velocity) for m_vecBaseVelocity
 // whenever the owner has an active usercmd. S21 adds m_vecBaseVelocity *
 // projectile_inherit_base_velocity_scale (default 1).
 static void BoltVel_StripS3Inherit(__int64 weapon, __int64 bolt, char clientPredicted)
@@ -692,7 +692,7 @@ static __int64 __fastcall Hook_CWeaponX_FireWeaponBolt(__int64 weapon, float* po
 		const int nMode = *reinterpret_cast<int*>(weapon + WEAPON_OFF_FIREMODE);
 		const int nSemi = *reinterpret_cast<unsigned char*>(weapon + WEAPON_OFF_ISSEMIAUTO) ? 1 : 0;
 		const int nFiring = (*reinterpret_cast<int*>(weapon + WEAPON_OFF_WEAPONISACTIVELYFIRING) > 0) ? 1 : 0;
-		// S3 branch order: no isAkimboWeapon term.
+		// dedi branch order: no isAkimboWeapon term.
 		const int nSel = ((nBurst > 0 || (nMode == 0 && nSemi == 0)) && nFiring > 0) ? 1 : 0;
 		const float flDt = (nSel ? flClkA : flClkG) - flLastAtk - flDelay;
 
@@ -712,7 +712,7 @@ static __int64 __fastcall Hook_CWeaponX_FireWeaponBolt(__int64 weapon, float* po
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: S21 airborne-before-isMovingFast order on the S3 m_moveSpread updater.
+// Purpose: S21 airborne-before-isMovingFast order on the dedi m_moveSpread updater.
 //-----------------------------------------------------------------------------
 static __int64 __fastcall Hook_CWeaponX_UpdateWeaponSpread(
 	__int64 weapon, float speed, float topRegularSpeed, float topFastSpeed,

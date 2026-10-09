@@ -68,6 +68,7 @@ struct PlayerExtendWire
 	float m_stickySprintForwardDisableTime;
 	float m_stickySprintForwardEnableTime;
 	float m_glideUpwardsBoostEndTime;
+	float m_timeShouldTryGivePlayerDoubleJump;
 
 	int64_t m_EadpUserId;
 	int64_t m_progressionUserId;

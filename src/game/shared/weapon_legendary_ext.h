@@ -10,7 +10,7 @@
 #include "thirdparty/detours/include/idetour.h"
 
 // Live server-half WeaponInfo allocation. Follows the legendary-cap grow;
-// stock S3 undershoots the relocated view-name array.
+// stock dedi undershoots the relocated view-name array.
 uint32_t WeaponLegendaryExt_ServerWeaponInfoSize(void);
 
 class VWeaponLegendaryExt : public IDetour

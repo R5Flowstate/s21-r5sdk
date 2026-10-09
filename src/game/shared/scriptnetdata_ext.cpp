@@ -101,12 +101,12 @@ static uint8_t* s_pOrigClientCategories = nullptr;
 static void* s_pNonRewindClientEnt = nullptr;
 
 // Engine global entity pointers (we read/swap these)
-static void** g_ppServerGlobalEnt = nullptr;   // qword_16859E480
-static void** g_ppClientGlobalEnt = nullptr;   // qword_1695075E8
+static void** g_ppServerGlobalEnt = nullptr;
+static void** g_ppClientGlobalEnt = nullptr;
 
 // Engine scriptNetVars hash tables (for category lookup)
-static uint8_t* g_pServerNetVars = nullptr;    // unk_1685A01A0
-static uint8_t* g_pClientNetVars = nullptr;    // unk_169509820
+static uint8_t* g_pServerNetVars = nullptr;
+static uint8_t* g_pClientNetVars = nullptr;
 
 // Hook targets
 static char (*v_ServerFindGlobalNetVar)(__int64 a1, int* a2) = nullptr;
@@ -116,7 +116,7 @@ static char (*v_ClientFindGlobalNetVar)(__int64 a1, int* a2) = nullptr;
 static void* (*v_ServerCreateScriptNetDataGlobal)(__int64 a1, __int64 a2) = nullptr;
 
 // Engine's TriggerChangeCallbacks — fires registered callbacks on a ScriptNetData entity
-// S3 RVA 0x88A9C0: checks dirty flag at entity+3072, iterates category's varsWithCallbacks,
+// dedi RVA 0x88A9C0: checks dirty flag at entity+3072, iterates category's varsWithCallbacks,
 // reads current values from server category struct, fires callback SQObjects.
 static void (*v_TriggerChangeCallbacks)(void* pEntity) = nullptr;
 
@@ -143,8 +143,8 @@ static constexpr int NETVAR_SLOT_OFFSET = 0x10;
 int ScriptNetData_FindVarSlotAndType(const char* name, int expectedCategory, int* outType)
 {
 	// The dedi uses the CLIENT RegisterNetworkedVariable chain, so vars are
-	// stored in the CLIENT hash table (unk_169509820, 32-byte entries), NOT the
-	// SERVER one (unk_1685A01A0, 56-byte entries). Use g_pClientNetVars.
+	// stored in the CLIENT hash table (32-byte entries), NOT the
+	// SERVER one (56-byte entries). Use g_pClientNetVars.
 	if (!g_pClientNetVars)
 	{
 		Warning(eDLL_T::ENGINE, "[SNDC-FIND] FAIL: g_pClientNetVars is NULL\n");
@@ -256,7 +256,7 @@ void ScriptNetDataExt_ClearEngineCallbacks()
 
 	constexpr int ENTRY_STRIDE = SERVER_NETVAR_ENTRY_SIZE; // 0x38 (56 bytes)
 	constexpr int CB_OFFSET    = 0x20;                     // SQObject (_type, _unVal)
-	// (unk_1685A3870 - unk_1685A01C0) / 0x38 = 0x36B0 / 56 = 250 entries.
+	// table span 0x36B0 / 56-byte entries = 250 entries.
 	// Matches the 250-bucket hash table in ScriptNetData_FindVarSlot.
 	constexpr int ENTRY_COUNT  = 250;
 
@@ -371,16 +371,16 @@ void VScriptNetDataExt::GetVar(void) const
 	// Direct RVA resolution for entity pointers and scriptNetVars
 	uintptr_t base = g_GameDll.GetModuleBase();
 
-	// Server global entity pointer: qword_16859E480
+	// Server global entity pointer.
 	g_ppServerGlobalEnt = reinterpret_cast<void**>(base + 0x2859E480);
 
-	// Client global entity pointer: qword_1695075E8
+	// Client global entity pointer.
 	g_ppClientGlobalEnt = reinterpret_cast<void**>(base + 0x295075E8);
 
-	// Server scriptNetVars: unk_1685A01A0
+	// Server scriptNetVars.
 	g_pServerNetVars = reinterpret_cast<uint8_t*>(base + 0x285A01A0);
 
-	// Client scriptNetVars: unk_169509820
+	// Client scriptNetVars.
 	g_pClientNetVars = reinterpret_cast<uint8_t*>(base + 0x29509820);
 
 	Warning(eDLL_T::ENGINE, "[ScriptNetDataExt] ServerCategories=0x%p ClientCategories=0x%p\n",

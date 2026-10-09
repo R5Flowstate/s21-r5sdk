@@ -30,7 +30,7 @@ bool Chat_AllowsPlayerChat(void)
 //-----------------------------------------------------------------------------
 // Per-sender chat mute, keyed by the sender slot the SayText usermessage carries
 // in its first payload byte. Slot-keyed rather than identity-keyed because the
-// S3 dedicated server has no GetUserID/GetUnspoofedHardware, so the client can
+// dedicated server has no GetUserID/GetUnspoofedHardware, so the client can
 // never build the uid triplet TogglePlayerVoiceAndTextMuteForUID needs for a
 // player it holds no entity for -- which is every player outside its own realm.
 //-----------------------------------------------------------------------------

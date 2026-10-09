@@ -45,7 +45,7 @@ static_assert(offsetof(CGameTrace, endpos) == 16, "engine trace endpos");
 static_assert(offsetof(CGameTrace, fraction) == 48, "engine trace fraction");
 static_assert(offsetof(CGameTrace, hit_entity) == 96, "engine trace hit entity");
 
-// S3 weapon collision group (S21 inserted a group above debris, shifting the
+// dedi weapon collision group (S21 inserted a group above debris, shifting the
 // same group to 14 there; the engine resolves group behaviour natively).
 static constexpr int kCollisionGroupWeapon = 13;
 

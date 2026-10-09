@@ -1,10 +1,10 @@
 //=============================================================================//
 //
-// Purpose: update_player_last_fire_time on the S3 attack paths.
+// Purpose: update_player_last_fire_time on the dedi attack paths.
 //
 // The S21 client stamps the owner's m_lastFiredTime / m_lastFiredWeapon on a
 // primary attack only when the weapon sets update_player_last_fire_time
-// (default on; abilities turn it off). The S3 attack paths always stamp.
+// (default on; abilities turn it off). The dedi attack paths always stamp.
 //
 //=============================================================================//
 #ifndef WEAPON_LAST_FIRE_TIME_H

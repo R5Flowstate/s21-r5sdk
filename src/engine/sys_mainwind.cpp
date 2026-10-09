@@ -30,6 +30,7 @@
 extern void SDK_Log(const char* fmt, ...);
 
 volatile LONG g_imguiWndProcToggleSerial = 0;
+volatile bool g_bImguiWndProcSeesKeys = false;
 
 //-----------------------------------------------------------------------------
 // Purpose: plays the startup video's
@@ -79,11 +80,12 @@ LRESULT CGame::ImguiWindowProc(HWND hWnd, UINT& uMsg, WPARAM wParam, LPARAM lPar
 		Input_MaintainCursorClip(hWnd);
 
 	if (uMsg == WM_KEYDOWN || uMsg == WM_SYSKEYDOWN)
+		g_bImguiWndProcSeesKeys = true;
+
+	// lParam bit 30 = key was already down; auto-repeat must not re-toggle.
+	if ((uMsg == WM_KEYDOWN || uMsg == WM_SYSKEYDOWN) && !(lParam & (1 << 30)))
 	{
 		const ImGuiKey imParam = ImGui_ImplWin32_KeyEventToImGuiKey(wParam, lParam);
-
-		// (Per-keydown imgui-key-mapping trace removed -- same synchronous
-		// main-thread flush cost as the WND-HOOK keydown trace above.)
 
 		if (imParam == g_ImGuiConfig.m_ConsoleConfig.m_nBind0 ||
 			imParam == g_ImGuiConfig.m_ConsoleConfig.m_nBind1)

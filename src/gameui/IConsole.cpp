@@ -960,7 +960,7 @@ void CConsole::CreateSuggestionsFromPartial(void)
 
     if (!ok)
     {
-        // Registry walk faulted (S3 header vs S21 CCvar). Drop partial suggestions.
+        // Registry walk faulted (dedi header vs S21 CCvar). Drop partial suggestions.
         m_vecSuggest.clear();
         static bool s_warnedIterCrash = false;
         if (!s_warnedIterCrash)

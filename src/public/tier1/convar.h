@@ -275,7 +275,7 @@ protected:
 		ChangeUserData_t   m_pUserData; // Typically used for syncing cvars with VGUI sliders.
 	};
 
-	// +8 vs S3 (dropped static usage string). m_pParent @ +0x40, string @ parent+0x50.
+	// +8 vs dedi (dropped static usage string). m_pParent @ +0x40, string @ parent+0x50.
 	ConVar*        m_pParent;         //0x0040
 	const char*    m_pszDefaultValue; //0x0048
 	CVValue_t      m_Value;           //0x0050

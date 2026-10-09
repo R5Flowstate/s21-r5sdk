@@ -12,10 +12,6 @@ macro( add_codecs_lib LIB_NAME )
 		"bink/bink_impl.h"
 	)
 
-	add_sources( SOURCE_GROUP "Miles"
-		"miles/miles_types.h"
-	)
-
 	if( ${LIB_NAME} STREQUAL "codecs_cl" )
 		add_sources( SOURCE_GROUP "Miles"
 			"miles/miles_banklist.cpp"
@@ -41,7 +37,6 @@ macro( add_codecs_lib LIB_NAME )
 	if( ${LIB_NAME} STREQUAL "codecs_cl" )
 		target_compile_definitions( ${PROJECT_NAME} PRIVATE
 			"CLIENT_DLL"
-			"GAMEDLL_S21"
 		)
 	endif()
 endmacro()

@@ -585,7 +585,7 @@ inline void* (*v_PhysModelCreate)(int64_t pEntity, uint32_t nModelIndex, void* p
 // rmdl v10 load callback: CStudioVCollide at studiodata+24, CStudioPhysicsGeoms at +32.
 inline void** (*v_Studio_RmdlLoadCallback)(int64_t* pAssetHeader, int64_t a2, int64_t a3, void* a4);
 
-// CStudioPhysicsGeoms::Destroy (S3 dedi ): frees the geoms payload
+// CStudioPhysicsGeoms::Destroy (dedi ): frees the geoms payload
 // (this+16). Hooked purely to log WHO loses its geoms post-build.
 inline int64_t (*v_CStudioPhysicsGeoms_Destroy)(int64_t pThis, int64_t a2);
 

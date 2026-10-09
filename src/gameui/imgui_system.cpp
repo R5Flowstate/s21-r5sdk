@@ -241,7 +241,7 @@ void CImguiSystem::SetupFonts() const
 void CImguiSystem::LoadFont(const char* const fontPath, const bool mergeMode, const float sizePixels, ImWchar* const ranges) const
 {
 	// S21: Use only IBaseFileSystem methods (Open/Read/Size/Close) -- the IFileSystem
-	// vtable indices differ between S3 and S21, so any IFileSystem-specific calls crash.
+	// vtable indices differ between dedi and S21, so any IFileSystem-specific calls crash.
 	IBaseFileSystem* const pFS = BaseFileSystem();
 	if (!pFS)
 		return;

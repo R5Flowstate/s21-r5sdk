@@ -734,7 +734,7 @@ static ConVar sdk_bridge_db_incremental_ack("sdk_bridge_db_incremental_ack", "1"
     "dedi resends only missing fragments -- collapses the ~10s/snapshot large-DataBlock stall. "
     "0 = legacy (ACK only on full completion).");
 static uint8_t  s_deferredSignon3Buf[1024] = {};
-// S2C ScriptRemote: S3 net_ScriptMessage(68) isTyped=0, inject by wire-carried name.
+// S2C ScriptRemote: dedi net_ScriptMessage(68) isTyped=0, inject by wire-carried name.
 // Bypasses the native 600-cap receive queue; local-entry + argCount gates still apply.
 static ConVar bridge_s2c_scriptremote("bridge_s2c_scriptremote", "1", FCVAR_RELEASE,
 	"Inject the dedi(S3)-originated name-carried ScriptRemote S->C RPC (S3 net_ScriptMessage(68), "
@@ -906,7 +906,7 @@ static volatile LONG s_snapProcCrash     = 0;
 //-----------------------------------------------------------------------------
 static volatile LONG s_pmCallCount         = 0;   // S21Bridge_ProcessMessages calls
 static volatile LONG s_pmIterTotal         = 0;   // total dispatch-loop iterations
-static volatile LONG s_pmS3TypeFires[128]  = {};  // per-S3-type fire count
+static volatile LONG s_pmS3TypeFires[128]  = {};  // per-dedi-type fire count
 static volatile LONG s_ppEntryCount        = 0;   // Hook_ProcessPacket entries
 static volatile LONG s_ppBadNonce          = 0;   // dropped by nonce magic check
 static volatile LONG s_ppSubchanCalled     = 0;   // subchannel data parsed
@@ -923,8 +923,8 @@ static constexpr int S3_NETMSG_TABLE_MAX = 68;
 static ConVar bridge_desync_dump("bridge_desync_dump", "0", FCVAR_DEVELOPMENTONLY,
 	"Hex-dump the transfer bytes around a bitstream desync (impossible net-message type).");
 
-// S3 svc_DLCNotifyOwnership body: 64-bit entitlement bitfield + N*16 balance bits.
-// N is NOT on the wire -- both S3 ends use Host_GetEntitlementBalances->m_Size.
+// dedi svc_DLCNotifyOwnership body: 64-bit entitlement bitfield + N*16 balance bits.
+// N is NOT on the wire -- both dedi ends use Host_GetEntitlementBalances->m_Size.
 static ConVar bridge_s3_dlc_balance_count("bridge_s3_dlc_balance_count", "151", FCVAR_RELEASE,
 	"S3 svc_DLCNotifyOwnership balance count for body-skip (not applied). "
 	"Must match dedi Host_GetEntitlementBalances size. -1 = auto when transfer "
@@ -1125,7 +1125,7 @@ static bool S21Bridge_ReadHostProof(char (&szProof)[HOST_PROOF_HEX_LEN + 1])
 }
 
 // Stage 1 -> 2. Called from PollReceive on S2C_CHALLENGE (ffffffff 49).
-// Builds the S3 C2S_CONNECT bitstream and sends it. Pre-activates the bridge
+// Builds the dedi C2S_CONNECT bitstream and sends it. Pre-activates the bridge
 // so the server's follow-up netchan packets flow through the normal drain.
 static void S21Bridge_OnS2CChallenge(uint32_t challenge)
 {
@@ -1138,8 +1138,8 @@ static void S21Bridge_OnS2CChallenge(uint32_t challenge)
         (unsigned long long)bridgeNucleusID, bridgePersona.c_str(),
         Bridge_GetConnectPasswordTag()[0] ? 1 : 0);
 
-    // ─── Build S3-format C2S_CONNECT via bitstream writer ───
-    // Build S3 C2S_CONNECT payload for online-auth token ConVars.
+    // ─── Build dedi-format C2S_CONNECT via bitstream writer ───
+    // Build dedi C2S_CONNECT payload for online-auth token ConVars.
     // Wire must stay under net_maxroutable (1200).
     static constexpr int kC2SConnectPayloadBytes = 1152; // worst-case full token ~1018B body
     static constexpr int kC2SConnectWireHeader = 5;      // 0xFFFFFFFF + C2S_CONNECT
@@ -1200,7 +1200,7 @@ static void S21Bridge_OnS2CChallenge(uint32_t challenge)
     bsWriteU32(challenge);              // challenge echo
     bsWriteU32(0);                      // reservation
     bsWriteU8(2);                       // authProtocol (< 8)
-    bsWriteI64(bridgeNucleusID);        // platform user id field (S3 C2S layout; value = Nucleus)
+    bsWriteI64(bridgeNucleusID);        // platform user id field (dedi C2S layout; value = Nucleus)
     bsWriteStr(bridgePersona.c_str());  // persona name
     // Challenge-bound HMAC tag; the dedi recomputes it from sv_password + the
     // challenge it issued.
@@ -1210,7 +1210,7 @@ static void S21Bridge_OnS2CChallenge(uint32_t challenge)
     bsWriteI64(0);                      // nonce1
     bsWriteI64(0);                      // nonce2
     bsWriteU32(0);                      // clientToken
-    // sendtableHash: CRC64 of scripts/entitlements.rson on the S3 server.
+    // sendtableHash: CRC64 of scripts/entitlements.rson on the dedi.
     static constexpr uint64_t kS3ServerSendTableCRC = 0xA28012AACDFB8F7EULL;
     bsWriteI64(kS3ServerSendTableCRC);  // field 12: sendtableHash (CRC64)
 
@@ -1218,7 +1218,7 @@ static void S21Bridge_OnS2CChallenge(uint32_t challenge)
     bsWriteI64(0); // field 13: signature blob (8 bytes = 64 bits, zeroed)
 
     // DLC count must match the server's entitlement slot count so later markers stay aligned.
-    // Emit the same count of zero u16 entries as the S3 server expects.
+    // Emit the same count of zero u16 entries as the dedi expects.
     static constexpr uint8_t  kS3ServerDLCCount = 31;
     bsWriteU8(kS3ServerDLCCount);                 // field 14: DLC count
     for (int i = 0; i < kS3ServerDLCCount; ++i)
@@ -1232,7 +1232,7 @@ static void S21Bridge_OnS2CChallenge(uint32_t challenge)
     char szHostProof[HOST_PROOF_HEX_LEN + 1];
     const bool bHostProof = S21Bridge_ReadHostProof(szHostProof);
     bsWriteU8(bHostProof ? 6 : 5);      // pluginCount
-    // Per-plugin format (from S3 client)
+    // Per-plugin format (from dedi client)
     // 6 bits: plugin-name-table index (0 = name not in table, full string follows)
     bsWriteBits(0, 6); // plugin-name-table index = 0 -> string follows
     bsWriteStr("nucleus_id"); bsWriteStr("0");
@@ -1290,7 +1290,7 @@ static void S21Bridge_OnS2CChallenge(uint32_t challenge)
     { extern bool g_bCrashHandlerNoFatal; g_bCrashHandlerNoFatal = true; }
 
     // Diagnostic: dump the wire bytes around the sendtableHash field.
-    // The S3 parser reads u32 protocol/authChallenge/challenge/reservation
+    // The dedi parser reads u32 protocol/authChallenge/challenge/reservation
     SDK_Log("[NET-OBS] HANDSHAKE: C2S_CONNECT bytes[60..76]="
             " %02X %02X %02X %02X | %02X %02X %02X %02X %02X %02X %02X %02X |"
             " %02X %02X %02X %02X (hash should be LE 7E 8F FB CD AA 12 80 A2)\n",
@@ -1742,7 +1742,7 @@ static void S21BR_SkipBits(uint8_t* s21, int64_t numBits)
 		S21BR_ReadUBits(s21, (int)numBits);
 }
 
-// S3 net_SignonState body after [8b state][32b spawn]: [String][String][QWORD][String].
+// dedi net_SignonState body after [8b state][32b spawn]: [String][String][QWORD][String].
 // Nothing in the body is length-prefixed, so a dropped SignonState must consume it
 // or the next cmd in the transfer is read off the leftover cursor.
 static void S21BR_SkipSignonBody(uint8_t* s21)
@@ -1763,7 +1763,7 @@ static void S21BR_SkipSignonBody(uint8_t* s21)
 	}
 }
 
-// S3->S21 snapshot dest writer. LSB-first bits == little-endian store when
+// dedi->S21 snapshot dest writer. LSB-first bits == little-endian store when
 // dest is byte-aligned. Header rewrite adds 17 bits, so FULL dest is aligned
 // (336) and delta dest is 1 bit in (369 / 401).
 static void Snap_WriteBits(uint8_t* dst, int cap, int& wBit, uint64_t val, int nBits)
@@ -2145,7 +2145,7 @@ void NetBridge_FireClientPlayerCallback(const char* funcName, void* pPlayerEnt)
 	if (!CSquirrelVM_IsAlive_S21(vm) || !CSquirrelVM__FindFunction || !CSquirrelVM__ExecuteFunction)
 		return;
 
-	// Resolve GetScriptInstance with the S21 pattern; the SDK header still uses a stale S3 one.
+	// Resolve GetScriptInstance with the S21 pattern; the SDK header still uses a stale dedi one.
 	if (!v_C_BaseEntity__GetScriptInstance)
 	{
 		Module_FindPattern(g_GameDll,
@@ -2529,7 +2529,7 @@ static void S21Bridge_InjectScriptRemote(const char* name, uint32_t nameLen, uin
 		return;
 	isUI = S21Bridge_S2CResolveIsUI(name, nameLen, isUI);
 
-	// Lazily resolve C_BaseEntity::GetScriptInstance; the SDK header still uses a stale S3 pattern.
+	// Lazily resolve C_BaseEntity::GetScriptInstance; the SDK header still uses a stale dedi pattern.
 	if (!v_C_BaseEntity__GetScriptInstance)
 	{
 		Module_FindPattern(g_GameDll,
@@ -2698,7 +2698,7 @@ static void S21Bridge_InjectScriptRemote(const char* name, uint32_t nameLen, uin
 	}
 
 	// Entity/typed_entity args resolve via S21Bridge_SR_ResolveEntityScript (EHandle 16:16,
-	// serial-checked) to a valid client HSCRIPT; the cross-binary S3->S21 EHandle round-trips
+	// serial-checked) to a valid client HSCRIPT; the cross-binary dedi->S21 EHandle round-trips
 
 	// Build ScriptVariant_t args. NOTE (deviation from the frozen spec, verified
 	// against this repo's public/vscript/ivscript.h): the wire typeTag values 1/3/5/6/0x22
@@ -2830,7 +2830,7 @@ static char* S21Bridge_ResolvePlaylistNameBuf(void)
 }
 
 // Client-side stand-in for v_Playlists_GetCurrent, which is permanently null in
-// client.dll: VPlaylists is REGISTERed only in init_server.cpp, and its S3
+// client.dll: VPlaylists is REGISTERed only in init_server.cpp, and its dedi
 const char* S21Bridge_GetCurrentPlaylistName(void)
 {
 	const char* pszBuf = S21Bridge_ResolvePlaylistNameBuf();
@@ -2910,7 +2910,7 @@ static void S21Bridge_ApplyServerPlaylist(const char* pszPlaylist)
 		pszPlaylist, (int)result, pszNow);
 }
 
-// ProcessMessages: read S3 IDs from the bitstream, translate, dispatch S21 handlers.
+// ProcessMessages: read dedi IDs from the bitstream, translate, dispatch S21 handlers.
 static constexpr int kBridgeS2CStringMax = 256;
 
 static bool Bridge_ReadS2CString(uint8_t* const s21buf, char* const pOut, const int nOutMax)
@@ -2948,7 +2948,7 @@ static bool S21Bridge_SetCVarNameAccepted(const char* const name)
 	ConVar* const var = g_pCVar->FindVar(name);
 	if (!var)
 		return false;
-	// Names the retail client does not flag REPLICATED but the dedi must still drive.
+	// Names the S21 client does not flag REPLICATED but the dedi must still drive.
 	static const char* const kReplicatedByServer[] = {
 		"mp_gamemode", "sv_lobbyType", "sv_players",
 		"sv_forceChatToTeamOnly", "tether_maxvel"
@@ -3479,7 +3479,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 		return true;
 	}
 
-	// Extract data from S3 bf_read
+	// Extract data from dedi bf_read
 	const uint8_t* baseData = (const uint8_t*)s3buf->GetBasePointer();
 	const int s3TotalBytes = (int)s3buf->TotalBytesAvailable();
 	const int startBit = (int)s3buf->GetNumBitsRead();
@@ -3492,7 +3492,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 	s_S21BfReadInit(s21buf, baseData, (uint64_t)s3TotalBytes);
 	s_pmTrailN = 0; s_pmTrailBase = baseData; s_pmTrailBytes = s3TotalBytes;
 
-	// Skip to current S3 bit position (for partially-consumed buffers)
+	// Skip to current dedi bit position (for partially-consumed buffers)
 	// Use SkipBits (ReadUBits loop) instead of Seek to avoid alignment issues
 	if (startBit > 0)
 		S21BR_SkipBits(s21buf, startBit);
@@ -3535,7 +3535,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			return false;
 		}
 
-		// Per-S3-type lifetime fire counter (read by histogram dump).
+		// Per-dedi-type lifetime fire counter (read by histogram dump).
 		InterlockedIncrement(&s_pmIterTotal);
 		if (cmd >= 0 && cmd < 128)
 			InterlockedIncrement(&s_pmS3TypeFires[cmd]);
@@ -3588,16 +3588,16 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 		prevMsgStartBit = bitsReadNow;
 		++msgOrdinal;
 
-		// Translate S3 ID -> S21 ID
+		// Translate dedi ID -> S21 ID
 		const int s3cmd = cmd;
 		const int s21cmd = S21Bridge_TranslateNetMsgType(cmd, true);
 
 		if (s21cmd < 0) // -1 = removed in S21, -2 = format changed / S21 type TBD
 		{
-			// Known S3-only or format-changed messages: skip their body.
+			// Known dedi-only or format-changed messages: skip their body.
 			// Without this, ALL messages after an unknown type are dropped.
 
-			// S3 net_ScriptMessage (type 68) maps to s21cmd=-1; handle the S2C ScriptRemote frame here.
+			// dedi net_ScriptMessage (type 68) maps to s21cmd=-1; handle the S2C ScriptRemote frame here.
 			if (s3cmd == 68)
 			{
 				S21Bridge_HandleS2CScriptRemote(s21buf);
@@ -3700,9 +3700,9 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 
 			if (s3cmd == 22) // svc_ServerTick -- FORMAT BRIDGE
 			{
-				// S3 wire: 32b tick + 32b tick2 + 16b compute + 16b stdDev + 1b bool + 8b byte + 32b field = 137 bits
+				// dedi wire: 32b tick + 32b tick2 + 16b compute + 16b stdDev + 1b bool + 8b byte + 32b field = 137 bits
 				// S21 wire (slot 24): 32b tick + 32b tick2 + 16b compute + 16b stdDev + 16b word + 8b byte + 32b field = 152 bits
-				// Difference: S3 has 1-bit bool, S21 has 16-bit word at same position
+				// Difference: dedi has 1-bit bool, S21 has 16-bit word at same position
 				const uint32_t s3Tick1     = S21BR_ReadUBits(s21buf, 32);
 				const uint32_t s3Tick2     = S21BR_ReadUBits(s21buf, 32);
 				const uint32_t s3Compute   = S21BR_ReadUBits(s21buf, 16);
@@ -3726,7 +3726,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 				writeBitsTK(s3Tick2, 32);
 				writeBitsTK(s3Compute, 16);
 				writeBitsTK(s3StdDev, 16);
-				writeBitsTK(s3Bool, 16);  // S21: 16-bit word (S3 was 1-bit bool)
+				writeBitsTK(s3Bool, 16);  // S21: 16-bit word (dedi was 1-bit bool)
 				writeBitsTK(s3Byte, 8);
 				writeBitsTK(s3Last, 32);
 
@@ -3818,7 +3818,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 
 			if (s3cmd == 32) // svc_PlaylistChange -- FORMAT BRIDGE
 			{
-				// S3 wire: null-term string (playlist name, max 64)
+				// dedi wire: null-term string (playlist name, max 64)
 				// S21 wire: 7-bit playlist index -- no name string. Apply by name instead.
 				char plcName[65] = {};
 				for (int ci = 0; ci < 64; ci++)
@@ -3836,7 +3836,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 
 			if (s3cmd == 34) // svc_PlaylistOverrides -- REMOVED in S21, decoded by the bridge
 			{
-				// S3 wire: 32b(lenBits) + payload(lenBits bits). The payload is
+				// dedi wire: 32b(lenBits) + payload(lenBits bits). The payload is
 				// Playlist_WriteOverridesToBuffer's output:
 				const int32_t lenBits = (int32_t)S21BR_ReadUBits(s21buf, 32);
 				if (lenBits <= 0 || lenBits >= 0x100000)
@@ -3965,8 +3965,8 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 
 			if (s3cmd == 10) // svc_SetPause -- REMOVED in S21
 			{
-				// S3 wire: 1 bit (m_bPaused)
-				// No S21 equivalent. Read S3 bit correctly.
+				// dedi wire: 1 bit (m_bPaused)
+				// No S21 equivalent. Read dedi bit correctly.
 				const uint32_t paused = S21BR_ReadUBits(s21buf, 1);
 				static int s_spLog = 0;
 				if (++s_spLog <= 3)
@@ -3976,11 +3976,11 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 
 			if (s3cmd == 16) // svc_Print -- FORMAT BRIDGE
 			{
-				// S3 wire format: null-terminated string (WriteString)
+				// dedi wire format: null-terminated string (WriteString)
 				// S21 wire format: 4-bit prefix + null-terminated string (ReadBits(4) + char loop)
-				// Bridge: read S3 string, build S21 buffer with 4-bit prefix, dispatch to S21:20
+				// Bridge: read dedi string, build S21 buffer with 4-bit prefix, dispatch to S21:20
 
-				// Read S3 null-terminated string from bitstream
+				// Read dedi null-terminated string from bitstream
 				char printText[2048];
 				int pi = 0;
 				for (; pi < 2047; pi++)
@@ -4060,7 +4060,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 
 			if (s3cmd == 36) // svc_AntiCheatChallenge (removed in S21)
 			{
-				// S3 wire format: WriteLong(m_nLength) + WriteBits(data, m_nLength)
+				// dedi wire format: WriteLong(m_nLength) + WriteBits(data, m_nLength)
 				const int32_t lenBits = (int32_t)S21BR_ReadUBits(s21buf, 32);
 				if (lenBits > 0 && lenBits < 0x100000)
 					S21BR_SkipBits(s21buf, lenBits);
@@ -4087,7 +4087,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 
 			if (s3cmd == 28) // svc_DLCNotifyOwnership -- BODY-SKIP (do not apply)
 			{
-				// S3 WriteToBuffer: WriteBits(m_bitfield, 64) + N * WriteBits(u16, 16).
+				// dedi WriteToBuffer: WriteBits(m_bitfield, 64) + N * WriteBits(u16, 16).
 				// N = dedi Host_GetEntitlementBalances->m_Size -- NOT on the wire.
 				// Wrong N shears the rest of the transfer; fail closed to SKIP-TRANSFER.
 				const int64_t bitsAtStart = S21BR_GetBitsLeft(s21buf);
@@ -4140,7 +4140,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 
 			if (s3cmd == 42) // svc_Menu -- BODY-SKIP (dedi rarely emits; never apply KV)
 			{
-				// S3 Write: u16 dialogType + u16 lenBytes + lenBytes raw (capped 4096).
+				// dedi Write: u16 dialogType + u16 lenBytes + lenBytes raw (capped 4096).
 				if (S21BR_GetBitsLeft(s21buf) < 32)
 				{
 					Bridge_RecordBodySkip(42, false);
@@ -4174,7 +4174,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 
 			if (s3cmd == 43) // svc_CmdKeyValues -- BODY-SKIP (removed in S21)
 			{
-				// S3 Write: u32 lenBytes + lenBytes raw KeyValues blob.
+				// dedi Write: u32 lenBytes + lenBytes raw KeyValues blob.
 				if (S21BR_GetBitsLeft(s21buf) < 32)
 				{
 					Bridge_RecordBodySkip(43, false);
@@ -4205,11 +4205,11 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			if (s3cmd == 44) // svc_DatatableChecksum -- FORMAT BRIDGE
 			{
 				// Bridge mutates SendTables so the dedi checksum can never match the
-				// S21 client; consume the S3 body and skip dispatch (hostile parse path).
+				// S21 client; consume the dedi body and skip dispatch (hostile parse path).
 				const uint32_t dtLo = S21BR_ReadUBits(s21buf, 32);
 				const uint32_t dtHi = S21BR_ReadUBits(s21buf, 32);
 
-				// NUL-terminated string, S3 caps it at 512 bytes. Bound the walk on
+				// NUL-terminated string, dedi caps it at 512 bytes. Bound the walk on
 				// bitsLeft as well -- a desynced or hostile stream may never present a NUL.
 				char dtName[512];
 				uint32_t dtLen = 0;
@@ -4359,11 +4359,11 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 		s_pmTrail[s_pmTrailN % 12] = { s3cmd, preReadBits };
 		++s_pmTrailN;
 
-		// Per-message format bridges for S3->S21 wire format differences.
+		// Per-message format bridges for dedi->S21 wire format differences.
 		// Messages with identical wire formats use the generic S21 vtable
 		if (s3cmd == 41) // svc_TempEntities -- FORMAT BRIDGE (S21 type 48)
 		{
-			// S3 wire (after 7-bit type): [32 m_tick][10 m_nNumEntries][22 m_nLength][m_nLength-bit blob]
+			// dedi wire (after 7-bit type): [32 m_tick][10 m_nNumEntries][22 m_nLength][m_nLength-bit blob]
 			// S21 wire (msg 48): [32 m_tick][10 m_nNumEntries][24 m_nLength][m_nLength-bit blob]
 			const uint32_t teTick = S21BR_ReadUBits(s21buf, 32);
 			const uint32_t teNum  = S21BR_ReadUBits(s21buf, 10);
@@ -4443,10 +4443,10 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 
 		if (s3cmd == 23) // svc_PersistenceDefFile
 		{
-			// S3 wire format (after 7-bit type)
+			// dedi wire format (after 7-bit type)
 			// S21 expects
 
-			// Parse S3 fields from the bitstream
+			// Parse dedi fields from the bitstream
 			const uint64_t pdefVersion = ((uint64_t)S21BR_ReadUBits(s21buf, 32))
 				| ((uint64_t)S21BR_ReadUBits(s21buf, 32) << 32);
 			const uint32_t pdefDataLen = S21BR_ReadUBits(s21buf, 16);
@@ -4461,7 +4461,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 				continue;
 			}
 
-			// Read the BZ2 data bytes from the S3 bitstream into temp buffer
+			// Read the BZ2 data bytes from the dedi bitstream into temp buffer
 			uint8_t* pdefBZ2 = (uint8_t*)malloc(pdefDataLen + 16);
 			if (!pdefBZ2)
 			{
@@ -4595,7 +4595,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 		}
 		else if (s3cmd == 24) // svc_UseCachedPersistenceDefFile
 		{
-			// S3 wire: [32b version low] [32b version high]
+			// dedi wire: [32b version low] [32b version high]
 			const uint64_t cachedVer = ((uint64_t)S21BR_ReadUBits(s21buf, 32))
 				| ((uint64_t)S21BR_ReadUBits(s21buf, 32) << 32);
 
@@ -4625,18 +4625,18 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			continue;
 		}
 		// svc_PersistenceBaseline (s3cmd == 25) uses native dispatch.
-		// S3 and S21 wire formats match once pdef schemas align (DefFile loads S3 pdef into S21 globals).
+		// dedi and S21 wire formats match once pdef schemas align (DefFile loads dedi pdef into S21 globals).
 		// Types: 0=1bit 1=32bit 2=32bit 3=string 4=8bit. Fall through to generic vtable path for slot 28.
 		else if (s3cmd == 37) // svc_UserMessage -- FORMAT BRIDGE
 		{
-			// S3 wire
+			// dedi wire
 			// [m_nLength bits] -- payload data (inline in bitstream)
 
 			const uint32_t umMsgType = S21BR_ReadUBits(s21buf, 8);
 			const uint32_t umLenBits = S21BR_ReadUBits(s21buf, 12);
 			const uint32_t umLenBytes = (umLenBits + 7) / 8;
 
-			// S3->S21 UserMessages_t index reconciliation: S21 dropped 4
+			// dedi->S21 UserMessages_t index reconciliation: S21 dropped 4
 			// legacy slots (AchievementEvent/UpdateJalopyRadar/CurrentTimescale/
 			const bool umRpcFamily = (umMsgType >= 52 && umMsgType <= 54);
 			uint32_t umMsgTypeS21 = umMsgType;
@@ -4663,7 +4663,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			s21UmBuf[2] = (uint8_t)(umLenBytes & 0xFF);
 			s21UmBuf[3] = (uint8_t)((umLenBytes >> 8) & 0xFF);
 
-			// Copy payload bytes from S3 bitstream
+			// Copy payload bytes from dedi bitstream
 			for (uint32_t i = 0; i < umLenBytes; i++)
 			{
 				const uint32_t bitsLeft = (umLenBits > i * 8) ? (umLenBits - i * 8) : 0;
@@ -4678,14 +4678,14 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 				S21Bridge_CallNativeSayText(&s21UmBuf[4], umLenBytes);
 			}
 
-			// PlayerNotifyDidDamage (raw S3 type=55, translated to S21 native slot 51)
+			// PlayerNotifyDidDamage (raw dedi type=55, translated to S21 native slot 51)
 			// same dispatch-routing bug as SayText above, proved by [DMG-DIAG-NATIVE]
 			if (umMsgType == 55 && umLenBytes >= 1)
 			{
 				S21Bridge_CallNativeDidDamage(&s21UmBuf[4], umLenBytes);
 			}
 
-			// RemoteBulletFired / RemoteWeaponReload (raw S3 type=56/57, translated to S21
+			// RemoteBulletFired / RemoteWeaponReload (raw dedi type=56/57, translated to S21
 			// native slots 52/53): the cause behind all of these is that
 			if (umMsgType == 56 && umLenBytes >= 1)
 			{
@@ -4696,7 +4696,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 				S21Bridge_CallNativeUmHandler((void*)s_origRemoteWeaponReload, &s21UmBuf[4], umLenBytes);
 			}
 
-			// WeapProjFireCB (S3/S21 idx 17, fixed 66B -- no index remap; the -4 shift
+			// WeapProjFireCB (dedi/S21 idx 17, fixed 66B -- no index remap; the -4 shift
 			// only applies past the dropped AchievementEvent..DesiredTimescale block).
 			if (umMsgType == 17 && umLenBytes >= 1)
 			{
@@ -4734,10 +4734,10 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 		}
 		else if (s3cmd == 7) // svc_ServerInfo -- FORMAT BRIDGE
 		{
-			// S3 format: [16b proto][32b count][1b][1b][1b][16b][32b][16b][8b][8b]
+			// dedi format: [16b proto][32b count][1b][1b][1b][16b][32b][16b][8b][8b]
 			// [32b field11][8b field12]
 
-			// Parse shared prefix (same in both S3 and S21)
+			// Parse shared prefix (same in both dedi and S21)
 			const uint32_t proto     = S21BR_ReadUBits(s21buf, 16);
 			const uint32_t srvCount  = S21BR_ReadUBits(s21buf, 32);
 			const uint32_t bDedicated= S21BR_ReadUBits(s21buf, 1);
@@ -4749,11 +4749,11 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			const uint32_t field9    = S21BR_ReadUBits(s21buf, 8);
 			const uint32_t field10   = S21BR_ReadUBits(s21buf, 8);
 
-			// S3-only fields at divergence point
+			// dedi-only fields at divergence point
 			const uint32_t s3_field11 = S21BR_ReadUBits(s21buf, 32);
 			const uint32_t s3_field12 = S21BR_ReadUBits(s21buf, 8);
 
-			// S3 strings: 7x ReadString(260) + 1x ReadString(128)
+			// dedi strings: 7x ReadString(260) + 1x ReadString(128)
 			char s3Strings[8][260] = {};
 			for (int si = 0; si < 7; si++)
 			{
@@ -4772,7 +4772,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 				if (ch == 0) break;
 			}
 
-			// S3 flags byte
+			// dedi flags byte
 			const uint32_t flagsByte = S21BR_ReadUBits(s21buf, 8);
 
 			// Skip bulk data if flags set (64000 x 32-bit reads)
@@ -4843,14 +4843,14 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			// S21-specific: 32-bit field
 			writeBits(s3_field11, 32);
 
-			// S21: 8-bit field (same as S3 field12)
+			// S21: 8-bit field (same as dedi field12)
 			writeBits(s3_field12, 8);
 
-			// S21: 6x String(260) -- use first 6 of S3's 7 strings
+			// S21: 6x String(260) -- use first 6 of dedi's 7 strings
 			for (int si = 0; si < 6; si++)
 				writeString(s3Strings[si], 260);
 
-			// S21: String(128) -- same as S3
+			// S21: String(128) -- same as dedi
 			writeString(s3Strings[7], 128);
 
 			// S21: String(9) -- new in S21, use empty string
@@ -4859,7 +4859,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			// S21: flags byte
 			writeBits(flagsByte, 8);
 
-			// If flags: write bulk data (we skipped it in S3 read, write zeros)
+			// If flags: write bulk data (we skipped it in dedi read, write zeros)
 			// In practice flags should be 0 for signon
 
 			int totalBytes = (wBit + 7) / 8;
@@ -4910,9 +4910,9 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 		}
 		else if (s3cmd == 5) // net_SignonState -- FORMAT BRIDGE
 		{
-			// S3 format: [8b state][32b spawnCount][String][String][int64][String]
+			// dedi format: [8b state][32b spawnCount][String][String][int64][String]
 			// S21 format: [8b state][32b spawnCount][String(64)][String(32)][QWORD][String(64)]
-			// Bridge: read S3 fields including strings, pass through to S21.
+			// Bridge: read dedi fields including strings, pass through to S21.
 
 			// A sheared cursor landing on type 5 near the tail reads state 0
 			// out of an overflowed reader, and state 0 dispatches straight
@@ -4937,7 +4937,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 				return false;
 			}
 
-			// S3 CHANGELEVEL=9; S21 9 is MAYRECONNECT (drops to menu) and CHANGELEVEL is 10.
+			// dedi CHANGELEVEL=9; S21 9 is MAYRECONNECT (drops to menu) and CHANGELEVEL is 10.
 			const uint32_t s21SignonState = (signonState == 9) ? 10u : signonState;
 
 			// A demo rewind replays the packets after its full snapshot, and with
@@ -4984,7 +4984,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			if (s21SignonState >= 4)
 				S21Bridge_ClearUserInfo();
 
-			// Read S3 strings (null-terminated)
+			// Read dedi strings (null-terminated)
 			char ssStr1[256] = {}, ssStr2[256] = {}, ssStr3[256] = {};
 			bool ssOk = Bridge_ReadSignonString(s21buf, ssStr1, sizeof(ssStr1));
 			ssOk = ssOk && Bridge_ReadSignonString(s21buf, ssStr2, sizeof(ssStr2));
@@ -5017,7 +5017,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 					s21SignonState, (int)spawnCount);
 			}
 
-			// ssStr3 is the dedi playlist name (S3 SignonState). Apply before load UI paints.
+			// ssStr3 is the dedi playlist name (dedi SignonState). Apply before load UI paints.
 			S21Bridge_ApplyServerPlaylist(ssStr3);
 
 			// Build S21 format buffer
@@ -5059,7 +5059,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 					"[BRIDGE-SIGNON] re-walk spawn %u -> -1 (state=%u)\n",
 					spawnCount, s21SignonState);
 			writeBitsSS(outSpawn, 32);
-			writeStringSS(ssStr1, 64);   // S21: String(64) -- pass through S3 map name etc.
+			writeStringSS(ssStr1, 64);   // S21: String(64) -- pass through dedi map name etc.
 			writeStringSS(ssStr2, 32);   // S21: String(32)
 			writeBitsSS(ssQword & 0xFFFFFFFF, 32);  // QWORD low
 			writeBitsSS(ssQword >> 32, 32);          // QWORD high
@@ -5262,7 +5262,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			}
 			continue;
 		}
-		else if (s3cmd == 6) // net_MTXUserMsg -- S3 is [u32 L][L bits], S21 RFB is not
+		else if (s3cmd == 6) // net_MTXUserMsg -- dedi is [u32 L][L bits], S21 RFB is not
 		{
 			const uint32_t nBits = S21BR_ReadUBits(s21buf, 32);
 			const int64_t left = S21BR_GetBitsLeft(s21buf);
@@ -5280,7 +5280,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 		}
 		else if (s3cmd == 13) // svc_UpdateStringTable -- resolve the table by name
 		{
-			// Header matches S21 (5b id, 1b many, [16b count], 20b len) but the S3
+			// Header matches S21 (5b id, 1b many, [16b count], 20b len) but the dedi
 			// table id is not the S21 container index once the bridge has skipped
 			// or reordered a CreateStringTable; GetTable(id) then returns garbage.
 			const uint32_t ustTableId = S21BR_ReadUBits(s21buf, 5);
@@ -5358,7 +5358,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 		}
 		else if (s3cmd == 12) // svc_CreateStringTable -- FORMAT BRIDGE
 		{
-			// CreateStringTable: S3 dataLen is 22 bits, S21 is 24. Other fields match.
+			// CreateStringTable: dedi dataLen is 22 bits, S21 is 24. Other fields match.
 			char cstName[260] = {};
 			for (int ci = 0; ci < 256; ci++)
 			{
@@ -5385,8 +5385,8 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			cstEntryBits++;
 			const uint32_t cstNumEntries = S21BR_ReadUBits(s21buf, cstEntryBits);
 
-			// 4. Data length -- S3 uses 22 bits (verified: writes 22)
-			// This is the ONLY format difference between S3 and S21.
+			// 4. Data length -- dedi uses 22 bits (verified: writes 22)
+			// This is the ONLY format difference between dedi and S21.
 			const uint32_t cstDataLenBits = S21BR_ReadUBits(s21buf, 22);
 
 			// 5. hasUserData FIRST (same order as S21 -- NOT swapped!)
@@ -5424,7 +5424,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			// 6. isCompressed SECOND (same order as S21)
 			const uint32_t cstCompressed = S21BR_ReadUBits(s21buf, 1);
 
-			// 7. 2-bit flags (S3 HAS this field too -- verified)
+			// 7. 2-bit flags (dedi HAS this field too -- verified)
 			const uint32_t cstFlags = S21BR_ReadUBits(s21buf, 2);
 
 			// [SEC] s21CstBuf is 4 MiB; leave headroom for CST header bits + safety pad
@@ -5492,9 +5492,9 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 					cstName, cstMaxEntries, cstNumEntries, cstDataLenBits,
 					cstCompressed, cstHasUserData, cstUserDataSize, cstUserDataSizeBits, cstFlags);
 
-			// S3 uses LZSS compression (magic "LZSS").
+			// dedi uses LZSS compression (magic "LZSS").
 			// S21 uses a different format (magic 0xFFFFFFFD).
-			// Decompress S3 data here and pass as uncompressed/Oodle to S21.
+			// Decompress dedi data here and pass as uncompressed/Oodle to S21.
 			uint8_t* cstFinalData = cstRawData;
 			uint32_t cstFinalDataBits = cstDataLenBits;
 			uint32_t cstFinalComp = cstCompressed;
@@ -5736,10 +5736,10 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			// 3. (log2(maxEntries)+1) bits: numEntries (same)
 			writeBitsCST(cstNumEntries, cstEntryBits);
 
-			// S21 dataLen is 24 bits (S3 was 22).
+			// S21 dataLen is 24 bits (dedi was 22).
 			writeBitsCST(cstFinalDataBits, 24);
 
-			// All remaining fields are IDENTICAL between S3 and S21 -- pass through
+			// All remaining fields are IDENTICAL between dedi and S21 -- pass through
 			writeBitsCST(cstHasUserData, 1);
 			if (cstHasUserData)
 			{
@@ -5887,32 +5887,32 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			}
 			continue;
 		}
-		else if (s3cmd == 40) // svc_Snapshot -- WIRE RE-ENCODE S3->S21
+		else if (s3cmd == 40) // svc_Snapshot -- WIRE RE-ENCODE dedi->S21
 		{
-			// S3 and S21 differ on the wire in TWO places only
-			// => S3 helper = 137 bits, S21 helper = 152 bits
+			// dedi and S21 differ on the wire in TWO places only
+			// => dedi helper = 137 bits, S21 helper = 152 bits
 
 			// === RE-ENCODER PER-STAGE BIT TRACE (delta-aligned bug hunt) ===
-			// Capture S3 input bit position at every stage so any off-by-N
+			// Capture dedi input bit position at every stage so any off-by-N
 			const int64_t snapStartBit = S21BR_GetBitsRead(s21buf);
 
 			// 32-bit prefix (m_nDeltaFromTick / serverCount)
 			const uint32_t serverCount = (uint32_t)S21BR_ReadUBits(s21buf, 32);
 			const int64_t  rb_serverCount = S21BR_GetBitsRead(s21buf);
 
-			// S3 ServerTickInfo: 32+32+16+16+1+8+32 = 137 bits
+			// dedi ServerTickInfo: 32+32+16+16+1+8+32 = 137 bits
 			const uint32_t sti_tick1    = (uint32_t)S21BR_ReadUBits(s21buf, 32);
 			const uint32_t sti_tick2    = (uint32_t)S21BR_ReadUBits(s21buf, 32);
 			const uint32_t sti_compute  = (uint32_t)S21BR_ReadUBits(s21buf, 16);
 			const uint32_t sti_stddev   = (uint32_t)S21BR_ReadUBits(s21buf, 16);
-			const uint32_t sti_connFlag = (uint32_t)S21BR_ReadUBits(s21buf, 1);  // S3 = 1 bit
+			const uint32_t sti_connFlag = (uint32_t)S21BR_ReadUBits(s21buf, 1);  // dedi = 1 bit
 			const uint32_t sti_byte     = (uint32_t)S21BR_ReadUBits(s21buf, 8);
 			const uint32_t sti_cmdRun   = (uint32_t)S21BR_ReadUBits(s21buf, 32);
 			const int64_t  rb_sti       = S21BR_GetBitsRead(s21buf);
 
 			const uint32_t nMaxEntries = (uint32_t)S21BR_ReadUBits(s21buf, 15);
 			const uint32_t isDelta     = (uint32_t)S21BR_ReadUBits(s21buf, 1);
-			// Delta-from inner conditional (S3 + S21
+			// Delta-from inner conditional (dedi + S21
 			// use IDENTICAL structure)
 			uint32_t nDeltaFrom      = 0xFFFFFFFF;
 			uint32_t rawDeltaPresent = 0;
@@ -5926,7 +5926,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			}
 			const int64_t  rb_delta = S21BR_GetBitsRead(s21buf);
 
-			// 112 shared header bits (identical layout in S3 and S21)
+			// 112 shared header bits (identical layout in dedi and S21)
 			// [1]+[14]+[1]+[1]+[14]+[32]+[1]+[32]+[1]+[1]+[14] = 112
 			const uint32_t sh0 = (uint32_t)S21BR_ReadUBits(s21buf, 32);
 			const uint32_t sh1 = (uint32_t)S21BR_ReadUBits(s21buf, 32);
@@ -5934,7 +5934,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			const uint32_t sh3 = (uint32_t)S21BR_ReadUBits(s21buf, 16);
 			const int64_t  rb_shared = S21BR_GetBitsRead(s21buf);
 
-			const uint32_t nLengthBits = (uint32_t)S21BR_ReadUBits(s21buf, 22); // S3 = 22 bits
+			const uint32_t nLengthBits = (uint32_t)S21BR_ReadUBits(s21buf, 22); // dedi = 22 bits
 			const int64_t  rb_nLenBits = S21BR_GetBitsRead(s21buf);
 			const int64_t  snapBitsLeft = S21BR_GetBitsLeft(s21buf);
 			if ((int64_t)nLengthBits > snapBitsLeft)
@@ -6000,7 +6000,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			// nMaxEntries (15 bits, same)
 			writeBits(nMaxEntries, 15);
 
-			// isDelta + inner conditional (verbatim S3 -> S21 pass-through)
+			// isDelta + inner conditional (verbatim dedi -> S21 pass-through)
 			writeBits(isDelta, 1);
 			if (isDelta)
 			{
@@ -6018,11 +6018,11 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			writeBits(sh3, 16);
 			const int wb_shared = wBit;
 
-			// nLengthBits (S21 = 24 bits, S3 was 22 - widen, same value)
+			// nLengthBits (S21 = 24 bits, dedi was 22 - widen, same value)
 			writeBits(nLengthBits, 24);
 			const int wb_nLenBits = wBit;
 
-			// Entity payload (nLengthBits bits, verbatim copy from S3).
+			// Entity payload (nLengthBits bits, verbatim copy from dedi).
 			const int64_t rb_payloadStart = S21BR_GetBitsRead(s21buf);
 			if (sbArm)
 				QueryPerformanceCounter(&sbQBlit0);
@@ -6154,7 +6154,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 			if (Bridge_DiagFirehoseEnabled() && isDelta && nLengthBits > 0 && s_snapReencodeDelta <= 8)
 			{
 				// Reconstruct m_nHeaderCount from the 14-bit field at
-				// sharedBits[98..111]. The wire order matches both S3
+				// sharedBits[98..111]. The wire order matches both dedi
 				const uint32_t hdrCount = (sh3 >> 2) & 0x3FFFu;
 
 				// Parse the entity payload bits using a fresh SDK bf_read.
@@ -6588,7 +6588,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 				continue;
 			}
 
-			// SVC_ClassInfo (S3:9 -> S21:13): Process now runs properly.
+			// SVC_ClassInfo (dedi:9 -> S21:13): Process now runs properly.
 			// Decoder builder lenient patch skips unmatched props.
 			if (s3cmd == 9)
 			{
@@ -6690,7 +6690,7 @@ static bool S21Bridge_ProcessMessages_Locked(CNetChan* pChan, bf_read* s3buf)
 		}
 	}
 
-	// Sync final position back to S3 bf_read
+	// Sync final position back to dedi bf_read
 	s3buf->Seek((int)S21BR_GetBitsRead(s21buf));
 	return true;
 }
@@ -6706,7 +6706,7 @@ static const uint8_t* s_dsyncRaw = nullptr;
 static int            s_dsyncPktSize = 0;
 
 //-----------------------------------------------------------------------------
-// S3 subchannel fragment parser for reliable data reassembly.
+// dedi subchannel fragment parser for reliable data reassembly.
 //-----------------------------------------------------------------------------
 static void S21Bridge_AckSubchanEntry(const uint32_t entrySeq)
 {
@@ -6793,15 +6793,15 @@ static void S21Bridge_DispatchReliableTransfer(CNetChan* pChan)
 
 static bool S21Bridge_ParseSubChannelData(CNetChan* pChan, bf_read& buf)
 {
-	// -verified format from S3 WriteSubChannelData
+	// -verified format from dedi WriteSubChannelData
 	// and ReadSubChannelData.
 
 	const uint32_t subMagic = buf.ReadUBitLong(32);
-	// S3 reader reads and discards magic -- never checks.
+	// dedi reader reads and discards magic -- never checks.
 	// Log unexpected values for diagnostics but do NOT fail.
 	if (subMagic != 0xABCDEF01)
 	{
-		// S3 reader reads but never checks magic, so the dedi
+		// dedi reader reads but never checks magic, so the dedi
 		// can write any value here. Log rare divergences only.
 		static long long s_badSub = 0;
 		if (++s_badSub <= 5 || (s_badSub % 1000) == 0)
@@ -7065,7 +7065,7 @@ static bool S21Bridge_ParseSubChannelData(CNetChan* pChan, bf_read& buf)
 }
 
 //-----------------------------------------------------------------------------
-// CNetChan::ProcessPacket: parse S3 incoming, update CNetChan, process reliable + unreliable.
+// CNetChan::ProcessPacket: parse dedi incoming, update CNetChan, process reliable + unreliable.
 //-----------------------------------------------------------------------------
 void S21Bridge_Hook_ProcessPacket(CNetChan* pChan, netpacket_s* pPacket)
 {
@@ -7109,7 +7109,7 @@ void S21Bridge_Hook_ProcessPacket(CNetChan* pChan, netpacket_s* pPacket)
 	pBuf->Seek(0);
 	bf_read& buf = *pBuf;
 
-	// === Parse S3 header: [32 seq][32 ack][8-bit flags] ===
+	// === Parse dedi header: [32 seq][32 ack][8-bit flags] ===
 	const int sequence = buf.ReadLong();
 	const int sequenceAck = buf.ReadLong();
 	const int flags = buf.ReadUBitLong(8);
@@ -7141,9 +7141,9 @@ void S21Bridge_Hook_ProcessPacket(CNetChan* pChan, netpacket_s* pPacket)
 		QueryPerformanceCounter(&ppQ0);
 	}
 
-	// Format gate: S3 nonce-magic check (0xFDBAC34D / S21 variant).
+	// Format gate: dedi nonce-magic check (0xFDBAC34D / S21 variant).
 
-	// S3 choked count (flags bit 4 = 0x10)
+	// dedi choked count (flags bit 4 = 0x10)
 	int choked = 0;
 	if (flags & 0x10)
 		choked = buf.ReadUBitLong(8);
@@ -7164,7 +7164,7 @@ void S21Bridge_Hook_ProcessPacket(CNetChan* pChan, netpacket_s* pPacket)
 		}
 	}
 
-	// === Parse S3 nonce + subchannel (-verified format) ===
+	// === Parse dedi nonce + subchannel (-verified format) ===
 	bool subChannelOk = true;
 
 	// === NONCE SECTION (: SendDatagram, ProcessPacket) ===
@@ -7178,14 +7178,14 @@ void S21Bridge_Hook_ProcessPacket(CNetChan* pChan, netpacket_s* pPacket)
 		dsNonceMagic = nonceMagic;
 		if (nonceMagic != S3_SUBCHAN_MAGIC_S3 && nonceMagic != S3_SUBCHAN_MAGIC_S21)
 		{
-			// S3 ProcessPacket returns -1 (drops packet) on bad nonce magic.
+			// dedi ProcessPacket returns -1 (drops packet) on bad nonce magic.
 			// We must do the same -- if we skip ahead, bit reader is misaligned.
 			InterlockedIncrement(&s_ppBadNonce);
 			static long long s_badMagic = 0;
 			if (++s_badMagic <= 10)
 				Warning(eDLL_T::ENGINE, "S21Bridge: bad nonce magic 0x%08X seq=%d bitsRead=%d -- dropping packet\n",
 					nonceMagic, sequence, (int)buf.GetNumBitsRead());
-			return; // Drop packet like S3 ProcessPacket does
+			return; // Drop packet like dedi ProcessPacket does
 		}
 
 		const int nonceAck = buf.ReadUBitLong(1);
@@ -7468,8 +7468,8 @@ void S21Bridge_Hook_ProcessPacket(CNetChan* pChan, netpacket_s* pPacket)
 		DemoPlay_OnPacketProcessed();
 }
 
-// S21->S3 translation table (for outgoing messages from S21 client, or
-// incoming on S3 server). Index = S21 type ID, value = S3 type ID.
+// S21->dedi translation table (for outgoing messages from S21 client, or
+// incoming on dedi server). Index = S21 type ID, value = dedi type ID.
 static const int s_S21ToS3[91] = {
 	/* 0 */ 0, // net_NOP
 	/* 1 */ 1, // net_Disconnect
@@ -7484,7 +7484,7 @@ static const int s_S21ToS3[91] = {
 	/* 12 */ 8, // svc_SendTable [VERIFIED: msgArray[12] RFB = 1b + 32b length + payload]
 	/* 13 */ 9, // svc_ClassInfo [VERIFIED: msgArray[13] RFB = 16b count + per-class strings]
 	/* 14 */ 11, // svc_Playlists [VERIFIED: msgArray[14] RFB = 1b compressed + 32b length + BZ2 blob (max 0x7D000)]
-	/* 15 */ 12, // svc_CreateStringTable [VERIFIED: slot 15 RFB reads 24b dataLen (vs S3's 22b)]
+	/* 15 */ 12, // svc_CreateStringTable [VERIFIED: slot 15 RFB reads 24b dataLen (vs dedi's 22b)]
 	/* 16 */ 13, // svc_UpdateStringTable: 5b tableId + 1b count-present + [16b numEnt] + 20b dataLen; 16b exists only when the flag is set
 	/* 17 */ 14, // svc_VoiceData [VERIFIED: matches s3 wire format = 8b+16b+payload]
 	/* 18 */ 15, // svc_DurangoVoiceData [VERIFIED: matches s3 = 8b+16b+2b+1b+payload]
@@ -7507,7 +7507,7 @@ static const int s_S21ToS3[91] = {
 	/* 35 */ 33, // svc_SetTeam [7 bits]
 	/* 36 */ 34, // svc_PlaylistOverrides [15b length + 1b + blob]
 	/* 37 */ 35, // svc_AntiCheat
-	/* 38 */ -1, // svc_CustomMatchResponse (new, no S3 equiv)
+	/* 38 */ -1, // svc_CustomMatchResponse (new, no dedi equiv)
 	/* 39 */ -1, // svc_CustomMatchCreateOrJoinResp
 	/* 40 */ -1, // svc_CustomMatchGetStatsResp
 	/* 41 */ -1, // svc_NetHealth
@@ -7517,10 +7517,10 @@ static const int s_S21ToS3[91] = {
 	/* 45 */ -1, // svc_RelayTicket
 	/* 46 */ -1, // svc_MigrateParty
 	/* 47 */ -1, // svc_ConnectToDedi
-	/* 48 */ 41, // svc_TempEntities -- -VERIFIED: RFB = 32b m_tick(@+0x88) + 10b m_nNumEntries(@+0x20) + 24b m_nLength + blob + Seek; GetType vtbl-> returns 48. (Old table guessed DestructibleStaticProps -- wrong.) -> S3 41.
+	/* 48 */ 41, // svc_TempEntities -- -VERIFIED: RFB = 32b m_tick(@+0x88) + 10b m_nNumEntries(@+0x20) + 24b m_nLength + blob + Seek; GetType vtbl-> returns 48. (Old table guessed DestructibleStaticProps -- wrong.) -> dedi 41.
 	/* 49 */ 37, // svc_UserMessage
 	/* 50 */ 40, // svc_Snapshot
-	/* 51 */ -1, // S21 51 = inline-records msg (8b count + N*(10*u32) + 32b), NOT svc_TempEntities -- do not relay to S3. (TempEntities is S21 48.)
+	/* 51 */ -1, // S21 51 = inline-records msg (8b count + N*(10*u32) + 32b), NOT svc_TempEntities -- do not relay to dedi. (TempEntities is S21 48.)
 	/* 52 */ 42, // svc_Menu
 	/* 53 */ 44, // svc_DatatableChecksum
 	/* 54 */ -1, // svc_DeathRecap (new)
@@ -7532,7 +7532,7 @@ static const int s_S21ToS3[91] = {
 	/* 60 */ -1, // svc_RankScoreUpdated
 	/* 61 */ 45, // clc_ClientInfo (UNVERIFIED on S21 -- type may differ)
 	/* 62 */ -1, // (S21 doesn't have clc_Move at 62 -- it's at type 57; verified via msgArray dump + CLC_Move::GetType)
-	/* 63 */ 57, // clc_ClaimClientSidePickup (loot) -- -VERIFIED (GetType ->63; RFB 10-bit field). S3 type 57. (68, -5 shift. VoiceData's real S21 type is TBD.)
+	/* 63 */ 57, // clc_ClaimClientSidePickup (loot) -- -VERIFIED (GetType ->63; RFB 10-bit field). dedi type 57. (68, -5 shift. VoiceData's real S21 type is TBD.)
 	/* 64 */ 48, // clc_DurangoVoiceData (UNVERIFIED on S21)
 	/* 65 */ 60, // clc_ClientTick -- -VERIFIED: CLC_ClientTick::vftable=, vtable[7]=GetType= returns 65. (Old table claimed slot 65 was clc_LoadingProgress, which is wrong for S21.)
 	/* 66 */ 61, // clc_ClientSayText (text chat) -- -VERIFIED (GetType ->0x42). numbered chat 71; S21 numbers it 66. (PersistenceClientToken's real S21 type is TBD.)
@@ -7543,7 +7543,7 @@ static const int s_S21ToS3[91] = {
 	/* 71 */ 61, // clc_ClientSayText -- DISPROVEN: S21 71 is a BINARY msg, NOT chat. Real S21 chat type unknown; do NOT relay this as chat (corrupts the dedi packet).
 	/* 72 */ -1, // (gap)
 	/* 73 */ -1, // clc_AntiCheat -- never relay / never native ProcessAntiCheat
-	/* 74 */ 65, // clc_GamepadMsg -- -VERIFIED (GetType ->74; RFB reads 8-bit field). S3 type 65. (No shift: 74 == S21 74.)
+	/* 74 */ 65, // clc_GamepadMsg -- -VERIFIED (GetType ->74; RFB reads 8-bit field). dedi type 65. (No shift: 74 == S21 74.)
 	/* 75 */ -1, // clc_ControllerEventMsg (new)
 	/* 76 */ -1, // clc_ObserverCmdMsg
 	/* 77 */ -1, // clc_RoamingCameraPosMsg
@@ -7570,21 +7570,21 @@ int S21Bridge_TranslateNetMsgType(int msgType, bool bIncoming)
 
 	if (bIncoming)
 	{
-		// Incoming from S3 server -> translate S3 IDs to S21 IDs
+		// Incoming from dedi server -> translate dedi IDs to S21 IDs
 		if (msgType < 0 || msgType >= (int)ARRAYSIZE(s_S3ToS21))
 			return -1;
 		return s_S3ToS21[msgType];
 	}
 	else
 	{
-		// Outgoing to S3 server -> translate S21 IDs to S3 IDs
+		// Outgoing to dedi server -> translate S21 IDs to dedi IDs
 		if (msgType < 0 || msgType >= (int)ARRAYSIZE(s_S21ToS3))
 			return -1;
 		return s_S21ToS3[msgType];
 	}
 }
 
-// Phase 2: Parse an incoming S3 S2C netchannel packet to extract subchannel
+// Phase 2: Parse an incoming dedi S2C netchannel packet to extract subchannel
 // data (server nonce, subchannel seq). This runs on every netchannel packet
 static void S21Bridge_ParseS2CPacket(const uint8_t* data, int dataLen)
 {
@@ -7600,7 +7600,7 @@ static void S21Bridge_ParseS2CPacket(const uint8_t* data, int dataLen)
 		s_bridgeInSeqNr = seq;
 
 	// Check if this packet has the reliability/subchannel section
-	// In S3, the flags byte is at bit offset 64. The reliability section
+	// In dedi, the flags byte is at bit offset 64. The reliability section
 	int bitPos = 72; // after [32 seq][32 ack][8 flags]
 	if (flags & 0x10)
 		bitPos += 8; // choked count sits between flags and nonce_present
@@ -7806,7 +7806,7 @@ static bool S21Bridge_Handle0x4F(const uint8_t* data, int dataLen)
 	if (data[4] != 0x4F)
 		return false;
 
-	// Parse ACTUAL S3 DataBlock header (19-byte header)
+	// Parse ACTUAL dedi DataBlock header (19-byte header)
 	// Binary uses WriteShort for transferId/transferNr/blockNr (not WriteByte as SDK says)
 	const uint8_t* p = data + 5; // after FFFFFFFF + 4F
 	uint16_t transferId;
@@ -8238,7 +8238,7 @@ bool S21Bridge_PollReceive(int iSocket, netpacket_s* pInpacket)
 		}
 
 		// ── Split packet reassembly (NET_HEADER_FLAG_SPLITPACKET = 0xFFFFFFFE) ──
-		// S3 server fragments netchan packets > MTU into multiple UDP datagrams.
+		// dedi server fragments netchan packets > MTU into multiple UDP datagrams.
 		// We must reassemble all fragments before processing as a netchan packet.
 		if (hdr4 == 0xFFFFFFFE && recvd >= 12)
 		{
@@ -8516,7 +8516,7 @@ bool S21Bridge_PollReceive(int iSocket, netpacket_s* pInpacket)
 	*reinterpret_cast<int*>(pktBase + 0x7C) = recvd; // wiresize
 	*reinterpret_cast<int*>(pktBase + 0x78) = recvd; // size
 
-	// Set source address in S21 netadr_t layout (32 bytes, NOT S3's 24 bytes).
+	// Set source address in S21 netadr_t layout (32 bytes, NOT dedi's 24 bytes).
 	// match: type(+0,4B)=3, addr(+4,16B), port(+20,2B), slot(+23,1B)
 	{
 		// S21 netadr_t occupies bytes 0-31 of netpacket_s

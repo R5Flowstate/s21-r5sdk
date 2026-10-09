@@ -17,6 +17,7 @@ bool TriggerCannon_IsPreparingLaunch(const void* pTrigger);
 bool TriggerCannon_SetLaunchTargetLocation(void* pTrigger, const float target[3]);
 bool TriggerCannon_GetLaunchDir(const void* pTrigger, float outDir[3]);
 bool TriggerCannon_SetEnableDoubleJump(void* pTrigger, bool bEnable);
+bool TriggerCannon_GetEnableDoubleJump(const void* pTrigger);
 bool TriggerCannon_SetLaunchAirControlParams(void* pTrigger, float flSpeed, float flAccel);
 bool TriggerCannon_SetLimitedAirControl(void* pTrigger, bool bLimited);
 void TriggerCannon_OnJumpPadLaunched(void* pPlayer, void* pTrigger);

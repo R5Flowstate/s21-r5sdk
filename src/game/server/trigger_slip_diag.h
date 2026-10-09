@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: live diagnostics for S3 CTriggerSlip touch + force application.
+// Purpose: live diagnostics for dedi CTriggerSlip touch + force application.
 //
 //=============================================================================//
 #ifndef TRIGGER_SLIP_DIAG_H

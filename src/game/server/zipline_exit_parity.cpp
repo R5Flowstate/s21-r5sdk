@@ -2094,7 +2094,7 @@ static bool Hook_Zipline_Find(uintptr_t player,
 	}
 
 	// Accept/reject stays engine-owned. Only rewrite reverse + use position for
-	// a ziprail that has a baked path (S3 has no rail mount concept).
+	// a ziprail that has a baked path (dedi has no rail mount concept).
 	int railParity = 0;
 	float useRail[3] = {};
 	int revRail = 0;
@@ -2264,7 +2264,7 @@ static char __fastcall Hook_Zipline_JumpOff(void* zip, void* player, float* velo
 	Vector3D fwd;
 	AngleVectors(eye, &fwd);
 
-	// Near-vertical look uses an unresolved S3 move-direction helper -- decline.
+	// Near-vertical look uses an unresolved dedi move-direction helper -- decline.
 	if (fabsf(fwd.x) < 0.01f && fabsf(fwd.y) < 0.01f)
 	{
 		if (!s_bWarnedNearVerticalLook)

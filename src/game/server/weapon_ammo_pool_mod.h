@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: Let a weapon mod override ammo_pool_type on the S3 dedi.
+// Purpose: Let a weapon mod override ammo_pool_type on the dedi.
 //
 // The engine only applies mod entries inside the 0x1150 settings block
 // (WeaponInfo+0x12E8). ammo_pool_type lives at WeaponInfo+0x268, so a mod like

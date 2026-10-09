@@ -21,7 +21,7 @@ enum WeaponInventorySlot_t
 };
 
 //-----------------------------------------------------------------------------
-// S21: anti_titan=5, gadget=6, dualprimary from 7. S3 packs anti-titan at 4.
+// S21: anti_titan=5, gadget=6, dualprimary from 7. dedi packs anti-titan at 4.
 // Dual-wield partner is main+7, not main+5.
 //-----------------------------------------------------------------------------
 enum WeaponInventorySlotS21_t

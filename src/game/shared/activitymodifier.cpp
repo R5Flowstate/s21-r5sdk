@@ -337,7 +337,7 @@ static void CC_ActivityModifier_Dump(const CCommand& args)
 	ListAllActivityModifiers();
 }
 
-static ConCommand activitymodifier_dump("activitymodifier_dump", CC_ActivityModifier_Dump, "List registered activity modifiers", FCVAR_RELEASE);
+static ConCommand activitymodifier_dump("activitymodifier_dump", CC_ActivityModifier_Dump, "List registered activity modifiers", FCVAR_DEVELOPMENTONLY);
 
 static void CC_ActivityModifier_Reload(const CCommand& args)
 {

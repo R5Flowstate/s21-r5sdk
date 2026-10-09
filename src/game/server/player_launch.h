@@ -1,7 +1,7 @@
 //=============================================================================//
 //
-// Purpose: S3 port of C_Player::PlayerLaunch / CGameMovement::ApplyPlayerLaunch.
-// Sidecar + DT_LocalPlayerExclusive value proxies; S3 has no native cluster.
+// Purpose: dedi port of C_Player::PlayerLaunch / CGameMovement::ApplyPlayerLaunch.
+// Sidecar + DT_LocalPlayerExclusive value proxies; dedi has no native cluster.
 //
 //=============================================================================//
 #ifndef PLAYER_LAUNCH_H

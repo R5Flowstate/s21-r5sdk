@@ -18,6 +18,7 @@
 #include "rtech/pak/mapedit_paks_cl.h"
 #include "game/client/mantle_boost_rui.h"
 #include "game/client/wall_launch.h"
+#include "game/client/source_push.h"
 #include "game/client/double_jump_power.h"
 #include "game/client/demo_natives.h"
 #if defined(SDK_WIP)
@@ -80,6 +81,7 @@ static void EnsureLateNativeRegistration(uint8_t vmType, CSquirrelVM* s)
 				ClassVar_RegisterClientFunctions(vm);
 				MantleBoostRui_RegisterClientFunctions(vm);
 				WallLaunchClient_RegisterClientFunctions(vm);
+				SourcePushClient_RegisterClientFunctions(vm);
 				DoubleJumpPowerClient_RegisterClientFunctions(vm);
 				MapEditPaks_RegisterClientFunctions(vm);
 				Demo_RegisterClientFunctions(vm);

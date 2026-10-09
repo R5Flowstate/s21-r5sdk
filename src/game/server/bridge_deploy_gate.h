@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: S3 CWeaponX::DeployWeapon first-raise / sprint order parity with S21.
+// Purpose: dedi CWeaponX::DeployWeapon first-raise / sprint order parity with S21.
 //
 //=============================================================================//
 #ifndef BRIDGE_DEPLOY_GATE_H

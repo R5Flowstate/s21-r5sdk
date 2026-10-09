@@ -52,6 +52,7 @@ struct CubemapCapture_t
 	int nFrame;
 	int nWritten;
 	int nViewModelWas;
+	int nMismatch;
 };
 
 static float s_samples[CUBEMAP_MAX_SAMPLES][3];
@@ -253,13 +254,53 @@ static void CubemapCapture_Finish(const bool bComplete)
 		bComplete ? "done" : "stopped", s_cap.nWritten, s_szMap);
 }
 
+// True when the last rendered main view stood at the current face's pose. A frame
+// rendered from any other camera must neither settle nor be read back.
+static bool CubemapCapture_RenderedIsFace(void)
+{
+	float org[3], fwd[3];
+	if (!SceneView_GetMainCamera(org, fwd, nullptr, nullptr, nullptr, nullptr))
+		return false;
+	const float* const want = s_samples[s_cap.nSample];
+	const float dx = org[0] - want[0], dy = org[1] - want[1], dz = org[2] - want[2];
+	if (dx * dx + dy * dy + dz * dz > 4.0f)
+		return false;
+	const float p = s_faceAngles[s_cap.nFace][0] * 0.01745329f;
+	const float y = s_faceAngles[s_cap.nFace][1] * 0.01745329f;
+	const float dot = fwd[0] * cosf(p) * cosf(y) + fwd[1] * cosf(p) * sinf(y) - fwd[2] * sinf(p);
+	return dot > 0.999f;
+}
+
+bool CubemapCapture_CurrentView(float* const pOrigin, float* const pAngles)
+{
+	if (!s_cap.bActive)
+		return false;
+	memcpy(pOrigin, s_samples[s_cap.nSample], 3 * sizeof(float));
+	pAngles[0] = s_faceAngles[s_cap.nFace][0];
+	pAngles[1] = s_faceAngles[s_cap.nFace][1];
+	pAngles[2] = 0.0f;
+	return true;
+}
+
 bool CubemapCapture_OverrideView(float* const pOrigin, float* const pAngles, float* const pFov)
 {
 	if (!s_cap.bActive || !pOrigin || !pAngles)
 		return false;
 
+	if (!CubemapCapture_RenderedIsFace())
+	{
+		s_cap.nFrame = 0;
+		if (++s_cap.nMismatch == 240)
+		{
+			Warning(eDLL_T::CLIENT, "[CUBEMAP-CAPTURE] cubemap %d face %d: the screen is not showing the capture camera; "
+				"leave third person / spectator and stay alive\n", s_cap.nSample, s_cap.nFace);
+		}
+	}
+	else
+		s_cap.nMismatch = 0;
+
 	const int settle = s_cap.nFace == 0 ? cubemap_capture_settle_first.GetInt() : cubemap_capture_settle.GetInt();
-	if (++s_cap.nFrame > settle)
+	if (s_cap.nMismatch == 0 && ++s_cap.nFrame > settle)
 	{
 		// The frame just finished rendered this face; read it before moving on.
 		if (!CubemapCapture_ReadFace())

@@ -3,8 +3,8 @@
 
 //=============================================================================//
 //
-// Purpose: S21 WCAF_* custom-activity semantics on the S3 weapon.
-// Scripts pass S21 flags; the engine keeps S3 bits; the wire carries S21.
+// Purpose: S21 WCAF_* custom-activity semantics on the dedi weapon.
+// Scripts pass S21 flags; the engine keeps dedi bits; the wire carries S21.
 //
 //=============================================================================//
 
@@ -13,7 +13,7 @@
 struct ScriptClassDescriptor_t;
 class CSquirrelVM;
 
-// S21 m_customActivityFlags for the send proxy, given the weapon's S3 byte.
+// S21 m_customActivityFlags for the send proxy, given the weapon's dedi byte.
 int  WeaponCustomAct_WireFlags(void* pWeapon, int s3Flags);
 // Called from the engine StartCustomActivity detour on every start.
 void WeaponCustomAct_OnEngineStart(void* pWeapon);

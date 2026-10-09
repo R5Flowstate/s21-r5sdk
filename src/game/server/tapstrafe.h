@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: S21 mantle_boost suppression gate for native S3 tap-strafe.
+// Purpose: S21 mantle_boost suppression gate for native dedi tap-strafe.
 // Masks directional press bits around AirMove while state==4.
 //
 //=============================================================================//

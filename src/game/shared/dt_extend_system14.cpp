@@ -1314,7 +1314,7 @@ void DTExtend_Apply(void** tables, int count)
 
 	DTExtend_RetargetNonRewindSendProps();
 
-	// --- DT_Player.m_passives 2 -> 3 element resize (SNDC method + tail-zero) --- S3 sends m_passives as a 2-element Int64 array (128 passives @ CPlayer+0x5FF0); the S21 client's RecvProp is array[3] (192).
+	// --- DT_Player.m_passives 2 -> 3 element resize (SNDC method + tail-zero) --- dedi sends m_passives as a 2-element Int64 array (128 passives @ CPlayer+0x5FF0); the S21 client's RecvProp is array[3] (192).
 	// The shape mismatch left the prop ?_unmatched on the client, so BOTH real passive words were discarded.
 	{
 		uintptr_t playerTable = 0;
@@ -1400,11 +1400,11 @@ void DTExtend_Apply(void** tables, int count)
 		}
 	}
 
-	// --- DT_HighlightSettings full rebuild to the S21 6-member shape (HUD highlights) --- The S21 highlight subsystem fully diverged from S3: only m_highlightTeamBits is name-shared (S3 scalar @ +0x21C / ctx @ +0x218 -> S21 per-context Int32[8]).
-	// The S3 dedi shipping its raw 7-member DT_HighlightSettings left the S21 client with 6 ?_unmatched array/datatable nodes (m_highlightParams/FunctionBits/ServerFade*/ ServerContextID) that mis-consume in the enter-PVS instance-baseline decode -> bitstream desync -> spawn crash (canyonlands_hu CDynamicProp).
+	// --- DT_HighlightSettings full rebuild to the S21 6-member shape (HUD highlights) --- The S21 highlight subsystem fully diverged from dedi: only m_highlightTeamBits is name-shared (dedi scalar @ +0x21C / ctx @ +0x218 -> S21 per-context Int32[8]).
+	// The dedi shipping its raw 7-member DT_HighlightSettings left the S21 client with 6 ?_unmatched array/datatable nodes (m_highlightParams/FunctionBits/ServerFade*/ ServerContextID) that mis-consume in the enter-PVS instance-baseline decode -> bitstream desync -> spawn crash (canyonlands_hu CDynamicProp).
 	DTExtend_RebuildHighlightSettings(tables, count);
 
-	// --- Time/Ticks codec divergence --- DPT_Time(9)/DPT_Ticks(8) wire formats diverge S3<->S21 (the S21 decoders Time_Read / Ticks_Read are network-time-relative variable-width codecs).
+	// --- Time/Ticks codec divergence --- DPT_Time(9)/DPT_Ticks(8) wire formats diverge dedi<->S21 (the S21 decoders Time_Read / Ticks_Read are network-time-relative variable-width codecs).
 	// The reconciliation is now ENCODE-side, NOT a send-table retype: snapshot_diag.cpp's DT_EncodePropValue hook (bridge_time_encode) emits the S21 wire format directly, keeping the prop type-9/8 so SNDC m_times native dispatch is preserved.
 
 	// --- SNDC Entity Factory Growth --- Walk the factory linked list, find each SNDC factory by name, patch allocSize (+0x1C) to fit the resized arrays.
@@ -1552,7 +1552,7 @@ void DTExtend_PostApplyS21Overrides(void** tables, int count)
 		}
 
 		// Find parent wrapper SendTable from factory list. wireParentDT wins
-		// where the S21 inheritance chain diverges from the S3 entity chain --
+		// where the S21 inheritance chain diverges from the dedi entity chain --
 		// only the transmitted tree moves, the entity stays parentFactory's.
 		const char* cloneSrcDT =
 			def.wireParentDT ? def.wireParentDT : def.parentDT;
@@ -1749,7 +1749,7 @@ void DTExtend_PostApplyS21Overrides(void** tables, int count)
 			*(uintptr_t*)(zpProps + 0x70) = (uintptr_t)clonedWrapper;
 			*(uintptr_t*)(zpProps + SP_PARENTTABLE) = (uintptr_t)slot.wrapperTable;
 
-			// Donors, all native S3 props living in the DT_Zipline clone.
+			// Donors, all native dedi props living in the DT_Zipline clone.
 			uint8_t* zpIntDonor  = ZiprailWire_FindRootProp(clonedWrapper, "m_ziplineMaterialIndex", 0);
 			uint8_t* zpBoolDonor = ZiprailWire_FindRootProp(clonedWrapper, "m_ziplineEnabled", 0);
 			uint8_t* zpArrDonor  = ZiprailWire_FindRootProp(clonedWrapper, "m_ziplineRestPositions", 10);
@@ -2070,7 +2070,7 @@ void DTExtend_PostApplyS21Overrides(void** tables, int count)
 			"after S21 ServerClass deep-clone");
 }
 
-// S3 networks path arrays natively; no flatten exclusion.
+// dedi networks path arrays natively; no flatten exclusion.
 // Flag 0x100 only keeps the array OFF the precalc's PROXIED datatable list; pack resolves element base as entityBase+accumOffset (+0x4FC).
 
 // [ZIPRAIL-ISO] isolation suite retired with the array-flatten wall. Do not
@@ -2208,7 +2208,7 @@ static void __fastcall OffhandSlotExt_ShadowProxy(void* pProp, void* pStruct,
 	*(uint64_t*)pOut       = 0;
 	*((uint64_t*)pOut + 1) = 0;
 	*((uint64_t*)pOut + 2) = 0;
-	// S21 RecvProxy_IntToEHandle invalid is 0xFFFFFF, not S3 0xFFFFFFFF.
+	// S21 RecvProxy_IntToEHandle invalid is 0xFFFFFF, not dedi 0xFFFFFFFF.
 	*(uint32_t*)pOut = 0x00FFFFFFu;
 
 	int propOff = -1;
@@ -2247,7 +2247,7 @@ static void __fastcall OffhandSlotExt_ShadowProxy(void* pProp, void* pStruct,
 	}
 
 	const uint32_t eh = OffhandSlotsExt_GetServer(pPlayer, slot);
-	// Shadow is an S3 memory EHANDLE. Cloning prop[5] replaced the native
+	// Shadow is a dedi memory EHANDLE. Cloning prop[5] replaced the native
 	// SendPropEHandle packer, so we have to emit S21 wire form ourselves.
 	const int32_t wire = SDKEntityState_PackS21RecvEHandle(static_cast<int32_t>(eh));
 	*(uint32_t*)pOut = static_cast<uint32_t>(wire);
@@ -2552,7 +2552,7 @@ void DTExtend_BuildDeathFieldArrays(void** tables, int count)
 		else
 		{
 			// No registered table of this name yet -- allocate and clone a real
-			// S3 SendTable so engine-internal fields stay valid (CANON precedent).
+			// dedi SendTable so engine-internal fields stay valid (CANON precedent).
 			sub = static_cast<uint8_t*>(malloc(NR_SENDTABLE_SIZE));
 			if (!sub) { free(children); continue; }
 			memcpy(sub, (void*)cloneBase, NR_SENDTABLE_SIZE);
@@ -3416,7 +3416,7 @@ void DTExtend_BuildConnectionQualityIndex(void** tables, int count)
 	ConnQuality_Prime();
 }
 
-// S3's sets child names via [k] which holds unbracketed `000N` strings.
+// dedi's sets child names via [k] which holds unbracketed `000N` strings.
 // Bridge name-match fails -> client [DEC-FLAT] shows '?_unmatched' for every weapons / offhandWeapons / activeWeapons child today; the bits get consumed by the dummy-skip cave and the value never reaches S21 entity bytes.
 struct BracketizeCtx {
 	uintptr_t visited[1024];
@@ -3452,7 +3452,7 @@ static void DTExtend_BracketizeRecursive(uint8_t* table, BracketizeCtx& ctx, int
 	int touched = 0;
 
 	// Pass 1: array element template bracketize.
-	// S21 native names array element templates as `m_X[0]` while S3 dedi emits a duplicate bare `m_X` immediately before the array DataTable's bare `m_X`.
+	// S21 native names array element templates as `m_X[0]` while dedi emits a duplicate bare `m_X` immediately before the array DataTable's bare `m_X`.
 	for (int j = 0; j + 1 < nProps; ++j)
 	{
 		uint8_t* p0 = props + static_cast<uint64_t>(j) * SP_SIZE;
@@ -3528,7 +3528,7 @@ static void DTExtend_BracketizeRecursive(uint8_t* table, BracketizeCtx& ctx, int
 
 // ============================================================================
 // PROP RELOCATION (cross-scope match enabler) The bridge matcher pairs SendProps to RecvProps by NAME within sub-table scope -- it walks both trees in parallel and only matches a wire prop to a recv prop at the SAME tree position.
-// When the dedi (S3 SendTable) emits a prop at top-level but the S21 client has the equivalent RecvProp nested inside a DataTable child (or vice versa), the names exist in both trees but the matcher never sees them as candidates.
+// When the dedi (dedi SendTable) emits a prop at top-level but the S21 client has the equivalent RecvProp nested inside a DataTable child (or vice versa), the names exist in both trees but the matcher never sees them as candidates.
 struct PropRelocation {
 	const char* sourceTableName;
 	const char* propName;
@@ -3931,7 +3931,7 @@ void DTExtend_CopyProps()
 }
 
 // ============================================================================
-// WRAPPER TABLE INSERTION (chain-mismatch fixer) When S21 added an inheritance level the dedi's S3 SendTable chain doesn't have (e.g.
+// WRAPPER TABLE INSERTION (chain-mismatch fixer) When S21 added an inheritance level the dedi's dedi SendTable chain doesn't have (e.g.
 // CPlayerDecoy on S21 inherits via DT_BaseAnimatingOverlay between DT_PlayerDecoy and DT_BaseAnimating, but the dedi's CPlayerDecoy goes straight DT_PlayerDecoy -> DT_BaseAnimating), the matcher's parallel depth-first walk hits a structural mismatch one level in: wire's first inheritance child name is DT_BaseAnimating, recv's is DT_BaseAnimatingOverlay.
 struct WrapperInsertion {
 	const char* parentTableName;    // table whose inheritance child gets re-targeted

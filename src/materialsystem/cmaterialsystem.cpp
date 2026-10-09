@@ -129,7 +129,7 @@ CMaterialGlue* CMaterialSystem::FindMaterialEx(CMaterialSystem* pMatSys, const c
 {
 	CMaterialGlue* const pMaterial = CMaterialSystem__FindMaterialEx(pMatSys, pMaterialName, nMaterialType, nUnk, bComplain);
 
-	// Miss returns g_ppErrorMaterials[type]. Do not use S3 IsErrorMaterial vftable[0].
+	// Miss returns g_ppErrorMaterials[type]. Do not use dedi IsErrorMaterial vftable[0].
 	if ((bComplain || mat_alwaysComplain.GetBool()) && pMaterialName && pMaterial && g_ppErrorMaterials)
 	{
 		CMaterialGlue* const* const ppErrorMaterials = *g_ppErrorMaterials;

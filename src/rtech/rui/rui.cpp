@@ -1337,7 +1337,7 @@ static void Rui_PatchDrawImageTilingLite()
 }
 
 //=============================================================================
-// ruiFunc shadow buffer: remap S3 fields, never write the original state.
+// ruiFunc shadow buffer: remap dedi fields, never write the original state.
 //=============================================================================
 
 struct FieldRemap
@@ -1350,19 +1350,19 @@ static constexpr size_t SHADOW_STATE_SIZE = 0x1000;
 
 typedef void (*RuiFunc_t)(void*, void*, void*, char*);
 
-// S3->S16: player fields +0xA4/+0xC8 vs +0xA8/+0xDC. Zero fields S3 does not have.
+// dedi->S16: player fields +0xA4/+0xC8 vs +0xA8/+0xDC. Zero fields dedi does not have.
 static void Rui_RemapStateS3toS16(uint8_t* shadow, const uint8_t* s)
 {
-	// Everything below +0xA0 is identical between S3 and S16 (camera, viewport, time)
+	// Everything below +0xA0 is identical between dedi and S16 (camera, viewport, time)
 	// Already copied by memcpy. Only remap +0xA0 onwards.
 
 	auto rd32 = [&](uint32_t off) -> uint32_t { return *reinterpret_cast<const uint32_t*>(s + off); };
 	auto wr32 = [&](uint32_t off, uint32_t val) { *reinterpret_cast<uint32_t*>(shadow + off) = val; };
 
-	// +0xA0 killReplay.changeTime (same). +0xA4 is isUsingController on S3; zero isWatching.
+	// +0xA0 killReplay.changeTime (same). +0xA4 is isUsingController on dedi; zero isWatching.
 	wr32(0xA4, 0);
 
-	// --- Player Section: S3 +0xA4..+0xC7 -> S16 +0xA8..+0xDB ---
+	// --- Player Section: dedi +0xA4..+0xC7 -> S16 +0xA8..+0xDB ---
 	wr32(0xA8, rd32(0xA4));  // isUsingController
 	wr32(0xAC, rd32(0xA8));  // isAlive
 	wr32(0xB0, rd32(0xAC));  // isSpectator
@@ -1373,15 +1373,15 @@ static void Rui_RemapStateS3toS16(uint8_t* shadow, const uint8_t* s)
 	wr32(0xC4, rd32(0xC0));  // sniperScopeEquipped
 	wr32(0xC8, rd32(0xC4));  // isViewingDeathScreen
 
-	// Fields that DON'T exist in S3 -- zero them
-	wr32(0xCC, 0);  // isPureSpectator (added post-S3)
-	wr32(0xD0, 0);  // isThirdPerson (added post-S3)
-	wr32(0xD4, 0);  // isDrivingHoverVehicle (added post-S3)
-	wr32(0xD8, 0);  // crosshairADSFrac (added post-S3, float 0.0)
+	// Fields that DON'T exist in dedi -- zero them
+	wr32(0xCC, 0);  // isPureSpectator (added post-dedi)
+	wr32(0xD0, 0);  // isThirdPerson (added post-dedi)
+	wr32(0xD4, 0);  // isDrivingHoverVehicle (added post-dedi)
+	wr32(0xD8, 0);  // crosshairADSFrac (added post-dedi, float 0.0)
 
-	// --- Game Section: S3 +0xC8..+0xF3 -> S16 +0xDC..+0x107 ---
+	// --- Game Section: dedi +0xC8..+0xF3 -> S16 +0xDC..+0x107 ---
 	// Shift entire game block +0x14 (20 bytes) to make room for 5 new player fields
-	// S3 game: friendlyColor(12B) + enemyColor(12B) + partyColor(12B) + announcement(8B) = 44B
+	// dedi game: friendlyColor(12B) + enemyColor(12B) + partyColor(12B) + announcement(8B) = 44B
 	for (int i = 0; i < 44; i += 4)
 		wr32(0xDC + i, rd32(0xC8 + i));
 
@@ -1396,7 +1396,7 @@ static void Rui_RuiFuncTrampoline(
 {
 	uint8_t* s = reinterpret_cast<uint8_t*>(state);
 
-	// Shadow buffer approach: copy S3 state, remap to S16 layout, call, discard
+	// Shadow buffer approach: copy dedi state, remap to S16 layout, call, discard
 	alignas(16) uint8_t shadow[SHADOW_STATE_SIZE];
 	memcpy(shadow, s, SHADOW_STATE_SIZE);
 	Rui_RemapStateS3toS16(shadow, s);

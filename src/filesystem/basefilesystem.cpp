@@ -129,7 +129,7 @@ void CBaseFileSystem::VAddMapPackFile(CBaseFileSystem* pFileSystem, const char* 
 	// Since the mounting of the packfile lump is performed before the BSP header
 	// is loaded and parsed, we have to do it here. The internal 'AddMapPackFile'
 	// function has been patched to load the fields in the global 's_MapHeader'
-	// field, instead of the one that is getting initialized (see r5apex.patch).
+	// field, instead of the one that is getting initialized.
 	if (s_MapHeader->ident != IDBSPHEADER || s_MapHeader->version != BSPVERSION)
 	{
 		FileHandle_t hBspFile = FileSystem()->Open(pPath, "rb", pPathID);

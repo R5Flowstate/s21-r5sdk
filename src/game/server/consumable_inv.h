@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: u16 full-type shadow for S3 m_consumableInventory {u8 type,u8 count}
+// Purpose: u16 full-type shadow for dedi m_consumableInventory {u8 type,u8 count}
 // at CPlayer+0x5FAC -- S21 loot indices exceed 255.
 //
 //=============================================================================//

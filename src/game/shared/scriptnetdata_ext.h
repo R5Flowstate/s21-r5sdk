@@ -49,7 +49,7 @@ void ScriptNetDataExt_ClearEngineCallbacks();
 
 // TriggerGlobalChangeCallbacks — fires all registered netvar change callbacks
 // for the GLOBAL entity. Called once from cl_mapspawn.gnut after init.
-// S3 doesn't have this native; S21+ scripts expect it.
+// dedi doesn't have this native; S21+ scripts expect it.
 void ScriptNetDataExt_TriggerGlobalChangeCallbacks();
 
 class VScriptNetDataExt : public IDetour

@@ -11,6 +11,9 @@
 #include "game/client/move_sim_trace.h"
 #include "game/client/wallclimb.h"
 #include "game/client/wall_launch.h"
+#include "game/client/slope_launch.h"
+#include "game/client/autobunnyhop.h"
+#include "game/client/source_push.h"
 #if defined(SDK_WIP)
 #include "game/client/portal/portal_teleport.h"
 #endif // SDK_WIP
@@ -87,6 +90,8 @@ static __int64 __fastcall Hook_CGameMovement_FullWalkMove(void* ctx)
 	if (!ctx || !v_CGameMovement__FullWalkMove)
 		return 0;
 
+	AutoBunnyHopClient_BeforeFullWalkMove(ctx);
+	SourcePushClient_BeforeFullWalkMove(ctx);
 	WallLaunchClient_BeforeFullWalkMove(ctx);
 #if defined(SDK_WIP)
 	if (uint8_t* const pPortalMv = *reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(ctx) + MT_CTX_OFF_MV))
@@ -97,6 +102,8 @@ static __int64 __fastcall Hook_CGameMovement_FullWalkMove(void* ctx)
 	if (nMode <= 0)
 	{
 		const __int64 nTapOnly = v_CGameMovement__FullWalkMove(ctx);
+		SourcePushClient_AfterFullWalkMove(ctx);
+		SlopeLaunchClient_AfterFullWalkMove(ctx);
 		WallClimbTap_AfterFullWalkMove(ctx);
 		WallLaunchClient_AfterFullWalkMove(ctx);
 #if defined(SDK_WIP)
@@ -118,6 +125,8 @@ static __int64 __fastcall Hook_CGameMovement_FullWalkMove(void* ctx)
 	if (!player || !mv)
 	{
 		const __int64 nNoPlayer = v_CGameMovement__FullWalkMove(ctx);
+		SourcePushClient_AfterFullWalkMove(ctx);
+		SlopeLaunchClient_AfterFullWalkMove(ctx);
 		WallClimbTap_AfterFullWalkMove(ctx);
 		WallLaunchClient_AfterFullWalkMove(ctx);
 		return nNoPlayer;
@@ -140,6 +149,8 @@ static __int64 __fastcall Hook_CGameMovement_FullWalkMove(void* ctx)
 	const float flVX = pVel[0], flVY = pVel[1], flVZ = pVel[2];
 
 	const __int64 nResult = v_CGameMovement__FullWalkMove(ctx);
+	SourcePushClient_AfterFullWalkMove(ctx);
+	SlopeLaunchClient_AfterFullWalkMove(ctx);
 	WallClimbTap_AfterFullWalkMove(ctx);
 	WallLaunchClient_AfterFullWalkMove(ctx);
 #if defined(SDK_WIP)

@@ -16,6 +16,9 @@ void OffhandJumpToggle_OnHolster(void* pWeapon, bool bFast, const void* pCaller)
 // The main hand holds a jump-toggle offhand that this command's offhand frame
 // has already holstered; its deactivate callback runs after movement.
 bool OffhandJumpToggle_IsReleasing(const void* pPlayer);
+// The glide ended on the ground: a jump offhand still charging in the main hand
+// holsters now instead of waiting for the jump button to be released.
+void OffhandJumpToggle_ReleaseOnLanding(void* pPlayer);
 // Player_SwitchToOffhand is detoured by VOffhandActivationPatches; that hook reports the switched offhand here.
 void OffhandJumpToggle_PostSwitchToOffhand(void* pPlayer, void* pOffhand);
 

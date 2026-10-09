@@ -39,7 +39,7 @@ static ConVar bridge_weap_select_mirror_hold("bridge_weap_select_mirror_hold", "
 	"Seconds to hold the mirrored m_selectedWeapons value before resetting it to "
 	"-1 (cleared). Must outlive at least one snapshot.");
 
-// Server CBaseCombatCharacter offsets (S3 dedi): m_selectedWeapons +0x16D8,
+// Server CBaseCombatCharacter offsets (dedi): m_selectedWeapons +0x16D8,
 // activeWeapons +0x16CC + 4*slot. Do not use client-half offsets.
 static constexpr uintptr_t WEAPSEL_SELECTED_OFF     = 0x16D8; // m_selectedWeapons[2], int8 per active slot
 static constexpr uintptr_t WEAPSEL_ACTIVE_NATIVE    = 0x16CC; // server activeWeapons[3] (DT-visible), EHandle per slot
@@ -69,7 +69,7 @@ static int WeapSelMirror_Apply(void* player, unsigned int slot, __int64 weaponEn
 	if (newEH == oldActiveEH) // no-op activation (native early-outs too)
 		return -1;
 
-	// Locate the weapon in the 9-slot S3 backpack; the wire grafts
+	// Locate the weapon in the 9-slot dedi backpack; the wire grafts
 	// weapons 1:1 by position, so this index IS the client-side
 	// Inv_GetNormalWeapon_Client index.
 	int backpackSlot = -1;
@@ -331,7 +331,7 @@ void WeaponSelectMirror_GetFun(void)
 		Warning(eDLL_T::SERVER,
 			"[WEAP-SEL] SetActiveWeapon pattern UNRESOLVED -- mirror NOT installed\n");
 
-	// S3 direct weapon-select handler. Hook for [WEAP-DSEL].
+	// dedi direct weapon-select handler. Hook for [WEAP-DSEL].
 	Module_FindPattern(g_GameDll,
 		"40 55 48 83 EC 40 0F B7 C2 48 8B E9 66 C1 E8 08 84 C0 0F 88 40 02 00 00 4C 0F BE C0 48 89 5C 24 50 41 83 F8 09")
 		.GetPtr(v_WeaponDirectSelect);

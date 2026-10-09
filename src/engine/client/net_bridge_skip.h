@@ -292,7 +292,7 @@ inline bool S21Bridge_SkipNonSendTable(const uint8_t* pData, int nTotalBits, int
 	}
 	case 41:
 	{
-		// svc_TempEntities S3 wire: 32b tick + 10b entries + 22b len +
+		// svc_TempEntities dedi wire: 32b tick + 10b entries + 22b len +
 		// len-bit blob (inject handler reads the same widths).
 		if (nBitPos + 32 + 10 + 22 > nTotalBits)
 			return false;

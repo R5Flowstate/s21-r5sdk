@@ -25,12 +25,12 @@ void NetObserver_PushClientConvars();
 struct netpacket_s;
 bool S21Bridge_PollReceive(int iSocket, netpacket_s* pInpacket);
 
-// Translate net message type IDs between S3 and S21 enumerations.
+// Translate net message type IDs between dedi and S21 enumerations.
 int S21Bridge_TranslateNetMsgType(int msgType, bool bIncoming);
 
-// S3-format netchannel compatibility hooks.
+// dedi-format netchannel compatibility hooks.
 // When the bridge is active, these replace the S21 engine's ProcessPacket
-// and SendDatagram to speak S3 netchannel format on the wire.
+// and SendDatagram to speak dedi netchannel format on the wire.
 class CNetChan;
 struct netpacket_s;
 class bf_write;
@@ -48,7 +48,7 @@ int S21Bridge_GetConnectionPingMs(void);
 // Ms since last successful C2S flush / engine frame. -1 if never stamped.
 double S21BridgeDiag_MsSinceC2SFlush(void);
 double S21BridgeDiag_MsSinceEngineFrame(void);
-// CNetChan::SendNetMsg. SDK CNetChan layout is S3 and does not match S21.
+// CNetChan::SendNetMsg. SDK CNetChan layout is dedi and does not match S21.
 char S21Bridge_Hook_SendNetMsg(void* pChan, void* pMsg, char bForceReliable, char bVoice);
 
 //-----------------------------------------------------------------------------

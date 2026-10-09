@@ -16,7 +16,7 @@
 #include "tier0/dbg.h"
 #include <cstddef>
 
-static constexpr ptrdiff_t kContextAction = 0x17FC; // S3 server BCC m_contextAction
+static constexpr ptrdiff_t kContextAction = 0x17FC; // dedi server BCC m_contextAction
 static constexpr int kContextActionNone  = 0;
 static constexpr int kContextActionEmote = 13;
 

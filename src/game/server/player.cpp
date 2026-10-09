@@ -511,6 +511,9 @@ static ConVar bridge_cmdqueue_govern("bridge_cmdqueue_govern", "1", FCVAR_RELEAS
 // shave below that re-inflates at execute time.
 static constexpr float CMDQ_MIN_FRAMETIME = 0.003f;
 
+// Below this speed (units/s, squared) a grounded player with no input is at rest.
+static constexpr float CMDQ_REST_SPEED_SQR = 1.0f;
+
 static ConVar bridge_cmdqueue_slack_ms("bridge_cmdqueue_slack_ms", "15", FCVAR_RELEASE,
 	"[CMDQ] largest curTime slack granted per simulate call, milliseconds. Raised to "
 	"the head command's own frametime when that is larger, and never above one tick.",
@@ -532,9 +535,9 @@ static float Player_QueuedCommandTime(const CPlayer* const player, const int nQu
 
 	float flPending = 0.0f;
 	for (int i = 0; i < nCount; ++i)
-		flPending += player->Diag_QueuedCommandFrameTime(i);
+		flPending += player->Cmdq_QueuedCommandFrameTime(i);
 
-	flHeadFrameTime = player->Diag_QueuedCommandFrameTime(0);
+	flHeadFrameTime = player->Cmdq_QueuedCommandFrameTime(0);
 	return flPending;
 }
 
@@ -591,26 +594,48 @@ static bool Player_QueuedCommandsHoldFireOrSwitch(const CPlayer* const player, c
 	if (!player || nCount <= 0)
 		return false;
 
-	const int nBaseSlot = player->Diag_QueuedCommandCycleslot(0);
-	const int nBaseIndex = player->Diag_QueuedCommandWeaponIndex(0);
-	const int nBaseSelect = player->Diag_QueuedCommandWeaponSelect(0);
-	const int nBaseImpulse = player->Diag_QueuedCommandImpulse(0);
+	const int nBaseSlot = player->Cmdq_QueuedCommandCycleslot(0);
+	const int nBaseIndex = player->Cmdq_QueuedCommandWeaponIndex(0);
+	const int nBaseSelect = player->Cmdq_QueuedCommandWeaponSelect(0);
+	const int nBaseImpulse = player->Cmdq_QueuedCommandImpulse(0);
 
 	for (int i = 0; i < nCount; ++i)
 	{
-		if (player->Diag_QueuedCommandButtons(i) & (IN_ATTACK | IN_ATTACK2 | IN_ZOOM))
+		if (player->Cmdq_QueuedCommandButtons(i) & (IN_ATTACK | IN_ATTACK2 | IN_ZOOM))
 			return true;
 
-		if (player->Diag_QueuedCommandCycleslot(i) != nBaseSlot
-			|| player->Diag_QueuedCommandWeaponIndex(i) != nBaseIndex
-			|| player->Diag_QueuedCommandWeaponSelect(i) != nBaseSelect
-			|| player->Diag_QueuedCommandImpulse(i) != nBaseImpulse)
+		if (player->Cmdq_QueuedCommandCycleslot(i) != nBaseSlot
+			|| player->Cmdq_QueuedCommandWeaponIndex(i) != nBaseIndex
+			|| player->Cmdq_QueuedCommandWeaponSelect(i) != nBaseSelect
+			|| player->Cmdq_QueuedCommandImpulse(i) != nBaseImpulse)
 			return true;
 	}
 
 	// Switch issued on the head command itself: no edge across the window yet,
 	// but the weapon frame is still being re-timed.
 	return nBaseSlot != WEAPON_INVENTORY_SLOT_INVALID;
+}
+
+//------------------------------------------------------------------------------
+// Purpose: true unless the player rests on the ground with no input across the
+// queued window. Movement integrates each command's frametime, so a shaved
+// command lands somewhere the client did not predict; only a resting player
+// ends up in the same place either way.
+//------------------------------------------------------------------------------
+static bool Player_QueuedCommandsMove(const CPlayer* const player, const int nCount)
+{
+	if (!player || nCount <= 0)
+		return false;
+
+	if (!(player->GetFlags() & FL_ONGROUND) || player->Diag_AbsVelocity().LengthSqr() > CMDQ_REST_SPEED_SQR)
+		return true;
+
+	for (int i = 0; i < nCount; ++i)
+	{
+		if (player->Cmdq_QueuedCommandButtons(i) || player->Cmdq_QueuedCommandHasMove(i))
+			return true;
+	}
+	return false;
 }
 
 //------------------------------------------------------------------------------
@@ -635,7 +660,7 @@ bool Player_PhysicsSimulate(CPlayer* player, int numPerIteration, bool adjustTim
 	CmdChain_Bump(CMDCHAIN_SIM_CALLS);
 	CmdChain_Bump(player->IsBot() ? CMDCHAIN_SIM_BOT : CMDCHAIN_SIM_STOCK);
 
-	const int nQueuedBefore = player->Diag_QueuedCommandCount();
+	const int nQueuedBefore = player->Cmdq_QueuedCommandCount();
 
 	// An empty queue here means the native body runs a null command: a missed
 	// server tick for this player. Bots idle empty all the time; humans should
@@ -666,14 +691,15 @@ bool Player_PhysicsSimulate(CPlayer* player, int numPerIteration, bool adjustTim
 			// A compressed hold is a corrupted hold: while the window carries
 			// attack/zoom input or a weapon-switch edge the backlog drains with
 			// intact frametimes instead of being shaved.
-			const bool bHoldWindow = Player_QueuedCommandsHoldFireOrSwitch(player,
-				Min(nQueuedBefore, MAX_QUEUED_COMMANDS_PROCESS));
+			const int nWindow = Min(nQueuedBefore, MAX_QUEUED_COMMANDS_PROCESS);
+			const bool bHoldWindow = Player_QueuedCommandsHoldFireOrSwitch(player, nWindow)
+				|| Player_QueuedCommandsMove(player, nWindow);
 
 			if (bHoldWindow)
 			{
 				static uint32_t s_nGovSkips = 0;
 				if (++s_nGovSkips <= 4 || (s_nGovSkips % 512) == 0)
-					DevMsg(eDLL_T::SERVER, "[CMDQ-GOV] skip shave: fire/switch window (q=%d charge=%.4f)\n",
+					DevMsg(eDLL_T::SERVER, "[CMDQ-GOV] skip shave: fire/switch/movement window (q=%d charge=%.4f)\n",
 						nQueuedBefore, flCharge);
 			}
 
@@ -684,7 +710,7 @@ bool Player_PhysicsSimulate(CPlayer* player, int numPerIteration, bool adjustTim
 
 				for (int i = 0; i < nCount && flExcess > 0.0f; ++i)
 				{
-					const float flFt = player->Diag_QueuedCommandFrameTime(i);
+					const float flFt = player->Cmdq_QueuedCommandFrameTime(i);
 					const float flCut = Min(flExcess, flFt - CMDQ_MIN_FRAMETIME);
 
 					if (flCut <= 0.0f)
@@ -698,7 +724,7 @@ bool Player_PhysicsSimulate(CPlayer* player, int numPerIteration, bool adjustTim
 				if (flShaved > 0.0f)
 				{
 					flPending -= flShaved;
-					flHeadFrameTime = player->Diag_QueuedCommandFrameTime(0);
+					flHeadFrameTime = player->Cmdq_QueuedCommandFrameTime(0);
 
 					static uint32_t s_nGovLogs = 0;
 					if (++s_nGovLogs <= 8 || (s_nGovLogs % 512) == 0)
@@ -739,7 +765,7 @@ bool Player_PhysicsSimulate(CPlayer* player, int numPerIteration, bool adjustTim
 		player->SetLastSimulateTime(flSavedCurTime);
 	}
 
-	const int nQueuedAfter = player->Diag_QueuedCommandCount();
+	const int nQueuedAfter = player->Cmdq_QueuedCommandCount();
 	const int nRun = Max(0, nQueuedBefore - nQueuedAfter);
 
 	CmdChain_Bump(CMDCHAIN_SIM_EXECUTED, static_cast<uint64_t>(nRun));
@@ -845,7 +871,14 @@ static void CC_CreateFakePlayer_f(const CCommand& args)
 		return;
 
 	const char* const playerName = args.Arg(1);
-	const int teamNum = atoi(args.Arg(2));
+	int teamNum = atoi(args.Arg(2));
+
+	// 0 = TEAM_UNASSIGNED, 1 = TEAM_SPECTATOR: a bot there holds a server slot and never plays.
+	if (teamNum == 0 || teamNum == 1)
+	{
+		Msg(eDLL_T::SERVER, "sv_addbot: team %d is not a playing team; using auto (-1)\n", teamNum);
+		teamNum = -1;
+	}
 
 	// The following code must either run inside the server frame thread, or
 	// after it has finished. Lock here and help with other jobs until the

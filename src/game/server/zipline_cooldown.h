@@ -1,6 +1,6 @@
 //=============================================================================//
 //
-// Purpose: S21 client zipline re-mount cooldown parity on the S3 dedicated
+// Purpose: S21 client zipline re-mount cooldown parity on the dedicated
 // server. See zipline_cooldown.cpp for the ladder and the gate.
 //
 //=============================================================================//

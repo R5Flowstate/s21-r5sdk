@@ -561,7 +561,7 @@ static constexpr uintptr_t kWeaponModBitfieldCurrentOffset = 0x157C;
 
 static int64_t __fastcall Hook_CWeaponX_RecalcModdedSettings(void* pWeaponX)
 {
-	// S3's recalc has no disabled-mod mask; the akimbo optic mask is applied
+	// dedi's recalc has no disabled-mod mask; the akimbo optic mask is applied
 	// to the mod set for the duration of the call instead.
 	const uint32_t disabled = AkimboBridge_GetModBitfieldDisabled(pWeaponX);
 	uint32_t* const pCurrent = reinterpret_cast<uint32_t*>(

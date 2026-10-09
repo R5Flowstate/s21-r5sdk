@@ -1323,7 +1323,7 @@ const char* ConCommandBase::GetHelpText(void) const
 //-----------------------------------------------------------------------------
 const char* ConCommandBase::GetUsageText(void) const
 {
-	// S3 dedicated layout: static usage slot (see dual convar.h !CLIENT_DLL).
+	// dedicated layout: static usage slot (see dual convar.h !CLIENT_DLL).
 	return m_pszStaticUsageString;
 }
 

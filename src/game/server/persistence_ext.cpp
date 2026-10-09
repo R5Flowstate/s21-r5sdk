@@ -1,6 +1,6 @@
 //=============================================================================
 //
-// Purpose: raise S3 persistence DataDef caps to S21 capacity. Stock offsets stay.
+// Purpose: raise dedi persistence DataDef caps to S21 capacity. Stock offsets stay.
 //
 //=============================================================================
 #include "core/stdafx.h"
@@ -27,30 +27,29 @@ static ConVar sdk_pdef_expand("sdk_pdef_expand", "1",
 	"constants. Disable + restart to run with stock S3 limits.");
 
 //-----------------------------------------------------------------------------
-// S3 layout constants (where things live in r5apex.exe's static.data).
+// dedi layout constants (where things live in r5apex.exe's static.data).
 //-----------------------------------------------------------------------------
 namespace s3 {
-	// `unk_1634F4630` (pdef base) — at module_base + 0x234F4630 in r5apex.exe.
-	// shows it at absolute address 0x1634F4630 with image base.
+	// pdef base, at module_base + 0x234F4630.
 	constexpr uint32_t kBaseRVA       = 0x234F4630;
 
 	// Sub-global offsets within the pdef struct.
-	constexpr uint32_t kEnumDefsOff   = 0x20740;   // unk_163514D70 (kept)
-	constexpr uint32_t kSubTableOff   = 0x22530;   // unk_163516B60 (kept)
-	constexpr uint32_t kArrayBaseOff  = 0x22CB8;   // unk_1635172E8 (kept)
-	constexpr uint32_t kArrayField1   = 0x22CC0;   // unk_1635172F0 (kept)
-	constexpr uint32_t kCounterOff    = 0x9FCB8;   // qword_1635942E8 (MOVED)
+	constexpr uint32_t kEnumDefsOff   = 0x20740;   // kept
+	constexpr uint32_t kSubTableOff   = 0x22530;   // kept
+	constexpr uint32_t kArrayBaseOff  = 0x22CB8;   // kept
+	constexpr uint32_t kArrayField1   = 0x22CC0;   // kept
+	constexpr uint32_t kCounterOff    = 0x9FCB8;   // moved
 	constexpr uint32_t kMemsetEnd     = 0x9FCC0;
 	constexpr uint32_t kSub1BaseOff   = 0x9FCC0;   // substruct1 begin (MOVED)
-	constexpr uint32_t kSub1InitBase  = 0x9FCD8;   // unk_163594308 (MOVED)
+	constexpr uint32_t kSub1InitBase  = 0x9FCD8;   // moved
 	constexpr uint32_t kSub2BaseOff   = 0xA26C0;   // substruct2 begin (MOVED)
-	constexpr uint32_t kSub2InitBase  = 0xA26D8;   // unk_163596D08 (MOVED)
-	constexpr uint32_t kCtrlBaseOff   = 0xA2F80;   // qword_1635975B0 (MOVED)
-	constexpr uint32_t kCtrlF8Off     = 0xA2F88;   // qword_1635975B8 (MOVED, ctrl+8)
+	constexpr uint32_t kSub2InitBase  = 0xA26D8;   // moved
+	constexpr uint32_t kCtrlBaseOff   = 0xA2F80;   // moved
+	constexpr uint32_t kCtrlF8Off     = 0xA2F88;   // moved, ctrl+8
 	constexpr uint32_t kCtrlF10Off    = 0xA2F90;   // xmmword_1635975C0 (MOVED, ctrl+0x10)
 	constexpr uint32_t kCtrlF20Off    = 0xA2FA0;   // xmmword_1635975D0 (MOVED, ctrl+0x20)
 	constexpr uint32_t kCtrlF30Off    = 0xA2FB0;   // xmmword_1635975E0 (MOVED, ctrl+0x30)
-	constexpr uint32_t kCtrlF40Off    = 0xA2FC0;   // qword_1635975F0 (MOVED, ctrl+0x40)
+	constexpr uint32_t kCtrlF40Off    = 0xA2FC0;   // moved, ctrl+0x40
 	constexpr uint32_t kCtrlEndOff    = 0xA3030;   // end of pdef-internal region
 }
 
@@ -67,7 +66,7 @@ namespace ours {
 	constexpr uint32_t kScriptFlagOff   = 0x20710 + kHeadShift;       // 0x39010
 	constexpr uint32_t kScriptVerArgOff = 0x20718 + kHeadShift;       // 0x39018
 	constexpr uint32_t kDataSizeOff     = 0x20720 + kHeadShift;       // 0x39020
-	// S3-only extra fields between dataSize and enumDefs.
+	// dedi-only extra fields between dataSize and enumDefs.
 	constexpr uint32_t kS3Off20728      = 0x20728;
 	constexpr uint32_t kS3Off20730      = 0x20730;
 	constexpr uint32_t kS3Off20738      = 0x20738;
@@ -146,7 +145,7 @@ struct LeaXref
 };
 
 static constexpr LeaXref kLeaXrefs[] = {
-	// === Base unk_1634F4630 (21 xrefs) ===
+	// === Base (21 xrefs) ===
 	// All are 7-byte LEA forms: `48 8D xx [disp32]` or `4C 8D xx [disp32]`.
 	// disp_off = 3 for every one. Target: buffer + 0.
 	{ 0x1FF5EC, 3, 0x0, 0x0, "base@1FF5EC" },
@@ -171,8 +170,8 @@ static constexpr LeaXref kLeaXrefs[] = {
 	{ 0x36270F, 3, 0x0, 0x0, "base@36270F" },
 	{ 0x3628F7, 3, 0x0, 0x0, "base@3628F7" },
 
-	// === Array entry[0].field0 unk_1635172E8 (10 xrefs) ===
-	// Array stays at S3 offset 0x22CB8 in our buffer.
+	// === Array entry[0].field0 (10 xrefs) ===
+	// Array stays at dedi offset 0x22CB8 in our buffer.
 	{ 0x1FF823, 3, s3::kArrayBaseOff, ours::kArrayBaseOff, "arr.f0@1FF823" },
 	{ 0x1FF9E2, 3, s3::kArrayBaseOff, ours::kArrayBaseOff, "arr.f0@1FF9E2" },
 	{ 0x1FFA89, 3, s3::kArrayBaseOff, ours::kArrayBaseOff, "arr.f0@1FFA89" },
@@ -184,7 +183,7 @@ static constexpr LeaXref kLeaXrefs[] = {
 	{ 0x316241, 3, s3::kArrayBaseOff, ours::kArrayBaseOff, "arr.f0@316241" },
 	{ 0x36272B, 3, s3::kArrayBaseOff, ours::kArrayBaseOff, "arr.f0@36272B" },
 
-	// === Array entry[0].field1 unk_1635172F0 (12 xrefs) ===
+	// === Array entry[0].field1 (12 xrefs) ===
 	{ 0x1FF872, 3, s3::kArrayField1, ours::kArrayBaseOff + 8, "arr.f1@1FF872" },
 	{ 0x1FF8D2, 3, s3::kArrayField1, ours::kArrayBaseOff + 8, "arr.f1@1FF8D2" },
 	{ 0x1FF932, 3, s3::kArrayField1, ours::kArrayBaseOff + 8, "arr.f1@1FF932" },
@@ -198,16 +197,16 @@ static constexpr LeaXref kLeaXrefs[] = {
 	{ 0x3558BE, 3, s3::kArrayField1, ours::kArrayBaseOff + 8, "arr.f1@3558BE" },
 	{ 0x36133B, 3, s3::kArrayField1, ours::kArrayBaseOff + 8, "arr.f1@36133B" },
 
-	// === enumDefs pool unk_163514D70 (2 xrefs) — MOVED past items_dict ===
+	// === enumDefs pool (2 xrefs) — MOVED past items_dict ===
 	{ 0x28D4F4, 3, s3::kEnumDefsOff, ours::kEnumDefsOff, "enumDefs@28D4F4" },
 	{ 0x36292B, 3, s3::kEnumDefsOff, ours::kEnumDefsOff, "enumDefs@36292B" },
 
-	// === Subtable unk_163516B60 (3 xrefs) — MOVED past items_dict ===
+	// === Subtable (3 xrefs) — MOVED past items_dict ===
 	{ 0x1FFB9C, 3, s3::kSubTableOff, ours::kSubTableOff, "subtable@1FFB9C" },
 	{ 0x362495, 3, s3::kSubTableOff, ours::kSubTableOff, "subtable@362495" },
 	{ 0x3628E3, 3, s3::kSubTableOff, ours::kSubTableOff, "subtable@3628E3" },
 
-	// === Counter qword_1635942E8 (6 xrefs) — MOVED to ours::kCounterOff ===
+	// === Counter (6 xrefs) — MOVED to ours::kCounterOff ===
 	{ 0x1FFB8E, 2, s3::kCounterOff, ours::kCounterOff, "counter@1FFB8E (mov eax)" },
 	{ 0x28D4A7, 3, s3::kCounterOff, ours::kCounterOff, "counter@28D4A7" },
 	{ 0x3558B1, 3, s3::kCounterOff, ours::kCounterOff, "counter@3558B1" },
@@ -221,11 +220,11 @@ static constexpr LeaXref kLeaXrefs[] = {
 	{ 0x859F9, 3, s3::kSub1InitBase, ours::kSub1InitBase, "sub1init@859F9" },
 	{ 0x85A59, 3, s3::kSub2InitBase, ours::kSub2InitBase, "sub2init@85A59" },
 
-	// === Control block field 0 (qword_1635975B0) — 2 xrefs ===
+	// === Control block field 0 — 2 xrefs ===
 	{ 0x85AB3,  3, s3::kCtrlBaseOff, ours::kCtrlBaseOff + 0x00, "ctrl.f0@85AB3 (init)" },
 	{ 0x35FDF4, 3, s3::kCtrlBaseOff, ours::kCtrlBaseOff + 0x00, "ctrl.f0@35FDF4 (reinit)" },
 
-	// === Control block field +8 (qword_1635975B8) — 5 xrefs ===
+	// === Control block field +8 — 5 xrefs ===
 	{ 0x85AC1,  3, s3::kCtrlF8Off,   ours::kCtrlBaseOff + 0x08, "ctrl.f8@85AC1 (init)" },
 	{ 0x85B17,  3, s3::kCtrlF8Off,   ours::kCtrlBaseOff + 0x08, "ctrl.f8@85B17 (init)" },
 	{ 0x35FE0B, 3, s3::kCtrlF8Off,   ours::kCtrlBaseOff + 0x08, "ctrl.f8@35FE0B" },
@@ -244,7 +243,7 @@ static constexpr LeaXref kLeaXrefs[] = {
 	// === Control block field +0x30 (xmmword_1635975E0) — 1 xref (init) ===
 	{ 0x85B0F,  4, s3::kCtrlF30Off,  ours::kCtrlBaseOff + 0x30, "ctrl.f30@85B0F (movdqa init)" },
 
-	// === Control block field +0x40 (qword_1635975F0) — 1 xref (init) ===
+	// === Control block field +0x40 — 1 xref (init) ===
 	{ 0x85B1E,  3, s3::kCtrlF40Off,  ours::kCtrlBaseOff + 0x40, "ctrl.f40@85B1E (init)" },
 };
 
@@ -289,7 +288,7 @@ static constexpr Disp32Patch kDisp32Patches[] = {
 	// pdef base. 6-byte instruction (no REX prefix; eax is 32-bit).
 	{ 0x361CFB, 2, s3::kCounterOff, ours::kCounterOff, "counter READ" },
 
-	// items_dict count slot: S3 0x17700 -> 0x30000.
+	// items_dict count slot: dedi 0x17700 -> 0x30000.
 	{ 0x35D7BA, 3, 0x17700, ours::kItemsCountOff, "items count READ @items_dict alloc (rcx-base)" },
 	{ 0x35D7E4, 3, 0x17700, ours::kItemsCountOff, "items count RELOAD post-error (rbx-base)" },
 	{ 0x35D7EF, 3, 0x17700, ours::kItemsCountOff, "items count WRITE @items_dict alloc (rbx-base)" },
@@ -299,30 +298,30 @@ static constexpr Disp32Patch kDisp32Patches[] = {
 	{ 0x35F6B6, 4, 0x17700, ours::kItemsCountOff, "items count RELOAD @LoadDef (r12-base SIB)" },
 	{ 0x35F6C2, 4, 0x17700, ours::kItemsCountOff, "items count WRITE @LoadDef (r12-base SIB)" },
 
-	// === SCRIPT META FIELDS (S3 0x20710..0x20720 -> ours 0x39010..0x39020) ===
+	// === SCRIPT META FIELDS (dedi 0x20710..0x20720 -> ours 0x39010..0x39020) ===
 
-	// scriptVersion stored DWORD at S3 0x20710
+	// scriptVersion stored DWORD at dedi 0x20710
 	{ 0x35EA52, 3, 0x20710, ours::kScriptFlagOff,   "scriptVer READ @ (mov r8d, [r14+...])" },
 	{ 0x35EA7E, 3, 0x20710, ours::kScriptFlagOff,   "scriptVer WRITE @ (mov [r14+...], eax)" },
 	{ 0x35F87F, 4, 0x20710, ours::kScriptFlagOff,   "scriptVer WRITE @LoadDef (mov [r12+...], eax SIB)" },
 
-	// scriptVersion ARG storage qword at S3 0x20718
+	// scriptVersion ARG storage qword at dedi 0x20718
 	{ 0x35F26B, 4, 0x20718, ours::kScriptVerArgOff, "scriptVerArg WRITE @LoadDef (mov [r12+...], rax)" },
 	{ 0x35F86F, 4, 0x20718, ours::kScriptVerArgOff, "scriptVerArg READ @LoadDef (mov rax, [r12+...])" },
 	{ 0x1FFC93, 3, 0x20718, ours::kScriptVerArgOff, "scriptVerArg READ @ (rax-base getter)" },
 
-	// dataSize stored qword at S3 0x20720
+	// dataSize stored qword at dedi 0x20720
 	{ 0x35F6F3, 4, 0x20720, ours::kDataSizeOff,     "dataSize WRITE @LoadDef (mov [r12+...], rdx SIB)" },
 
-	// subTable locale base: S3 0x22530 -> 0x3AE30.
+	// subTable locale base: dedi 0x22530 -> 0x3AE30.
 	{ 0x35DA24, 3, 0x22530, ours::kSubTableOff, "subTable LEA r11 @ (lea r11, [rdx+...])" },
 	{ 0x35F215, 4, 0x22530, ours::kSubTableOff, "subTable LEA r15 @LoadDef (lea r15, [r12+...] SIB)" },
 	{ 0x360EA5, 3, 0x22530, ours::kSubTableOff, "subTable LEA r8 @ (lea r8, [rcx+...])" },
 
-	// === SUBTABLE +0x10 LEA (S3 0x22540 -> ours 0x3AE40) ===
+	// === SUBTABLE +0x10 LEA (dedi 0x22540 -> ours 0x3AE40) ===
 	{ 0x35E1BE, 3, 0x22540, ours::kSubTableOff + 0x10, "subTable+0x10 LEA rsi @" },
 
-	// === SUBTABLE FAR FIELD (S3 0x22CB0 -> ours 0x3B5B0) ===
+	// === SUBTABLE FAR FIELD (dedi 0x22CB0 -> ours 0x3B5B0) ===
 
 	{ 0x35F22F, 4, 0x22CB0, ours::kSubTableFarOff, "subTable far WRITE 1 @LoadDef (r12-base SIB)" },
 	{ 0x35DA0F, 3, 0x22CB0, ours::kSubTableFarOff, "subTable far READ @ (mov rdi, [rdx+...])" },
@@ -330,7 +329,7 @@ static constexpr Disp32Patch kDisp32Patches[] = {
 	{ 0x35EF7A, 3, 0x22CB0, ours::kSubTableFarOff, "subTable far READ @ (mov rbx, [r14+...])" },
 	{ 0x35EFAF, 3, 0x22CB0, ours::kSubTableFarOff, "subTable far WRITE @ (mov [r14+...], rax)" },
 
-	// enumDefs disp32-from-register: S3 0x20740 -> 0x39040.
+	// enumDefs disp32-from-register: dedi 0x20740 -> 0x39040.
 	{ 0x1FFA21, 4, 0x20740, ours::kEnumDefsOff, "enumDefs SIB cmp @ (rcx-base, r8 idx)" },
 	{ 0x1FFD88, 4, 0x20740, ours::kEnumDefsOff, "enumDefs SIB cmp @ (rdx-base, r8*8 idx)" },
 	{ 0x315F20, 4, 0x20740, ours::kEnumDefsOff, "enumDefs SIB cmp @ (rcx-base, rdx idx)" },
@@ -340,13 +339,13 @@ static constexpr Disp32Patch kDisp32Patches[] = {
 	{ 0x361DB1, 3, 0x20740, ours::kEnumDefsOff, "enumDefs READ @ (mov r9, [rax+...])" },
 	{ 0x362534, 3, 0x20740, ours::kEnumDefsOff, "enumDefs READ (mov rdx, [rax+...])" },
 
-	// === ARRAY.F0 DISP32-FROM-REGISTER (S3 0x22CB8 -> ours 0x3B5B8) ===
+	// === ARRAY.F0 DISP32-FROM-REGISTER (dedi 0x22CB8 -> ours 0x3B5B8) ===
 	// 2 real sites (8 false positives rejected: many `mov eax, 0x22C` immediates
 	// also start with 0xb8 followed by 0x2c 0x02 0x00).
 	{ 0x315F4B, 4, 0x22CB8, ours::kArrayBaseOff, "arr.f0 SIB read @ (r8-base, rdx idx)" },
 	{ 0x35E7C8, 3, 0x22CB8, ours::kArrayBaseOff, "arr.f0 WRITE @RBI (mov [rdx+...], rdi)" },
 
-	// === ARRAY.F1 DISP32-FROM-REGISTER (S3 0x22CC0 -> ours 0x3B5C0) ===
+	// === ARRAY.F1 DISP32-FROM-REGISTER (dedi 0x22CC0 -> ours 0x3B5C0) ===
 	// All 6 hits are real disp32 accesses (verified by ModRM/SIB context).
 	{ 0x303BBD, 4, 0x22CC0, ours::kArrayField1Off, "arr.f1 SIB read @ (rdx-base, rdi idx)" },
 	{ 0x3160A4, 4, 0x22CC0, ours::kArrayField1Off, "arr.f1 SIB read @ (r8-base, rdx idx)" },
@@ -355,7 +354,7 @@ static constexpr Disp32Patch kDisp32Patches[] = {
 	{ 0x3611E0, 4, 0x22CC0, ours::kArrayField1Off, "arr.f1 SIB read @ (rdx-base, r9 idx)" },
 	{ 0x3612A0, 4, 0x22CC0, ours::kArrayField1Off, "arr.f1 SIB read @ (rdx-base, r9 idx 2)" },
 
-	// === ARRAY.F2 (S3 0x22CC8 = arr_base + 16) -> ours 0x3B5C8 ===
+	// === ARRAY.F2 (dedi 0x22CC8 = arr_base + 16) -> ours 0x3B5C8 ===
 	// pdataIndexInfo struct field at +16 of each 32B entry. Not in original
 	// catalog because we treated array as just 2 fields; symbols show 4.
 	{ 0x35E7D6, 3, 0x22CC8, ours::kArrayField1Off + 0x08, "arr.f2 WRITE @RBI (mov [rdx+...], r8)" },
@@ -363,11 +362,11 @@ static constexpr Disp32Patch kDisp32Patches[] = {
 	{ 0x361215, 4, 0x22CC8, ours::kArrayField1Off + 0x08, "arr.f2 SIB read @ (rdx+r9)" },
 	{ 0x3612D8, 4, 0x22CC8, ours::kArrayField1Off + 0x08, "arr.f2 SIB read @ (rdx+r9 2)" },
 
-	// === ARRAY.F3 (S3 0x22CD0 = arr_base + 24) -> ours 0x3B5D0 ===
+	// === ARRAY.F3 (dedi 0x22CD0 = arr_base + 24) -> ours 0x3B5D0 ===
 	// 11-byte instruction: `mov qword [rdx+0x22CD0], imm32`.
 	{ 0x35E7DD, 3, 0x22CD0, ours::kArrayField1Off + 0x10, "arr.f3 WRITE imm @RBI" },
 
-	// === ENUMVALUENAMESPOOLUSED (S3 0x20708 -> ours 0x39008) ===
+	// === ENUMVALUENAMESPOOLUSED (dedi 0x20708 -> ours 0x39008) ===
 	// Field at +0x20708 (qword): enumValueNamesPool used count.
 	// All 3 hits are in (struct/enum start handler region).
 	{ 0x35EC76, 3, 0x20708, ours::kEnumValueNamesPoolUsedOff, "enumValueNamesPoolUsed READ @ (rcx)" },

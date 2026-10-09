@@ -11,7 +11,7 @@
 inline __int64 (__fastcall *v_CScriptVM_PreCompileScriptFile_S21)(
 	void* scriptvm, const char* path, const char* pszId, int isCompile) = nullptr;
 
-// S21 COM_InitFilesystem is void(mod path). S3 prologue does not match.
+// S21 COM_InitFilesystem is void(mod path). dedi prologue does not match.
 inline void (__fastcall *v_COM_InitFilesystem_S21)(const char* pFullModPath) = nullptr;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -41,7 +41,7 @@ class VPlatformFSOverrideS21 : public IDetour
 	}
 	virtual void GetFun(void) const
 	{
-		// S3 COM_InitFilesystem prologue n=0 on S21; do not reuse that pattern.
+		// dedi COM_InitFilesystem prologue n=0 on S21; do not reuse that pattern.
 		Module_FindPattern(g_GameDll,
 			"48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 81 EC ?? ?? ?? ?? 33 C0")
 			.GetPtr(v_COM_InitFilesystem_S21);

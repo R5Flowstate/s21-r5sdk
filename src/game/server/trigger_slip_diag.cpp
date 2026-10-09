@@ -121,7 +121,7 @@ static const char* SlipDiag_ServerClassName(const void* ent)
 
 static bool SlipDiag_IsSlipClassName(const char* cn)
 {
-	// Native S3 class is CTriggerSlip; after promote the ServerClass name is
+	// Native dedi class is CTriggerSlip; after promote the ServerClass name is
 	// CTriggerSlipSphere (dt_extend vtable steal + class swap). Match both.
 	if (!cn || !cn[0])
 		return false;

@@ -4,7 +4,7 @@
 //
 // The S21 client holds an ammo_drains_to_empty_on_fire weapon in its drain
 // window for regen_ammo_forced_delay seconds after the last primary attack,
-// and backdates a regen reset by the same amount. The S3 server uses
+// and backdates a regen reset by the same amount. The dedi server uses
 // fireDuration for both; the key replaces it for the length of the regen call.
 //
 //=============================================================================//

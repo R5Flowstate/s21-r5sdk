@@ -104,7 +104,7 @@ struct SettingsHeader
 };
 static_assert(sizeof(SettingsHeader) == 0x50, "SettingsHeader size");
 #else
-// S3 has no assetRefs; uniqueId onward is -8 vs S21.
+// dedi has no assetRefs; uniqueId onward is -8 vs S21.
 struct SettingsHeader
 {
 	SettingsLayoutHeader* layoutHeader; // 0x00

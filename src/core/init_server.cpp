@@ -121,6 +121,7 @@
 #include "game/server/persistence_ext.h"
 #include "game/server/persistence_basevar_overflow.h"
 #include "game/shared/weapon_legendary_ext.h"
+#include "game/shared/weapon_mod_names_ext.h"
 #include "game/shared/weapon_customact_c2s_xlat.h"
 #include "game/shared/scriptremotefunctions_server.h"
 #include "game/server/extended_range_use.h"
@@ -138,6 +139,7 @@
 #include "game/server/armored_leap.h"
 #include "game/server/player_stance.h"
 #include "game/server/entity_script_ext.h"
+#include "game/server/base_push.h"
 #include "game/server/script_mover_traversal.h"
 #include "game/server/offhand_jump_toggle.h"
 #include "game/server/offhand_melee_cancel.h"
@@ -176,6 +178,8 @@
 #include "game/server/tapstrafe.h"
 #include "game/server/wallclimb.h"
 #include "game/server/wall_launch.h"
+#include "game/server/slope_launch.h"
+#include "game/server/source_push.h"
 #include "game/server/double_jump_power.h"
 #include "game/server/weapon_stockpile_bonus.h"
 #include "game/server/status_effect_capacity.h"
@@ -189,7 +193,7 @@
 #include "game/shared/weapon_script_vars.h"
 #include "game/shared/offhand_activation_patches.h" // server dispatcher runs on DEDICATED too, must not be client-only
 #include "game/shared/weapon_dualwield_slot_patch.h"
-#include "game/shared/offhand_instant_swap.h" // -parity offhand_instant_swap_to_offhand escape in the S3 dispatcher switch-away gate
+#include "game/shared/offhand_instant_swap.h" // -parity offhand_instant_swap_to_offhand escape in the dedi dispatcher switch-away gate
 #include "game/shared/r1/weapon_bolt.h"
 #include "game/shared/bridge_cmd_seed.h"
 #include "game/server/bridge_fire_clock.h"
@@ -606,40 +610,41 @@ REGISTER(VConnectPasswordGate);   // REGISTER SERVER ONLY! challenge-bind the co
 	REGISTER(VAudioDigestExpand);       // REGISTER SERVER ONLY! heap-backs audio bank digest table to support >100K-entry mbnk_digest
 	REGISTER(VRemoteFuncBufferExpand);  // REGISTER SERVER ONLY! heap-backs Remote_RegisterClientFunction buffer (16KB/256 -> 256KB/2048) so S21 scripts can register all client functions
 	REGISTER(VZiplineValidationDedi);
-	REGISTER(VStatusEffectParseFix);    // REGISTER SERVER ONLY! NOPs the S3 status_effect_types.txt parser's fatal 'Code expects disable_wall_run_and_double_jump' so the dedi boots with the S21-aligned enum
+	REGISTER(VStatusEffectParseFix);    // REGISTER SERVER ONLY! NOPs the dedi status_effect_types.txt parser's fatal 'Code expects disable_wall_run_and_double_jump' so the dedi boots with the S21-aligned enum
 	REGISTER(VStatusEffectCapacity);    // REGISTER SERVER ONLY! [SE-CAPACITY] 256 status-effect types (8-bit type in seComboVars)
 	REGISTER(VMapEntitySkipper);        // REGISTER SERVER ONLY! [MAP-SKIP] refuses crasher classes (prop_dynamic/info_target/...) baked into the.bsp LUMP_ENTITIES during MapEntity_ParseEntity -- unreachable by VPK strip / script BlockMapEntityParseCreationOf
 	REGISTER(VGibFinderGuard);          // REGISTER SERVER ONLY! [GIB-FINDERS]/[GIB-GUARD] resolve gibModels finders + fail-closed HasGibModel / gib-spawn
-	REGISTER(VScriptRemoteS2CBridge);   // REGISTER SERVER ONLY! [BRIDGE-S2C-SR] hooks the shared S3 Remote_CallFunction_NonReplay/_Replay/_UI impl and forwards name-carried S->C remote calls to the S21 client on the Bridge S2C ScriptRemote lane (bridge_s2c_scriptremote, default on)
+	REGISTER(VScriptRemoteS2CBridge);   // REGISTER SERVER ONLY! [BRIDGE-S2C-SR] hooks the shared dedi Remote_CallFunction_NonReplay/_Replay/_UI impl and forwards name-carried S->C remote calls to the S21 client on the Bridge S2C ScriptRemote lane (bridge_s2c_scriptremote, default on)
 	REGISTER(VExtendedRangeUse);        // REGISTER SERVER ONLY! [EXT-USE] injects CodeCallback_GetExtendedRangeUseEntitiesForPlayer results into the native use-candidate list (Alter remote deathbox + Void Nexus)
-	REGISTER(VJetDrive);                // REGISTER SERVER ONLY! [JETDRIVE] from-scratch port of Vantage's tactical recall-launch movement subsystem -- S3 has zero trace of it (Season 14+ content, confirmed absent from the whole binary via ), unlike the S21 client which has it natively..
+	REGISTER(VJetDrive);                // REGISTER SERVER ONLY! [JETDRIVE] from-scratch port of Vantage's tactical recall-launch movement subsystem -- dedi has zero trace of it (Season 14+ content, confirmed absent from the whole binary via ), unlike the S21 client which has it natively..
 	REGISTER(VPlayerFov);               // REGISTER SERVER ONLY! [PLAYER-FOV] CPlayer.GetDefaultFOV native (settings fov * cl_fovScale userinfo)
-	REGISTER(VTrackEntity);             // REGISTER SERVER ONLY! [TRACK-ENT] ClearTrackEntitySettings detour so S21 camera sidecar resets with the S3 native
+	REGISTER(VTrackEntity);             // REGISTER SERVER ONLY! [TRACK-ENT] ClearTrackEntitySettings detour so S21 camera sidecar resets with the dedi native
 	REGISTER(VPlayerLaunch);            // REGISTER SERVER ONLY! [PLAYER-LAUNCH] CheckJumpButton-gated ApplyPlayerLaunch parity inside FullWalkMove
 	REGISTER(VSkydiveBridge);           // REGISTER SERVER ONLY! [SKYDIVE-SIM] per-executed-usercmd skydive simulation through the engine's own skydive wrappers. S21 predicts the skydive client-side every command; a server copy on a script thread integrates the same springs at a different rate and can never agree with it.
 	REGISTER(VSkywardBridge);           // REGISTER SERVER ONLY! [SKYWARD] server-authoritative skyward launch; movement rides FullTossMove via VSkydiveBridge
 	REGISTER(VGlideBridge);            // REGISTER SERVER ONLY! [GLIDE] S21 script-activated glide replaces the stock check/flight on the server half
 	REGISTER(VPlayerStance);            // REGISTER SERVER ONLY! [STANCE] instant stand/crouch helpers (leap start, drag revive)
 	REGISTER(VEntityScriptExt);         // REGISTER SERVER ONLY! [NEVER-CRUSH]/[DISSOLVE] S21 entity natives: never-crush pushes, velocity at point, Dissolve defaults
+	REGISTER(VBasePush);                // REGISTER SERVER ONLY! [BASE-PUSH] script base velocity that also carries a grounded player
 	REGISTER(VScriptMoverTraversal);     // REGISTER SERVER ONLY! [TRAV] CScriptMover non-physics traversal natives (Newcastle Mobile Shield)
 	REGISTER(VArmoredLeap);             // REGISTER SERVER ONLY! [AL-PHASE] Newcastle armored leap natives, phase machine and per-tick movement
 	REGISTER(VClassVarNatives);          // REGISTER SERVER ONLY! [CLASSVAR] replays Player_SetClassVar writes after each settings rebuild (legend change), matching the client sticky replay
-	REGISTER(VWeaponLastFireTime);      // REGISTER SERVER ONLY! update_player_last_fire_time on the S3 attack paths
-	REGISTER(VOffhandMeleeCancel);      // REGISTER SERVER ONLY! S21 offhand_cancelled_by_melee rule on the S3 melee test
+	REGISTER(VWeaponLastFireTime);      // REGISTER SERVER ONLY! update_player_last_fire_time on the dedi attack paths
+	REGISTER(VOffhandMeleeCancel);      // REGISTER SERVER ONLY! S21 offhand_cancelled_by_melee rule on the dedi melee test
 	REGISTER(VOffhandJumpToggle);       // REGISTER SERVER ONLY! [OFFHAND-JUMP] S21 offhand_deactivate_on_jump_toggle_or_release select/holster on the server offhand frames
 	REGISTER(VWeaponRegen);             // REGISTER SERVER ONLY! S21 regen_ammo_forced_delay on the server clip regen
-	REGISTER(VJetpackBridge);           // REGISTER SERVER ONLY! [JETPACK] S21 jetpack flight model on the S3 server half (check/apply/meter detours, post-effect drag and gravity)
+	REGISTER(VJetpackBridge);           // REGISTER SERVER ONLY! [JETPACK] S21 jetpack flight model on the dedi half (check/apply/meter detours, post-effect drag and gravity)
 	REGISTER(VMissileExpandContract);   // REGISTER SERVER ONLY! [MISSILE-EC] S21 expand-contract missile path, wiggle, grace period and grid target natives
-	REGISTER(VInfiniteAmmoDedi);        // REGISTER SERVER ONLY! [INF-AMMO] InfiniteAmmoState enforcement on the S3 native ammo paths; patterns are r5apex_ds-only (client twin left unhooked)
-	REGISTER(VWeaponAmmoPoolMod);       // REGISTER SERVER ONLY! [ALT-AMMO] per-entity WeaponInfo clone so a mod can override ammo_pool_type (field sits outside the S3 0x1150 moddable block)
-	REGISTER(VConsumableInvBridge);     // REGISTER SERVER ONLY! [CONSUMABLEINV-FULL] u16 type shadow for m_consumableInventory (S3 u8 type truncates loot idx>=256)
+	REGISTER(VInfiniteAmmoDedi);        // REGISTER SERVER ONLY! [INF-AMMO] InfiniteAmmoState enforcement on the dedi native ammo paths; patterns are r5apex_ds-only (client twin left unhooked)
+	REGISTER(VWeaponAmmoPoolMod);       // REGISTER SERVER ONLY! [ALT-AMMO] per-entity WeaponInfo clone so a mod can override ammo_pool_type (field sits outside the dedi 0x1150 moddable block)
+	REGISTER(VConsumableInvBridge);     // REGISTER SERVER ONLY! [CONSUMABLEINV-FULL] u16 type shadow for m_consumableInventory (dedi u8 type truncates loot idx>=256)
 	REGISTER(VMantleBoostBridge);       // REGISTER SERVER ONLY! [MANTLE-BOOST] mantle-exit boost: one TraversalMove detour -- pre-orig sweet-spot, post-orig finish boost + forced Jump
 	REGISTER(VMantleBoostVmProbe);      // REGISTER SERVER ONLY! [MB-VM] sprint start/stop trace around a mantle boost (sdk_mantle_boost_vm_probe)
 	REGISTER(VMantleBoostAnimServer);   // REGISTER SERVER ONLY! [MB-ANIM] ACT_MP_MANTLE_BOOST_AIR selection in CMultiPlayerAnimState::CalcMainActivity
 	REGISTER(VMoveScaleWeaponParity);   // REGISTER SERVER ONLY! move-scale weapon term -> client parity
 	REGISTER(VHalfDuckZipParity);       // REGISTER SERVER ONLY! [HALFDUCK] m_doingHalfDuck is latched once at duck-start and is not networked; duck is suppressed while ziplining, so the two engines sample it one command apart and only one applies the (standHull-duckHull)*0.5 origin step. Forces the latch on a duck that begins just after a zipline release. Twin: VHalfDuckZipParityClient.
 	REGISTER(VMoveSimTrace);            // REGISTER SERVER ONLY! [MOVE-TRACE] per-command FullWalkMove state dump; twin: VMoveSimTraceClient (attaches nothing; sampled from VJetDrive's hook)
-	REGISTER(VSurfPropIdUnclamp);       // REGISTER SERVER ONLY! [SURFPROP-ID] S3 remaps surface id >127 to default; S21 does not. Digital_Water is 133.
+	REGISTER(VSurfPropIdUnclamp);       // REGISTER SERVER ONLY! [SURFPROP-ID] dedi remaps surface id >127 to default; S21 does not. Digital_Water is 133.
 	REGISTER(VRepelRealmGate);          // REGISTER SERVER ONLY! [REPEL-REALM] player-vs-player repel pass gated on shared m_realmsBitMask; disjoint-realm players no longer push each other
 	REGISTER(VWeaponRealmFollow);       // REGISTER SERVER ONLY! [REALM-FOLLOW] carried weapons adopt owner realms at activation + on every SetRealmsBitMask (bolts inherit the weapon mask)
 	REGISTER(VProjectileTrailTE);       // REGISTER SERVER ONLY! [TRAIL-TE] trail temp entity sent when the S21 _3p trail key is set (close-range enemy tracers)
@@ -650,22 +655,24 @@ REGISTER(VConnectPasswordGate);   // REGISTER SERVER ONLY! challenge-bind the co
 	REGISTER(VMeleeLungeProbeServer);   // REGISTER SERVER ONLY! [LUNGE-PROBE] bridge_melee_lunge_probe: melee-lunge overspeed-clamp cap value, diffed against the client twin
 	REGISTER(VAllianceCompat);          // REGISTER SERVER! FreeDM/Control alliance matrix + IsEnemyTeam detour (SetTeamIsInAlliance native)
 	REGISTER(VDeathFieldSystem);        // REGISTER SERVER! SetDeathFieldParams hook + g_pWorldEntity resolve for realm rings
-	REGISTER(VSlideSuperJumpBridge);    // REGISTER SERVER ONLY! [SSJ] slide super-jump twin (boosted_slide_jump mod): airborne second press within 0.3s of a slide-jump gets sqrt(2gh) on the S3 Jump detour
+	REGISTER(VSlideSuperJumpBridge);    // REGISTER SERVER ONLY! [SSJ] slide super-jump twin (boosted_slide_jump mod): airborne second press within 0.3s of a slide-jump gets sqrt(2gh) on the dedi Jump detour
 	REGISTER(VGrenadeSpawnOrigin);      // REGISTER SERVER ONLY! [GRENADE-SPAWN] FireWeaponGrenade creates the projectile at the requested position instead of sweeping it from the owner eye
 	REGISTER(VSlideGateLaunch);         // REGISTER SERVER ONLY! [SLIDEGATE] Nitro Gate launch: velocity along travel + native TryBeginSlide on the next FullWalkMove (Player.ApplySlideGateLaunch)
-	REGISTER(VDodgeRules);              // REGISTER SERVER ONLY! [DODGE] airborne dodge rules + ducked dodge on the S3 Jump detour (client twin in game/client/dodge_rules.cpp)
+	REGISTER(VDodgeRules);              // REGISTER SERVER ONLY! [DODGE] airborne dodge rules + ducked dodge on the dedi Jump detour (client twin in game/client/dodge_rules.cpp)
 	REGISTER(VMovementAbilityInput);    // REGISTER SERVER ONLY! [MOVE-ABILITY] airborne Jump actions answer IN_DODGE, ground jump IN_JUMP (client twin in game/client/movement_ability_input.cpp)
 	REGISTER(VTitanGate);               // REGISTER SERVER ONLY! [TITAN] general-class field behind the titan early-out of the pilot movement overrides (client twin in game/client/titan_gate.cpp)
-	REGISTER(VTapStrafeBridge);         // REGISTER SERVER ONLY! [TAPSTRAFE] Gap B: from-scratch port of 's "jump grace"/tap-strafe (lurch) assist -- S3 has zero trace of the mechanic (confirmed via convar-string sweep, only 2 leftover ConVar-registration stubs survive). ONE detour on CGameMovement::FullWalkMove, airborne-gated, mantle_boost_disables_tap_strafes-gated via MantleBoost_ShouldSuppressTapStrafe. See tapstrafe.h.
+	REGISTER(VTapStrafeBridge);         // REGISTER SERVER ONLY! [TAPSTRAFE] Gap B: from-scratch port of 's "jump grace"/tap-strafe (lurch) assist -- dedi has zero trace of the mechanic (confirmed via convar-string sweep, only 2 leftover ConVar-registration stubs survive). ONE detour on CGameMovement::FullWalkMove, airborne-gated, mantle_boost_disables_tap_strafes-gated via MantleBoost_ShouldSuppressTapStrafe. See tapstrafe.h.
 	REGISTER(VWallClimb);               // REGISTER SERVER ONLY! [WALLCLIMB] remap S21-layout wallrun/climb finders + bind disable_wall_run. Tap sampled from VJetDrive FullWalkMove.
 	REGISTER(VWallLaunch);              // REGISTER SERVER ONLY! [WALL-LAUNCH] Sparrow climb high jump + edge air; twin: VWallLaunchClient.
+	REGISTER(VSlopeLaunch);             // REGISTER SERVER ONLY! [SLOPE-LAUNCH] Source ramp launch off sloped floors (sv_slope_launch); twin: VSlopeLaunchClient.
+	REGISTER(VSourcePush);             // REGISTER SERVER ONLY! [SOURCE-PUSH] predicted Source trigger_push volumes (script-registered); twin: VSourcePushClient.
 	REGISTER(VDoubleJumpPower);         // REGISTER SERVER ONLY! [DJ-POWER] Sparrow double-jump power drain/refill; twin: VDoubleJumpPowerClient.
 	REGISTER(VWeaponStockpileBonus);    // REGISTER SERVER ONLY! [STOCKPILE-BONUS] per-weapon ammo_stockpile_max raise (Sparrow Bocek arrows).
 	REGISTER(VTriggerSlipDiag);         // REGISTER SERVER ONLY! [SLIP-TOUCH]/[SLIP-END]/[SLIP-FORCE] enter/leave/force diag for CTriggerSlip (promoted CTriggerSlipSphere). sdk_slip_diag 0/1/2. StartTouch EndTouch FullWalkMove.
 	REGISTER(VBridgeFireClock);         // REGISTER SERVER ONLY! [FIRE-CLOCK] bounded command_time stamp on weapon-sim latestPredictedTime for one shared fire clock.
 	REGISTER(VTriggerStartTouchDedupe); // REGISTER SERVER ONLY! [TRIG-DEDUP] CBaseTrigger::StartTouch fires OnStartTouch + the script m_enterCallback on EVERY call, not just the first (EndTouch guards the same lookup) -- one detour restores the guard for the 19 trigger classes that reach that body.
-	REGISTER(VTriggerClientPredict);    // REGISTER SERVER ONLY! [TRIG-PRED] author CBaseTrigger::m_bClientSidePredicted on CTriggerCylinderHeavy so the S21 client can predict jump-pad touch
-	REGISTER(VJumpPadParity);           // REGISTER SERVER ONLY! [JP-DUCKVERT][JP-DEBOUNCE] ducked m_vertOverride scale + per-player jump-pad relaunch debounce (m_jumpPadDebounceExpireTime)
+	REGISTER(VTriggerClientPredict);    // REGISTER SERVER ONLY! author CBaseTrigger::m_bClientSidePredicted on CTriggerCylinderHeavy so the S21 client predicts its touch
+	REGISTER(VJumpPadParity);           // REGISTER SERVER ONLY! [JP-PARITY] jump-pad launch as the S21 client predicts it: per-command touch, launch gates, launch state the pad scripts set
 	REGISTER(VTriggerCannonBridge);     // REGISTER SERVER ONLY! [TRIG-CANNON] server-authoritative TT_GRAVITY_CANNON launch; driven from VJumpPadParity's hook, no detour of its own
 	REGISTER(VTriggerGravityBridge);    // REGISTER SERVER ONLY! [TRIG-GRAV] server-authoritative TT_GRAVITY_LIFT / TT_BLACKHOLE force; driven from VJumpPadParity's hook, no detour of its own
 	REGISTER(VTriggerUpdraftBridge);    // REGISTER SERVER ONLY! [UPDRAFT] server-authoritative updraft state + movement; driven from VJumpPadParity's hook, no detour of its own
@@ -754,20 +761,21 @@ REGISTER(VConnectPasswordGate);   // REGISTER SERVER ONLY! challenge-bind the co
 	REGISTER(VBlastPattern);
 	REGISTER(VPersistenceExt);        // must run before pdef parse
 	REGISTER(VPersistenceBaseVarOverflow); // heap-back baseStruct items past 180
+	REGISTER(VWeaponModNamesExt);
 	REGISTER(VWeaponLegendaryExt);    // raise legendary-skin slot cap 8 -> 32
-	REGISTER(VWeaponCustomActC2SXlat); // translate usercmd weaponCustomActivity S21->S3 before server-side StartCustomActivity
+	REGISTER(VWeaponCustomActC2SXlat); // translate usercmd weaponCustomActivity S21->dedi before server-side StartCustomActivity
 	REGISTER(VWeaponScriptVars);      // shared script/native resolver; dedicated needs server PhaseShiftBegin
 	REGISTER(VOffhandActivationPatches); // slot 0..5 native dispatcher diag + slot 6/7 ext; server dispatcher runs on DEDICATED too, must not be client-only
-	REGISTER(VOffhandInstantSwap);        // -parity offhand_instant_swap_to_offhand escape in the S3 dispatcher switch-away gate (Vantage tactical)
-	REGISTER(VWeaponDualWieldSlotPatch);  // pair the dual-wield partner S21-style (main+7); S3's main+5 auto-draws the ordnance with the first primary
+	REGISTER(VOffhandInstantSwap);        // -parity offhand_instant_swap_to_offhand escape in the dedi dispatcher switch-away gate (Vantage tactical)
+	REGISTER(VWeaponDualWieldSlotPatch);  // pair the dual-wield partner S21-style (main+7); dedi's main+5 auto-draws the ordnance with the first primary
 
 
 	// In shared code, but weapon bolt is SERVER only.
 	REGISTER(V_Weapon_Bolt);
 	REGISTER(VBridgeCmdSeed); // bridge_cmd_seed_parity: usercmd RNG-seed parity with the S21 client (view-kick jitter / pellet scatter) --
 	REGISTER(VBridgeZoomGate); // ADS-reload + air-spread parity (bridge_ads_reload_parity / bridge_spread_air_priority)
-	REGISTER(VBridgeEquipGate); // bridge_equip_gate: full S3 ACT_MP_EQUIP_* block for IsPlaying3pEquipActivity so pistol/rocket same-class switches match S21
-	REGISTER(VBridgeDeployGate); // first-raise DRAWFIRST before the S3 sprint DRAW_TO_SPRINT skip (ground pickup while running)
+	REGISTER(VBridgeEquipGate); // bridge_equip_gate: full dedi ACT_MP_EQUIP_* block for IsPlaying3pEquipActivity so pistol/rocket same-class switches match S21
+	REGISTER(VBridgeDeployGate); // first-raise DRAWFIRST before the dedi sprint DRAW_TO_SPRINT skip (ground pickup while running)
 	REGISTER(VPlayerDamageObstacle); // REGISTER SERVER ONLY! [OBSTACLE] cover-edge graze parity: drop bolt touches occluded from the victim's axis
 	REGISTER(VBoltHitsizeParity); // REGISTER SERVER ONLY! [HITSIZE] S21 bolt hit-size grow schedule (any-time gate, stage-1 floor, ordered stages)
 	REGISTER(VBoltRk4Shrink); // REGISTER SERVER ONLY! [RK4-SHRINK] bolt re-sim retries shrink the step by 0.7 like the S21 client
@@ -785,7 +793,7 @@ REGISTER(VConnectPasswordGate);   // REGISTER SERVER ONLY! challenge-bind the co
 	REGISTER(VBaseAnimating);
 	REGISTER(VPlayer);
 	REGISTER(VTranslocation);          // REGISTER SERVER ONLY! Loba toss-hold + drop-click latch
-	REGISTER(VWeaponCustomActivity);   // REGISTER SERVER ONLY! S21 WCAF_* flags on the S3 weapon
+	REGISTER(VWeaponCustomActivity);   // REGISTER SERVER ONLY! S21 WCAF_* flags on the dedi weapon
 	REGISTER(VEnergize);               // REGISTER SERVER ONLY! resolves SetIdealWeaponActivity before translocation attaches
 	REGISTER(VAI_BaseNPC);
 	REGISTER(VPlayerMove);

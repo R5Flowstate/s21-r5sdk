@@ -2,7 +2,7 @@
 //
 // Purpose: S21 expand-contract missile path on the dedicated server -- the
 // three-phase flight, wiggle, grace period and the multi-target grid finder
-// the S3 script VM lacks.
+// the dedi script VM lacks.
 //
 //=============================================================================//
 #ifndef MISSILE_EXPAND_CONTRACT_H

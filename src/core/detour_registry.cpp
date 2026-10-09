@@ -33,7 +33,6 @@ const char* DetourState_ToString(DetourState state)
 	{
 	case DetourState::NotAttempted:     return "NotAttempted";
 	case DetourState::SkippedByConfig:  return "SkippedByConfig";
-	case DetourState::SkippedByFlag:    return "SkippedByFlag";
 	case DetourState::ScanFailed:       return "ScanFailed";
 	case DetourState::ScanSucceeded:    return "ScanSucceeded";
 	case DetourState::ValidationFailed: return "ValidationFailed";
@@ -188,7 +187,6 @@ void DetourRegistry_PrintReport()
 			hooked++;
 			break;
 		case DetourState::SkippedByConfig:
-		case DetourState::SkippedByFlag:
 			skipped++;
 			break;
 		case DetourState::ScanFailed:

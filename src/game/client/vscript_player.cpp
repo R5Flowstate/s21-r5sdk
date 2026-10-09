@@ -32,6 +32,7 @@
 #include "game/shared/player_extend_sidecar.h"
 #include "vscript_player.h"
 
+#include <algorithm>
 #include <unordered_map>
 #include <vector>
 
@@ -625,6 +626,9 @@ static SQRESULT Script_IsConnectionActive(HSQUIRRELVM v)
 static constexpr int SHIELD_HISTORY_SIZE = 16;
 static constexpr int SHIELD_SOURCE_COUNT = 2;
 
+static constexpr ptrdiff_t SERVER_ENT_OFF_SHIELD_HEALTH     = 0xAB8; // CBaseEntity m_shieldHealth
+static constexpr ptrdiff_t SERVER_ENT_OFF_SHIELD_HEALTH_MAX = 0xABC; // CBaseEntity m_shieldHealthMax
+
 struct ShieldChangeEntry_t
 {
 	float time = 0.0f;
@@ -654,14 +658,30 @@ static SQRESULT Script_SetShieldHealthFromSource(HSQUIRRELVM v)
 	if (!v_sq_getentity(v, reinterpret_cast<SQEntity*>(&pPlayer)))
 		return SQ_ERROR;
 
-	SQInteger newHealth;
-	sq_getinteger(v, 2, &newHealth);
-
-	SQInteger source;
-	sq_getinteger(v, 3, &source);
+	SQInteger newHealth = 0;
+	SQInteger source = 0;
+	if (!pPlayer || SQ_FAILED(sq_getinteger(v, 2, &newHealth)) || SQ_FAILED(sq_getinteger(v, 3, &source)))
+	{
+		Warning(eDLL_T::COMMON, "[SHIELD] SetShieldHealthFromSource: bad player or argument; ignored\n");
+		SCRIPT_CHECK_AND_RETURN(v, SQ_OK);
+	}
 
 	if (source < 0 || source >= SHIELD_SOURCE_COUNT)
 		source = 0;
+
+	if (v->GetContext() == SQCONTEXT::SERVER)
+	{
+		uint8_t* const p = static_cast<uint8_t*>(pPlayer);
+		const int nMax = (std::max)(*reinterpret_cast<const int*>(p + SERVER_ENT_OFF_SHIELD_HEALTH_MAX), 0);
+		const int nNew = static_cast<int>(std::clamp<SQInteger>(newHealth, 0, nMax));
+		int* const pShield = reinterpret_cast<int*>(p + SERVER_ENT_OFF_SHIELD_HEALTH);
+		if (*pShield != nNew)
+		{
+			*pShield = nNew;
+			MarkEntityEdictDirty(pPlayer);
+		}
+		newHealth = nNew;
+	}
 
 	auto& hist = GetShieldHistoryMap(v)[pPlayer];
 	int idx = hist.currentIdx % SHIELD_HISTORY_SIZE;
