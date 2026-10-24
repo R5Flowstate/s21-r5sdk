@@ -1,7 +1,7 @@
 //=============================================================================//
 //
-// Purpose: Clamp OOB bodypart indices on C_BaseAnimating skin/body change so map-load cannot AV on a bad table slot.
-// Hook the skin/body change path: clamp index args and stored previous/current indices against studiohdr bodypart count; SEH-wrap the original.
+// Purpose: Clamp OOB skin indices on C_BaseAnimating skin/body change so map-load cannot AV on a bad table slot.
+// Hook the skin/body change path: clamp index args and stored previous/current indices against the studiohdr skin family count; SEH-wrap the original.
 // ConVar sdk_body_skin_guard (default 1). Zero = pure pass-through.
 //
 //=============================================================================//
@@ -23,7 +23,7 @@ static constexpr ptrdiff_t ENT_OFF_STUDIO_DATA = 0x1000; // +4096 -- per-entity 
 
 static ConVar sdk_body_skin_guard("sdk_body_skin_guard", "1", FCVAR_RELEASE,
 	"Guard C_BaseAnimating skin/body change against OOB"
-	"bodypart-table indices. Clamps bad indices to 0 and SEH-wraps the "
+	"skin-table indices. Clamps bad indices to 0 and SEH-wraps the "
 	"original so map load cannot hard-kill on corrupt studio body data. "
 	"0 = pass-through.");
 
@@ -91,10 +91,14 @@ static void TryGetEntityModelName(const __int64 entity, char* const out, const s
 }
 
 //-----------------------------------------------------------------------------
-// Read bodypart count the same way does. SEH-guarded: a bad
-// studio pointer must not take us down before the real call.
+// Read the skin family count from the rmdl studiohdr (v16/v17: u16 numskinfamilies
+// at +150). The index this path stores is the skin, so the bound is the skin count;
+// +122 (numlocalseq) clamped every skin past 0 on models with one sequence.
+// SEH-guarded: a bad studio pointer must not take us down before the real call.
 //-----------------------------------------------------------------------------
-static bool TryGetBodypartCount(const __int64 entity, unsigned __int16& outCount)
+static constexpr ptrdiff_t STUDIOHDR_OFF_NUMSKINFAMILIES = 150;
+
+static bool TryGetSkinFamilyCount(const __int64 entity, unsigned __int16& outCount)
 {
 	outCount = 0;
 	if (!entity)
@@ -106,18 +110,11 @@ static bool TryGetBodypartCount(const __int64 entity, unsigned __int16& outCount
 		if (!studio)
 			return false;
 
-		const __int64 overlay = *reinterpret_cast<__int64*>(studio + 0x10);
-		if (overlay)
-		{
-			outCount = *reinterpret_cast<const unsigned __int16*>(overlay + 2);
-			return true;
-		}
-
 		const __int64 baseHdr = *reinterpret_cast<__int64*>(studio + 0x08);
 		if (!baseHdr)
 			return false;
 
-		outCount = *reinterpret_cast<const unsigned __int16*>(baseHdr + 122);
+		outCount = *reinterpret_cast<const unsigned __int16*>(baseHdr + STUDIOHDR_OFF_NUMSKINFAMILIES);
 		return true;
 	}
 	__except (EXCEPTION_EXECUTE_HANDLER)
@@ -146,7 +143,7 @@ static void ClampBodyIndex(unsigned __int16& idx, const unsigned __int16 count,
 		const char* const nm = (modelName && modelName[0]) ? modelName : "<unknown>";
 		Warning(eDLL_T::ENGINE,
 			"[BODY-SKIN-GUARD] clamped %s body/skin index %u -> 0 "
-			"(bodyparts=%u entity=%p model='%s')\n",
+			"(skins=%u entity=%p model='%s')\n",
 			which, (unsigned)old, (unsigned)count, (void*)entity, nm);
 	}
 }
@@ -183,13 +180,13 @@ static double __fastcall Hook_AnimBodySkinChange(__int64 entity, unsigned __int1
 	modelName[0] = '\0';
 	TryGetEntityModelName(entity, modelName, sizeof(modelName));
 
-	unsigned __int16 bodypartCount = 0;
-	if (TryGetBodypartCount(entity, bodypartCount) && bodypartCount > 0)
+	unsigned __int16 skinCount = 0;
+	if (TryGetSkinFamilyCount(entity, skinCount) && skinCount > 0)
 	{
 		// Rate-limit clamp spam (hot on large maps / SPAWN).
 		static unsigned __int16 s_logBudget = 64;
 
-		ClampBodyIndex(newIdx, bodypartCount, "arg", entity, modelName, s_logBudget);
+		ClampBodyIndex(newIdx, skinCount, "arg", entity, modelName, s_logBudget);
 
 		__try
 		{
@@ -197,8 +194,8 @@ static double __fastcall Hook_AnimBodySkinChange(__int64 entity, unsigned __int1
 				*reinterpret_cast<unsigned __int16*>(entity + ENT_OFF_BODY_PREV);
 			unsigned __int16& cur =
 				*reinterpret_cast<unsigned __int16*>(entity + ENT_OFF_BODY_CUR);
-			ClampBodyIndex(prev, bodypartCount, "prev", entity, modelName, s_logBudget);
-			ClampBodyIndex(cur, bodypartCount, "cur", entity, modelName, s_logBudget);
+			ClampBodyIndex(prev, skinCount, "prev", entity, modelName, s_logBudget);
+			ClampBodyIndex(cur, skinCount, "cur", entity, modelName, s_logBudget);
 		}
 		__except (EXCEPTION_EXECUTE_HANDLER)
 		{
